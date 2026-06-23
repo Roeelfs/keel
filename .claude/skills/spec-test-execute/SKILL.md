@@ -341,7 +341,7 @@ After the test loop resolves and before writing the execution summary, sync accu
 **If `testing/flows.json` exists and is valid:** Read it, then perform the sync:
 
 1. **Review E2E execution results.** For each tested behavior, decide:
-   - Is this a reusable primitive (login, OTP, deploy) or a product-specific journey (retailer onboarding)?
+   - Is this a reusable primitive (login, OTP, deploy) or a product-specific journey (e.g. a multi-step account-setup flow)?
    - Would another journey reuse this step? If yes → primitive. If no → journey step with inline `action`.
 
 2. **Check existing flows.** For each flow you plan to create/update:

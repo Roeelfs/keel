@@ -1,69 +1,64 @@
 # LEARNINGS — spec-test-execute
 
-Accumulated procedural wisdom across projects. Read at task start; append at task end. Prune and promote quarterly.
+This is the skill's running memory. Read it at task start; append a dated bullet
+per non-trivial finding at task end. Prune vague entries and promote recurring
+ones (≥3 occurrences) into SKILL.md. Soft cap ~100 lines.
 
-Keep entries specific (cite bug class + evidence). Vague entries get pruned. Soft cap ~100 lines — promote recurring ones into SKILL.md and archive raw entries.
+Keep entries **portable** — cite the bug *class* and the evidence pattern that
+caught it, never a one-off identifier from a specific codebase (no real table /
+RPC / env-var / endpoint names). The seed entries below are de-identified
+patterns that recur across stacks. They are starting wisdom, not project-specific.
 
 ---
 
 ## What Worked
 
-- **[multi-lane V1 final verification]** — Step 5.5 Knowledge Sync is not optional closeout. The final session discovered durable runner knowledge: a clean verification worktree was required, the local Python env may lack Django, `FIELD_ENCRYPTION_KEY` must be supplied for encrypted-field tests, Playwright staging batches need serial/audit settings, the mobile UI-test runner leaves generated screenshots, and websocket onboarding has timing races. Capturing these in `testing/config.md` + `testing/flows.json` turns one painful final verification into a faster next run.
-- **[multi-lane V1 final verification]** — A `No tests found` grep is a test result, not a pass. A payment/receipt grep had no matching tests and was correctly classified as `DEFERRED-APPROVED` to another lane rather than hidden in a green summary. Pattern: spec-test-execute should force `No tests found` into GAP or a named deferral with owner/rationale.
-- **[Staging Auto-Deploy Protocol]** — `git push origin HEAD:staging` → `gh run list` poll → health check with backoff. Unblocks E2E without manual user intervention. Replaced vague "attempt to deploy" with mechanical steps.
-- **[Rule 9 (no free SKIPs)]** — Requiring fallback verification before accepting SKIP/BLOCKED forced the agent to try the platform-limitation fallback strategy. Catches coverage gaps that would otherwise ship silent.
-- **[Rule 10 (assertion strength audit)]** — Weak "returns 200" passes flagged as GAP (not PASS). Discovered several tests that asserted shape but not behavior.
-- **[Knowledge Sync Step 5.5]** — Flow registry + config.md append at end of execution means the next cycle starts with accumulated E2E knowledge. Compound leverage.
-- **[liveness-based Codex rescue monitoring]** — process-alive + file-growing checks instead of wall-clock SIGTERM. 30–45 min rescue fixes are legitimate; killing mid-fix leaves the tree worse than before.
+- **Mechanical staging auto-deploy beats "attempt to deploy".** Push to the staging
+  ref → poll the CI run → health-check with backoff. Concrete steps unblock E2E
+  without a manual hand-off; vague instructions burn minutes and then give up.
+- **Monitor a long model-rescue pass by *liveness*, not a wall-clock timer.**
+  Process-alive + output-still-growing checks let a legitimate 30–45 min fix finish;
+  a hard SIGTERM kills it mid-edit and leaves the tree worse than before.
+- **Assertion-strength audit catches weak greens.** A test that asserts "returns
+  200" but not the behavior is a GAP, not a PASS. Re-classify shape-only assertions.
+- **No free SKIPs.** Require a fallback attempt before accepting SKIP/BLOCKED — many
+  "can't run in this env" skips have a viable local fallback (e.g. a throwaway local
+  instance of the prod database engine) that converts them to real PASSes.
 
 ## What Failed
 
-- **[checkout stale-row split brain]** — A handler resolver filtered `needs_reprovision=false`, but the shared DB `checkout_and_acquire_slot` RPC still admitted `ready/free` rows marked stale. Runtime evidence beat code-only review: rows with `needs_reprovision=true` and a stale `last_error` were still selectable until quarantined. Pattern: for DB-backed admission control, verify every admission surface, including SQL RPCs, not only the application-layer resolvers.
-- **[vague "attempt to deploy"]** — 6+ minute churn, then gave up with a manual-push request. Fixed by the Staging Auto-Deploy Protocol.
-- **[silent SKIPs]** — "Cannot run in test env" with no fallback → coverage holes. Fixed by Rule 9.
-- **[Codex rescue with hard wall-clock SIGTERM]** — killed in-progress fixes mid-iteration; left half-applied patches. Fixed with liveness-based checkpoints.
-- **[canary smoke-test passing while concurrency bugs active]** — a single-run canary passed because there was no concurrent load, no upstream 502, no OAuth cache expiry. Canary is necessary, not sufficient.
-- **[Staging E2E account readiness can drift from flow assumptions]** — A staging Playwright run reached the deployed app with the feature flag on, but the approved retailer account lacked an active store item, so create-order redirected before feature controls rendered. Pattern: when staging E2E depends on named accounts, verify domain readiness fixtures before treating missing UI selectors as product failures.
-- **[Object-store evidence upload can fail after verification due to non-interactive reauth]** — UI evidence was captured locally, but `gcloud storage cp` / `gsutil cp` failed because user accounts required reauthentication and the only non-user service account lacked bucket access. Pattern: preflight `gcloud storage ls <evidence-prefix>` before long E2E runs and record a fallback evidence plan before marking PASS rows.
+- **`No tests found` is a result, not a pass.** A grep that matches zero tests must
+  become a GAP or a named deferral with an owner and rationale — never get hidden in
+  a green summary.
+- **A single-run canary passes while concurrency bugs are live.** One request sees no
+  concurrent load, no upstream 5xx, no cache expiry. A canary is necessary, not
+  sufficient — the deploy tier still needs chaos-level probes.
+- **Verify every admission/guard surface, including DB-level ones.** An app-layer
+  resolver filtered out stale rows, but a database-level routine still admitted them
+  — runtime evidence beat code-only review. For admission control, check every
+  surface (including stored procedures / RPCs), not just the application layer.
+- **Probe each data touch-point after a migration; don't assume inheritance.** A
+  migration updated one table's column but per-row records in a related table didn't
+  inherit the change, so a deployed read path rejected valid input. Probe each column
+  the migration claims to cover.
 
-## Patterns
+## Patterns (promoted — apply on every relevant run)
 
-- **One tier at a time:** no starting Tier N+1 until Tier N is resolved. Prevents noise from cascading failures across tiers.
-- **[prod hotfix plus lifecycle merge]** — When an emergency deploy goes out from an unmerged PR and `main` deploys afterward, prod can lose the hotfix even if the manual deploy was green. After any prod hotfix, check PR mergeability/main drift, merge the source PR, and verify the merged main deploy before closeout.
-- **Per-tier regression suite after individual tests** — cheap insurance against one test's fix breaking another.
-- **3-strike threshold for Codex rescue** — 2-failure Claude diagnostician loop, then escalate. Earlier wastes tokens; later wastes wall-clock.
-- **E2E never gates on deployment** — always attempt, deploy if needed, mark BLOCKED only for genuinely-impossible-in-env tests.
-- **Plan file is the ledger** — update status after every test, not in batch. Resumability depends on this.
-- **[vehicle-eligibility UI matrix]** — When the feature UI lives on an unmerged PR but staging is on main/staging, split evidence explicitly: run PR-branch UI against a temporary local app/DB for screenshots/HAR, run staging for already-deployed flow probes, and mark staging-only flag-on rows DEFERRED with a child issue instead of pretending local evidence satisfies staging.
+- **One tier at a time.** Don't start Tier N+1 until Tier N is resolved — prevents
+  noise from cascading failures across tiers.
+- **The plan file is the ledger.** Update each test's status immediately after it
+  runs, not in a batch — resumability depends on it.
+- **E2E never gates on deployment.** Always attempt; deploy if needed; mark BLOCKED
+  only for tests genuinely impossible in the environment.
+- **Per-tier regression sweep after individual fixes** — cheap insurance against one
+  test's fix breaking another in the same tier.
+- **When staging E2E depends on named accounts/fixtures, verify domain readiness
+  first.** A missing UI element is often a fixture-not-ready problem, not a product
+  failure — probe the account/data preconditions before classifying the row.
+- **N-strike threshold before escalating to a heavier rescue model.** Loop the
+  lighter diagnostician a bounded number of times first; escalate too early and you
+  waste tokens, too late and you waste wall-clock.
 
 ## Open Questions
 
-- When to escalate to Codex rescue vs keep iterating with the Claude diagnostician? A 2-failure threshold seems right but not validated against cost/time data.
-- How to detect "tests written that don't actually cover the blast radius" during execution, not just at plan review? Currently relies on spec-test-plan catching it upstream.
-- Should Chain tier (2.25) have its own gate like Unit/Integration, or follow E2E rules (always attempt)? Unclear — chain bugs are deterministic so gating seems right, but they also often signal plumbing regressions that matter more than later-tier failures.
-
-## What Worked (appended)
-
-- **[Staging Auto-Deploy Protocol caught a real infra-as-code validation bug]** — A deploy-to-staging command surfaced `OPTIONS is not a valid CFN enum value` on a Function URL CORS AllowMethods setting. The bug would never have shown in unit tests — only in infra-as-code ChangeSet validation. Fixed in 3 edits + redeploy succeeded. Exactly the kind of chaos-level probe the deploy tier is designed to catch. Confirms the Protocol is load-bearing.
-- **[Staging probe with a valid JWT surfaced an architectural gap]** — A 403 `credentials_not_browser_session` on a deployed `/browser-auth/load` revealed that an integration-credentials reader queries `customer_integrations.auth_type` but a Phase 0 migration only updated `integration_definitions.auth_type`. Per-org rows didn't inherit. The 403 is arguably the "correct" defensive behavior — it's just rejecting what it sees as a non-browser-session credential. But the wiring gap is real. Pattern: probe each DB column touch point after migrations; don't assume inheritance.
-
-## What Worked (appended)
-
-- **[DB MCP `apply_migration` for autonomous DDL]** — When migration apply was blocked by a Secrets Manager denial + no direct DB URL in `.env.local`, the database MCP tool authenticated via OAuth and ran the migration in seconds. Verified via an `information_schema.columns` query through the same MCP. Pattern: when Secrets Manager / direct DB access is gated, check for an MCP server with the right scopes before declaring a hard blocker. This unblocked the entire downstream task and the staging deploy chain.
-- **[Workflow_dispatch bypass when the CI gate is broken on infra debt]** — A pre-existing portal e2e CI step (SSO + trustedOrigins + missing test user) blocked the staging deploy through the normal `push staging → CI green → deploy workflow_run` path. `gh workflow run deploy-backend.yml --ref staging` triggered the deploy directly, surfacing the staging deployment issue without taking on infra debt that wasn't this PR's scope.
-- **[Audit-driven bulk evidence for tier execution]** — A plan with 240 rows + Backend CI green at HEAD = bulk-marking tiers via audit + CI evidence is faster and more accurate than per-row test invocation. Per-row execution is still required for net-new gaps that the audit flags as "GAPS — only here scaffold new". This matches the "extend, don't rewrite" default stance.
-- **[Serial Playwright audit mode for small staging databases]** — A broad E2E run at default worker parallelism exhausted managed Postgres connections (`remaining connection slots are reserved...`). Resetting the container maxScale to 3 and running `--workers=1` produced stable full-audit evidence while still exercising the deployed service.
-- **[App Review seed reset must reclaim marker-owned artifacts]** — An iOS App Store readiness pass found that deleting one reviewer user left seeded marker-owned orders/invoices/notifications attached to the deleted user, so reseed idempotency passed while mobile reviewer APIs returned empty data. Add reset tests that delete Account A, reseed, authenticate both accounts, and verify mobile endpoint data belongs only to current seed markers.
-- **[Root marker commands need root-level pytest option registration]** — Deploy probes initially registered `--staging-url` under a subtree `tests` dir, so `pytest -m staging --staging-url=...` from the repo root failed before collection. Move cross-tree markers/options to the root `conftest.py`; keep subtree conftests limited to path/setup helpers. Also verify marker commands with a bare repo-root invocation, not only targeted file paths.
-- **[Local E2E fallback must seed readiness gates, not just accounts]** — A scan-link Playwright run failed locally because seeded retailer credentials existed but `Store.is_profile_ready()` redirected the create-order URL to the dashboard until store hours, store email, address, and an active item were present. Pattern: when replacing staging with a repo-local DB, prepare every upstream readiness gate before classifying browser UI absence as product failure.
-- **[Mobile money E2E needs a fixture-auth probe before the UI runner]** — A mobile money iOS simulator reached the app, but all `driver-connect-*` staging users returned `401 No active account found` and the stock UI-runner money flows were stale against the current terms-gated login form. Pattern: before classifying mobile money UI as failed, probe `/api/auth/token/` for every named staging fixture and record selector drift separately from product behavior.
-- **[Deploy validation can be prod-green but staging-stale]** — A backend deploy run on `main` updated prod config/functions while staging still lacked the same `*_CONFIG` env and lifecycle flags. For mixed staging/prod plan rows, mark BLOCKED with exact deployed env evidence instead of turning a prod PASS into an all-stage PASS.
-- **[Profile setup E2E needs approved-but-incomplete fixtures]** — A profile setup audit initially treated an approved retailer account as incomplete, but that fixture is complete and correctly reaches Create Order. Use a dedicated approved active customer missing one blocking setup row for dashboard-first lock assertions, and mark the row SKIP/BLOCKED until seeded.
-- **[Create Order browser pricing tests must drive payload-writing controls]** — A price-preview audit changed `window.selectedItems` directly, while the deployed quote refresh posts the hidden `items` field. The real checkbox path updated both state and payload, turning a false assembly-service mismatch into a stable pass.
-- **[SQLite skips can often be converted with local Postgres instead of accepted as coverage loss]** — Several tests skipped PostgreSQL-only rows under SQLite; using a throwaway local Postgres DB converted all of them to PASS without product changes. Record both the SQLite skip reason and the Postgres verification command in the ledger.
-- **[Browser fixture skips should report the last passing step]** — A payments-V1 run skipped on missing accepted/delivered-failed order IDs, but the audit summary proved card save, quote, authorized order creation, and authorized detail all passed first. Capture the partial-pass boundary so the remaining blocker is precise fixture data, not a vague E2E failure.
-- **[Managed-compute seed jobs can lag behind deployed service images]** — A profile/orders staging env had the app deployed at one revision while the seed job still used an older image, so new fixture commands were unavailable until the job image was updated. Before declaring a seed command missing or blocked, compare the service image/revision to the job image and update the job to the deployed image when appropriate.
-- **[DB CLI migration history can be reconciled with temp placeholders]** — Backend migrations lived outside the standard migrations dir and used shorter filenames, while remote history stored longer version IDs. A temp workdir with empty placeholder files for already-applied remote versions plus the new migration let `db push --dry-run` show exactly one pending migration, then apply it without direct DB password access.
-- **[Handler canaries should probe the bundle proxy directly before blaming sandbox runtime]** — A handler run-parameter canary hit `bundle fetch failed: 500`; a direct `GET /handlers/{hash}.js` with a handler-scoped JWT exposed the real root cause: duplicate same-hash revision rows made `maybeSingle()` fail. Add the direct bundle route probe before debugging worker internals.
-- **[Verify Node-native suites with the same Node binary used by hooks]** — A staging verification initially failed because a native addon had been rebuilt for the `.nvmrc` Node version while the ad-hoc shell used a different Homebrew Node. Re-running the project's verify command with the correct Node bin first in `PATH` converted the native-addon failure into a clean pass.
-- **[Run-parameter canaries must respect channel policy]** — An MCP path correctly rejected a sensitive note with `sensitive_source_rejected`; the right split is MCP for non-sensitive declared flags and the portal/manual path for sensitive input + redacted audit/display assertions.
+- (append uncertainties here as runs surface them)

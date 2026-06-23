@@ -61,7 +61,7 @@ prompt: |
   caller has only A.
 
   ### 8. Resource boundaries
-  File at 0 bytes, max-size-1, max-size, max-size+1. Sandbox in stopped state,
+  File at 0 bytes, max-size-1, max-size, max-size+1. Managed resource in stopped state,
   archived state, terminated state, never-existed state. Quota at 100%, 101%.
 
   ### 9. Schema-evolution boundaries

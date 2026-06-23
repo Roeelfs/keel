@@ -27,7 +27,7 @@ prompt: |
     un-wired paths.
   - Concurrent OAuth refresh returning 401 with no re-read from the authoritative
     store (concurrency miss): the second caller didn't see the refreshed token.
-  - A "send to channel" path that silently drops when the primary channel-config
+  - A "notify destination" path that silently drops when the primary destination-config
     row is missing because no test org exercised the fallback (fallback miss).
   - A status flag that must be set BEFORE an async invoke, or the poller never
     wakes the work (state ordering miss).
@@ -42,7 +42,7 @@ prompt: |
   - Bot/scanner traffic eating most of the ERROR log budget so real 500s were
     invisible for days (observability miss).
   - A mobile serializer/decoder that silently breaks on a schema change (contract miss).
-  - A demographic edge case (e.g. religious headwear) rejected by a happy-path
+  - An input edge case (e.g. a multi-byte unicode value) rejected by a happy-path
     fixture set that contained no such examples (fixture-variance miss).
 
   ## Analyze each category — produce 2-3 concrete risks per category:
@@ -65,7 +65,7 @@ prompt: |
   ### 4. Build/deploy pipeline failures
   - Build-time placeholders that must be resolved?
   - Asset paths breaking under different URL patterns? (trailing slashes, relative vs absolute)
-  - CLI flags affecting runtime? (e.g., ffmpeg -movflags +faststart)
+  - CLI flags affecting runtime? (e.g., a transcode/build flag that changes output layout)
 
   ### 5. Cross-component data flow
   - Multi-step flows: does data from step A actually reach step B?
@@ -102,7 +102,7 @@ prompt: |
   - Migration race: if old and new pods both run during a rolling deploy, can old code write a schema new code can't read (or vice versa)?
   - Idempotence: if the same RPC fires twice (retry, network blip), does it produce duplicate work or exactly-once behavior?
   - Required test: for every write path, construct a `ThreadPoolExecutor`-style concurrent test OR document why single-writer is guaranteed.
-  - Risk example: a concurrent OAuth refresh shipped a 401 bug because the second caller didn't re-read from the authoritative store; a selfie-upload path had no collision test until one was added.
+  - Risk example: a concurrent OAuth refresh shipped a 401 bug because the second caller didn't re-read from the authoritative store; a file-upload path had no collision test until one was added.
 
   ### 11. State-mutation ordering & multi-phase writes
   - For every flag or status column that drives downstream behavior: when is it set, who reads it, what happens if a reader wins the race?
@@ -110,21 +110,21 @@ prompt: |
   - Error backfill: if a row was already marked complete before the error was known, does the backfill overwrite or preserve the earlier status?
   - Rollback: if mutation A commits and mutation B fails, does the system roll A back or leave a torn state?
   - Required test: for every state transition, write a unit test that reads mid-transition to verify no observer sees an inconsistent state.
-  - Risk example: a reprovision trigger had to set `needs_reprovision=true` BEFORE invoking the async worker, or the poller would never wake it up.
+  - Risk example: a refresh trigger had to set `is_stale=true` BEFORE invoking the async worker, or the poller would never wake it up.
 
   ### 12. Plumbing trace — every mutation through ALL consumers
-  - For every callback (e.g., a completion callback, `onRunTerminal`, `onSuccess`): enumerate EVERY terminal path that should invoke it. Unit tests validate the callback exists; integration tests must validate it fires in ALL paths.
-  - For every SDK → wrapper → adapter chain (e.g., a UI-block SDK → MCP tool → HTTP adapter): verify the payload survives each layer. A schema test at only the SDK layer misses drops in the adapter.
+  - For every callback (e.g., a completion callback, `onTerminate`, `onSuccess`): enumerate EVERY terminal path that should invoke it. Unit tests validate the callback exists; integration tests must validate it fires in ALL paths.
+  - For every SDK → wrapper → adapter chain (e.g., a client SDK → service tool → HTTP adapter): verify the payload survives each layer. A schema test at only the SDK layer misses drops in the adapter.
   - For every stub / TODO / `// placeholder` / `raise NotImplementedError`: the spec must mark it as "real implementation required before ship" or the plan must include a test that fails if the stub is still present.
   - Required test: add a "plumbing trace" table to the spec — columns: [mutation | consumer | test that verifies consumer fires]. Every row must have a test.
-  - Risk example: a real integration helper was wired into only some of the completion paths (health-report + several lifecycle-manager paths); resources never returned to their free state on the un-wired paths. A provision-and-attach function was a stub that returned immediately — concurrent runs clobbered each other.
+  - Risk example: a real integration helper was wired into only some of the completion paths (health-report + several lifecycle-manager paths); resources never returned to their free state on the un-wired paths. A resource-acquire function was a stub that returned immediately — concurrent runs clobbered each other.
 
   ### 13. Tenant / org / fixture variance
   - Test accounts in the happy-path E2E org often have ALL optional integrations configured. What breaks for an org missing one?
   - For every fallback chain (e.g., "use A, else B, else C"): is there a test org configured to force each branch?
-  - For every fixture: does the test seed cover edge populations — hijab / turban wearers, single-name drivers, non-ASCII names, drivers in states with no approval gate, orgs with zero history?
-  - Required test: at least ONE E2E test per fallback branch. At least ONE test org per "missing optional integration" scenario. Fixture seed must include demographic-diverse and edge-case examples.
-  - Risk example: a "send to channel" fallback to a secondary integration table was never exercised because the only test org had the primary channel-config row pre-seeded. A religious-headwear edge case was rejected because the approval fixture had no such faces.
+  - For every fixture: does the test seed cover edge populations — multi-byte unicode values, single-token names, non-ASCII names, records in states with no approval gate, orgs with zero history?
+  - Required test: at least ONE E2E test per fallback branch. At least ONE test org per "missing optional integration" scenario. Fixture seed must include input-diverse and edge-case examples.
+  - Risk example: a "notify destination" fallback to a secondary integration table was never exercised because the only test org had the primary destination-config row pre-seeded. An unusual-input edge case was rejected because the validation fixture had no such examples.
 
   ### 14. Observability & log-noise
   - For every new ERROR log or exception path: is it actionable, or is it expected user behavior (bot probes, expired tokens, rate-limited retries)?
@@ -148,10 +148,10 @@ prompt: |
   ### 16. Consumer contracts — API, mobile, downstream jobs
   - For every API schema change (add/remove/rename field, change type): who consumes this? Mobile app? Partner integrations? Downstream ETL? Cron jobs?
   - Snapshot the serializer/response shape pre-change, assert post-change keeps backward-compatible keys for N deploy cycles.
-  - Mobile decoders are especially brittle: a dropped `selfie_url` key crashes the Swift/Kotlin decoder, not a graceful null.
+  - Mobile decoders are especially brittle: a dropped `attachment_url` key crashes the strongly-typed mobile decoder, not a graceful null.
   - For removed fields: is there a deprecation window + dual-read migration, or does the field just vanish?
   - Required test: a contract test per consumer class — mobile serialization snapshot, partner webhook payload snapshot, cron job input-shape test.
-  - Risk example: removing URLField columns from a driver serializer would crash mobile decoders without a contract test.
+  - Risk example: removing URLField columns from an entity serializer would crash mobile decoders without a contract test.
 
   ## Output
 
@@ -159,13 +159,13 @@ prompt: |
 
   | ID | Category | Risk | Concrete Test | Tier | Fallback if Blocked |
   |----|----------|------|---------------|------|---------------------|
-  | ADV-1 | env divergence | EMAIL_HOST_PASSWORD missing in staging | Verify ALL env vars from deploy manifest exist and are non-empty | Deploy | Script that diffs prod vs staging env vars |
-  | ADV-2 | concurrency | Two automations on same org call provisionAndAttach; share sandbox | Dispatch 2 concurrent RPCs, assert distinct sandbox IDs | Integration | Serialized retry with lock |
+  | ADV-1 | env divergence | SOME_REQUIRED_SECRET missing in staging | Verify ALL env vars from deploy manifest exist and are non-empty | Deploy | Script that diffs prod vs staging env vars |
+  | ADV-2 | concurrency | Two jobs on same org call acquire_resource; share a resource | Dispatch 2 concurrent RPCs, assert distinct resource IDs | Integration | Serialized retry with lock |
   | ADV-3 | plumbing trace | completion callback wired in primary but not error path | Unit test each terminal path invokes the callback | Unit + Integration | Assert-count-greater-than-zero on callback mock |
   | ... | ... | ... | ... | ... | ... |
 
   Tag all items with [ADV] prefix. Be specific — "something might break" is useless.
-  "EMAIL_HOST_PASSWORD is in prod .env but not in staging docker-compose" is actionable.
+  "SOME_REQUIRED_SECRET is in prod .env but not in staging docker-compose" is actionable.
   "concurrent OAuth refresh: 2 parallel callers → 2nd gets 401, needs store re-read" is actionable.
 
   ## Minimum counts (enforce)

@@ -52,7 +52,7 @@ cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
 Probe each gap class below. For each gap, propose a specific test with tier and priority.
 
 Gap 1 — Runtime parity (local dev vs prod cloud):
-- Does the plan test against the actual production storage backend (object store: GCS/S3) or only local FileSystem/mocks?
+- Does the plan test against the actual production storage backend (object store) or only local FileSystem/mocks?
 - Does the plan probe IAM propagation, secret-manager fetch, connection pooling under load?
 - Are dependency version pins verified to contain the features the spec assumes (e.g. a storage library version that supports cloud-IAM credential signing)?
 - Does the plan check env-drop scenarios (ALLOWED_HOSTS missing, SECRET_KEY mid-rotation)?
@@ -66,22 +66,22 @@ Gap 2 — Concurrency & races:
 - Real bug: a concurrent OAuth refresh shipped 401 because the second caller had no re-read path against the authoritative store.
 
 Gap 3 — Plumbing trace (every mutation × every consumer):
-- For every callback (completion callback, onSuccess, onRunTerminal): does the plan enumerate and test every terminal path that should invoke it?
+- For every callback (completion callback, onSuccess, onTerminate): does the plan enumerate and test every terminal path that should invoke it?
 - For every SDK → wrapper → adapter chain: does a test exist for each layer, not just the top?
 - Are there stubs / NotImplementedError / TODO markers in the spec that the plan doesn't explicitly test for removal?
-- Real bug: a completion callback was wired into only some terminal paths; resources never returned to free on the rest. A provision-and-attach function was a stub that shipped.
+- Real bug: a completion callback was wired into only some terminal paths; resources never returned to free on the rest. A resource-acquire function was a stub that shipped.
 
 Gap 4 — State-mutation ordering & idempotence:
 - Does the plan specify and test the write-order for multi-phase writes? (flag BEFORE invoke vs after)
 - Does the plan test idempotent retries — same RPC twice produces the same final state?
 - Does error backfill preserve or overwrite earlier error messages?
-- Real bug: a reprovision trigger had to set needs_reprovision=true before the async worker invoke or the poller never fired.
+- Real bug: a refresh trigger had to set is_stale=true before the async worker invoke or the poller never fired.
 
 Gap 5 — Tenant / fixture variance:
 - For every fallback chain (use A else B else C), is there at least one test org configured to force each branch?
-- Are fixture seeds demographically diverse (religious headwear, non-ASCII names, edge populations)?
+- Are fixture seeds input-diverse (multi-byte unicode values, non-ASCII names, edge populations)?
 - Does the plan identify which tests depend on pre-seeded data that might only exist in one org?
-- Real bug: a send-to-channel fallback was never exercised because the only test org had the primary channel-config row; an approval queue rejected hijab faces because the fixture had no such examples.
+- Real bug: a notify-destination fallback was never exercised because the only test org had the primary destination-config row; a validation queue rejected unusual-input records because the fixture had no such examples.
 
 Gap 6 — Observability / log-noise:
 - Does the plan audit log levels (INFO vs WARN vs ERROR) for every new event?
@@ -93,7 +93,7 @@ Gap 7 — Consumer contracts (API, mobile, downstream):
 - For every schema change: is there a contract snapshot test for each consumer class (mobile app decoder, partner webhook, cron job input)?
 - Are removed fields covered by a deprecation window or dual-read path?
 - Does the plan flag JSON-shape changes as blocking on mobile contract tests?
-- Real bug: removing URLField columns from a driver serializer would crash mobile decoders without a contract test.
+- Real bug: removing URLField columns from an entity serializer would crash mobile decoders without a contract test.
 
 Additionally check:
 - Format/encoding mismatches at integration boundaries

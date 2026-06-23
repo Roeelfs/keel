@@ -31,7 +31,7 @@ prompt: |
   ### Tier classification:
   - **Unit**: isolated function/module, mockable boundaries
   - **Integration**: real DB/services, component interaction
-  - **Chain**: multi-step sequence end-to-end (upload → serialize → render; checkout → execute → checkin)
+  - **Chain**: multi-step sequence end-to-end (upload → serialize → render; acquire → use → release)
   - **Deploy**: env vars, build output, service health, IAM grants, runtime parity
   - **E2E**: full browser user journey
 
@@ -61,9 +61,9 @@ prompt: |
   - **External APIs**: Webhook payloads, partner integrations, mobile decoders
 
   Example:
-  - Surface: `Driver.profile_picture` URLField → FileField migration
-  - Consumers: (1) DriverSerializer → mobile app decoder, (2) AdminProfileFilter admin
-    review queue, (3) /api/drivers detail view → React component, (4) signed-URL health
+  - Surface: `Task.attachment_url` URLField → FileField migration
+  - Consumers: (1) TaskSerializer → mobile app decoder, (2) AdminAttachmentFilter admin
+    review queue, (3) /api/tasks detail view → React component, (4) signed-URL health
     probe, (5) object-store storage backend switch.
   - EACH consumer needs its own test row. The plan has FIVE tests, not one.
 
@@ -71,7 +71,7 @@ prompt: |
   - A completion callback: the spec defined ONE callback hook, but FOUR completion paths
     (a health-report path + several lifecycle-manager paths) should have invoked it. The plan
     had one test; the un-wired paths shipped broken.
-  - An `os.path.exists` filter: the admin consumer of `profile_picture` was never tested
+  - An `os.path.exists` filter: the admin consumer of `attachment_url` was never tested
     against object-store storage; local FileSystem made all tests pass, prod hid every image.
 
   ### State mutations — enumerate each flag/status transition
@@ -81,8 +81,8 @@ prompt: |
 
   | State Field | Valid Values | Write Triggers | Read Consumers | Ordering Constraint |
   |-------------|--------------|----------------|----------------|---------------------|
-  | needs_reprovision | bool | triggerReprovision before async worker invoke | lifecycle poller | WRITE must commit before invoke |
-  | approval_status | incomplete/pending/approved/rejected | driver onboarding, admin action | execute_signing guard, SigningAuditTrailTest setUp | transition rules spec §X |
+  | is_stale | bool | markStale before async worker invoke | background poller | WRITE must commit before invoke |
+  | review_status | incomplete/pending/approved/rejected | item submission, admin action | commit guard, AuditTrailTest setUp | transition rules spec §X |
 
   - "Ordering Constraint" forces the spec author to make two-phase writes explicit.
   - Missing constraints become unit test rows: "write X before Y or poller misses it".
@@ -108,11 +108,11 @@ prompt: |
     - Baseline: all integrations configured (happy path)
     - Missing-integration: at least one optional integration absent (forces fallback)
   - List fixture-diversity requirements:
-    - Demographic diversity (religious headwear, single-name drivers, non-ASCII names)
+    - Input diversity (multi-byte unicode names, single-token names, non-ASCII names)
     - Edge populations (zero-history accounts, suspended accounts, pending-approval accounts)
 
-  Real bug: a `send_to_channel` fallback shipped broken because all E2E tests used the one
-  test org that had the primary channel-config row pre-seeded — the fallback path never ran.
+  Real bug: a `notify_destination` fallback shipped broken because all E2E tests used the one
+  test org that had the primary destination-config row pre-seeded — the fallback path never ran.
 
   ## Output
 
