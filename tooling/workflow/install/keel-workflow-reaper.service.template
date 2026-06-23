@@ -1,0 +1,13 @@
+# keel workflow reaper — systemd service (Linux).
+# Pairs with keel-workflow-reaper.timer. This is a TEMPLATE: install.sh
+# substitutes __REPO__ with your repo's absolute path. To install by hand,
+# replace __REPO__ and drop both unit files into ~/.config/systemd/user/, then:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now keel-workflow-reaper.timer
+[Unit]
+Description=keel workflow reaper — clean up state from ungracefully-killed agent sessions
+
+[Service]
+Type=oneshot
+Environment=REPO=__REPO__
+ExecStart=/usr/bin/env bash __REPO__/.claude/hooks/heartbeat-reaper.sh

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  keel workflow reaper — macOS launchd agent.
+  Runs heartbeat-reaper.sh every 30 minutes to clean up state from sessions that
+  were killed without firing the SessionEnd hook.
+
+  This is a TEMPLATE. install.sh substitutes __REPO__ with your repo's absolute
+  path. To install by hand: replace __REPO__ below, then:
+    cp keel.workflow.reaper.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/keel.workflow.reaper.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>keel.workflow.reaper</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO__/.claude/hooks/heartbeat-reaper.sh</string>
+  </array>
+
+  <!-- The reaper has no session context; tell it which repo to reap. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>REPO</key>
+    <string>__REPO__</string>
+  </dict>
+
+  <!-- Run every 30 minutes (1800 seconds) -->
+  <key>StartInterval</key>
+  <integer>1800</integer>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/keel.workflow.reaper.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/keel.workflow.reaper.stderr.log</string>
+
+  <!-- Best-effort periodic task: don't restart on failure, don't run at load. -->
+  <key>KeepAlive</key>
+  <false/>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

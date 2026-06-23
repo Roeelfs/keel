@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Thin entrypoint — keeps the public command `tooling/workflow/workflow` stable
+# while the implementation lives in workflow.sh next to it.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$SCRIPT_DIR/workflow.sh" "$@"

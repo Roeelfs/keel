@@ -1,0 +1,63 @@
+{
+  "$comment": "keel example settings for Claude Code. Copy to .claude/settings.json (or merge into your existing one) and adjust. Hook paths use $CLAUDE_PROJECT_DIR so they resolve from the repo root. No secrets belong in this file — keep those in the environment.",
+
+  "permissions": {
+    "$comment_permissions": "Read-only inspection and the keel CLIs are auto-allowed so the agent doesn't prompt on every safe command. Destructive commands are denied outright. Tune to your comfort level.",
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git worktree list:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(which:*)",
+      "Bash(tooling/workflow/workflow:*)",
+      "Bash(with-heavy-lock:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf /:*)",
+      "Bash(rm -rf ~:*)",
+      "Bash(sudo rm:*)",
+      "Bash(mkfs:*)",
+      "Bash(dd if=:*)",
+      "Bash(chmod -R 777 /:*)"
+    ],
+    "defaultMode": "default"
+  },
+
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/capture-session-id.sh\"", "async": false },
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/warn-if-worktree-launch.sh\"", "async": false },
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh\"", "async": false },
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/tooling/workflow/inflight-registry.sh\" --hook", "async": false }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-end.sh\"", "async": false }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/serialize-heavy-ops.sh\"", "async": false }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# with-heavy-lock — run one CPU/disk-heavy command under a machine-global lock so
+# parallel agent sessions SERIALIZE (queue, not refuse) instead of melting the
+# machine. An 8-way parallel `vitest run` / `next build` can drive load average
+# to 25-34 and wedge the box; this makes heavy ops wait their turn and run one at
+# a time, locally.
+#
+# Why a wrapper and not just the PreToolUse hook: a hook is a GATE — it runs
+# before the command and exits, so it can only check-and-refuse and cannot HOLD a
+# lock across the command's lifetime. This wrapper holds the lock via an inherited
+# fd for the WHOLE command; flock releases it the instant the process exits —
+# including a test runner that SIGSEGVs on teardown — so a crash never wedges it.
+#
+# Usage:   with-heavy-lock npx vitest run path/to.test.ts
+#          with-heavy-lock pnpm --filter @acme/backend build
+#
+# Composable: nested heavy ops see KEEL_HEAVY_LOCK_HELD=1 and skip re-locking, so
+# wrapping a command that itself self-locks won't deadlock on the same lock.
+#
+# CONFIG: set KEEL_HEAVY_LOCK to override the lock file path
+# (default: ~/.keel/heavy.lock).
+set -uo pipefail
+
+[ $# -gt 0 ] || { echo "usage: with-heavy-lock <command> [args...]" >&2; exit 2; }
+
+# An ancestor already holds the lock → just run, don't re-acquire (deadlock guard).
+if [ "${KEEL_HEAVY_LOCK_HELD:-}" = "1" ]; then
+  exec "$@"
+fi
+
+LK="${KEEL_HEAVY_LOCK:-$HOME/.keel/heavy.lock}"
+mkdir -p "$(dirname "$LK")" 2>/dev/null || true
+
+if command -v flock >/dev/null 2>&1; then
+  if exec 200>"$LK"; then
+    if ! flock -n 200; then
+      echo "⏳ Queued behind another heavy op (machine-global lock) — waiting..." >&2
+      flock 200
+    fi
+  fi
+fi
+
+# exec `env` so the marker is set AND fd 200 (the held lock) is inherited by the
+# real command; the lock releases when that command finally exits.
+exec env KEEL_HEAVY_LOCK_HELD=1 "$@"

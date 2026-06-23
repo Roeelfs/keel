@@ -1,0 +1,21 @@
+# {{PROJECT_NAME}} — Agent Instructions
+
+The engineering rules for this repo live in **[CLAUDE.md](./CLAUDE.md)** — that is
+the single source of truth. Read it.
+
+`AGENTS.md` exists because different AI coding CLIs look for different filenames
+(Claude Code reads `CLAUDE.md`; Codex, Gemini, and others read `AGENTS.md`). Rather
+than maintain two copies that drift apart, this file is a thin pointer.
+
+**Keep it DRY — pick ONE canonical file:**
+
+- If most of your agents read `CLAUDE.md`, keep the full rules there and leave this
+  pointer as-is.
+- If most read `AGENTS.md`, move the full rules here and make `CLAUDE.md` the thin
+  pointer instead.
+
+Either way, never let the two files contain *different* rules — a contradiction
+between them is worse than either rule alone.
+
+> Tip: on systems that support it, symlink one to the other
+> (`ln -s CLAUDE.md AGENTS.md`) so there is physically one file.

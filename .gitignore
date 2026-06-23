@@ -1,0 +1,23 @@
+# keel doesn't ship build artifacts or secrets. Keep it that way.
+
+# Local Claude Code state (per-machine; never commit)
+.claude/settings.local.json
+.claude/settings.json
+
+# Workflow state lives under .git/ at runtime, never in the tree — but ignore a
+# stray copy just in case.
+claude-workflow/
+
+# OS / editor noise
+.DS_Store
+*.swp
+*~
+
+# Logs
+*.log
+
+# Anything secret — belt and suspenders
+*.env
+.env*
+*.pem
+*.key

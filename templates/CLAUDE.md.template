@@ -1,0 +1,102 @@
+# {{PROJECT_NAME}} — Engineering Rules for AI Agents
+
+> This file is read by every AI coding agent that works in this repo (Claude Code
+> reads `CLAUDE.md`; other CLIs read `AGENTS.md` — keep them in sync, or make one a
+> thin pointer to the other). It is the contract: how we build here, in priority
+> order. Fill in every `{{PLACEHOLDER}}` and delete guidance that doesn't apply.
+>
+> Keep it SHORT and TRUE. A rule the agent will actually follow beats a paragraph
+> it will skim. When a rule here conflicts with a default behavior, this file wins.
+
+## What this project is
+
+{{ONE_PARAGRAPH: what the system does, who uses it, and the single most important
+quality bar — e.g. "correctness over speed", "never lose customer data".}}
+
+**Stack:** {{STACK — languages, frameworks, runtime, package manager}}
+**Key directories:** {{e.g. `apps/` services · `packages/` shared libs · `docs/` specs}}
+
+## How to run things (source of truth — keep accurate)
+
+| Task | Command |
+|------|---------|
+| Install deps | `{{INSTALL_CMD}}` |
+| Build | `{{BUILD_CMD}}` |
+| Typecheck | `{{TYPECHECK_CMD}}` |
+| Lint | `{{LINT_CMD}}` |
+| Unit/integration tests | `{{TEST_CMD}}` |
+| Run locally | `{{DEV_CMD}}` |
+
+> If a command here is wrong, fix it before doing anything else — agents trust this
+> table. For end-to-end / staging verification, see `docs/testing-config.md`.
+
+## Coding standards
+
+- {{LANGUAGE_CONVENTIONS — e.g. "TypeScript strict; no `any`. Validate external
+  input at the boundary with `{{VALIDATION_LIB}}`."}}
+- **Small units.** Files {{e.g. 200–400 lines, 800 max}}; functions {{e.g. < 50
+  lines}}. If it's bigger, it probably wants splitting.
+- **Match the neighbors.** New code follows the conventions of the files around it
+  — naming, structure, error handling, test style. Consistency beats personal
+  preference.
+- **Errors are handled, not swallowed.** No empty `catch`/`except` that hides a
+  failure. Fail loudly or handle deliberately.
+- {{ANY_PROJECT_SPECIFIC_PATTERNS — immutability, dependency rules, layering, etc.}}
+
+## Change discipline
+
+- **Delete the path you replace, in the same change.** No dead code, no
+  commented-out blocks, no parallel old/new implementations behind a flag "just in
+  case." Leave exactly one architecture behind. Conflicting parallel architectures
+  are the #1 source of codebase rot.
+- **Right-sized changes.** {{Your PR philosophy — e.g. "one PR per feature; split
+  only on a true ordering dependency, never just because it's large."}}
+- **No speculative abstraction.** Build for the requirements you have. Don't pay
+  for flexibility you don't need yet.
+
+## Verification (non-negotiable)
+
+- **Verify before claiming done.** Run the actual build / tests / typecheck and
+  read the output. Never report success you haven't observed. "It should work" is
+  not "it works."
+- {{GATE — e.g. "`{{TEST_CMD}}` and `{{TYPECHECK_CMD}}` must pass locally before
+  you push. CI is a backstop, not the first check."}}
+- For anything user-facing or money/data-path, prove it end-to-end the way a user
+  would experience it — see `docs/testing-config.md`.
+
+## Git & commits
+
+- **Conventional commits with a required scope:** `<type>(<scope>): <description>`.
+  Scope matches a feature/domain (`{{EXAMPLE_SCOPES}}`). {{Why it matters to you, if
+  anything keys off it.}}
+- **Session traceability (optional but recommended):** add a `Session-Id:` trailer
+  so each commit links to the agent session that produced it:
+  `git commit -m "..." --trailer "Session-Id: $CLAUDE_SESSION_ID"`. keel's session
+  hooks set `$CLAUDE_SESSION_ID`; the `claude-sessions` skill uses the trailer to
+  attribute commits to sessions.
+- **Branch off fresh trunk.** `git fetch origin` then branch from `origin/{{DEFAULT_BRANCH}}`.
+  A stale base is the most common cause of divergence. (The in-flight registry hook
+  shows you how stale each branch is.)
+- {{Confirm-before-outward-actions policy — pushing, opening PRs, deploying, etc.}}
+
+## Parallel agents (if you run more than one)
+
+- Before touching files, claim your scope: `tooling/workflow/workflow claim-scope
+  '<glob>'`. It refuses if another live session already owns overlapping paths — so
+  two agents never silently edit the same code.
+- Heavy ops (tests, builds, installs) run under `with-heavy-lock` so parallel
+  sessions queue instead of melting the machine. The `serialize-heavy-ops` hook
+  enforces this.
+- Worktrees live under {{`.worktrees/` or your convention}}; launch the agent from
+  the main checkout, then `cd` into the worktree.
+
+## Security
+
+- {{Point to `docs/security-policy.md` and state the top 2-3 hard rules — e.g.
+  "no secrets in code or logs; authorization claims come from {{trusted source}},
+  never {{user-editable source}}; every query scoped to the caller's tenant."}}
+
+## Specs & review (if you use keel's spec flow)
+
+- Specs live in `{{docs/specs/}}`. Non-trivial features get a spec, a `spec-review`
+  pass (multi-model), and a `spec-test-plan` before they're called done.

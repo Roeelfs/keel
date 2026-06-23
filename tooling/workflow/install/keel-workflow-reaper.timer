@@ -1,0 +1,11 @@
+# keel workflow reaper — systemd timer (Linux). Fires the .service every 30 min.
+[Unit]
+Description=Run the keel workflow reaper every 30 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
