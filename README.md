@@ -95,6 +95,19 @@ prevents both:
   all firing at once.
 - **Lifecycle + a reaper** so state from a crashed session gets cleaned up.
 
+## Also: dropping into an unfamiliar codebase
+
+Before you can spec a change you often have to *understand* a repo you didn't
+write — map its structure, find where the intent lives, root-cause why something
+breaks, and have that understanding survive past the session. keel's read-only
+agents (`explore` for fast recon, `tracer`/`debugger` for root cause, `architect`
+for design archaeology, the web-enabled `critic`/`security-reviewer`), the
+`codebase-verifier` git-hotspot scan, the cross-worktree `spec-drift-scout`, and
+the `claude-sessions` miner + in-flight registry together form a real
+investigation toolkit. **[docs/investigation.md](docs/investigation.md)** is the
+playbook — and it credits the open-source discovery skills it recommends pairing
+with, rather than republishing them.
+
 ## What's in here
 
 ```
@@ -105,9 +118,9 @@ keel/
 │   │   ├── spec-test-plan/      # E2E-first test planning from a spec
 │   │   ├── spec-test-execute/   # tier-by-tier execution + failure triage
 │   │   └── claude-sessions/     # live-session survey + decision-mining (Python)
-│   ├── agents/                  # 10 generic sub-agents the skills dispatch
-│   │   #   architect · critic · executor · explore · planner
-│   │   #   security-reviewer · verifier · code-reviewer · debugger · git-master
+│   ├── agents/                  # 11 generic sub-agents the skills dispatch
+│   │   #   architect · critic · debugger · executor · explore · git-master
+│   │   #   planner · security-reviewer · tracer · verifier · code-reviewer
 │   ├── hooks/                   # session lifecycle, id capture, worktree warn,
 │   │   #                          heavy-op serializer, crashed-session reaper
 │   └── settings.example.json    # model routing, permissions, hook wiring
@@ -164,10 +177,13 @@ deliberately does **not** republish:
 
 - **[Matt Pocock's skills](https://github.com/mattpocock/skills)** — `grilling`
   (relentless plan stress-testing), the engineering-skills set (triage, to-prd,
-  to-issues, domain-modeling, codebase-design), `handoff`, and
-  `improve-codebase-architecture`. keel pairs naturally with these.
+  to-issues, `domain-modeling`, `codebase-design`, `diagnosing-bugs`), `handoff`,
+  and `improve-codebase-architecture`. keel pairs naturally with these — see
+  [docs/investigation.md](docs/investigation.md) for where the discovery skills
+  plug into keel's own agents.
 - **[superpowers](https://github.com/obra/superpowers)** — the spec-driven
-  workflow convention that shaped how I think about specs.
+  workflow convention that shaped how I think about specs, plus `deep-research`,
+  `systematic-debugging`, and `brainstorming` for the discovery/research axis.
 - **omc / generic sub-agents** — keel ships its own clean-room sub-agent
   definitions; any compatible agent set works.
 

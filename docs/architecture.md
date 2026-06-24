@@ -13,9 +13,9 @@ coding CLI (primarily Claude Code) behaves. Four layers, each doing one thing:
 │               claude-sessions                                      │
 │               → multi-step procedures the agent invokes on demand  │
 ├──────────────────────────────────────────────────────────────────┤
-│  AGENTS       architect · critic · executor · explore · planner    │
-│               security-reviewer · verifier · code-reviewer ·       │
-│               debugger · git-master                                │
+│  AGENTS       architect · critic · debugger · executor · explore   │
+│               git-master · planner · security-reviewer · tracer    │
+│               verifier · code-reviewer                             │
 │               → focused sub-agents the skills dispatch in parallel │
 ├──────────────────────────────────────────────────────────────────┤
 │  SUBSTRATE    hooks (session lifecycle, id capture, heavy-op lock) │
@@ -59,4 +59,5 @@ output trustworthy. The deep-dives:
 
 - [parallel-agents.md](parallel-agents.md) — the path-ownership + coordination layer.
 - [spec-flow.md](spec-flow.md) — the spec → review → test pipeline.
+- [investigation.md](investigation.md) — dropping into an unfamiliar codebase.
 - [philosophy.md](philosophy.md) — the engineering discipline encoded in the rules.
