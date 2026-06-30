@@ -91,4 +91,3 @@ prompt: |
   Only flag issues that would cause real problems during implementation.
   Stylistic preferences are NOT issues.
 ```
-</content>

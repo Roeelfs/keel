@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Spec Visualization</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://esm.sh/@xyflow/react@12.3.5/dist/style.css" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
+          mono: ['JetBrains Mono', 'SF Mono', 'Menlo', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  html, body { background: #09090b; }
+  body { font-feature-settings: 'cv11', 'ss01', 'ss02'; }
+  .nice-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+  .nice-scroll::-webkit-scrollbar-track { background: transparent; }
+  .nice-scroll::-webkit-scrollbar-thumb { background: #27272a; border-radius: 4px; }
+  .nice-scroll::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+
+  .react-flow { background: transparent; }
+  .react-flow__node { font-family: Inter, system-ui, sans-serif; }
+  .react-flow__handle { background: #52525b; border: 1px solid #18181b; width: 8px; height: 8px; }
+  .react-flow__edge-path { stroke-width: 1.5; }
+  .react-flow__attribution { background: transparent !important; color: #52525b !important; font-size: 9px !important; }
+  .react-flow__controls button { background: #18181b !important; border-color: #27272a !important; color: #a1a1aa !important; }
+  .react-flow__controls button:hover { background: #27272a !important; }
+  .react-flow__background { opacity: 0.4; }
+
+  .grain {
+    background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.015) 1px, transparent 0);
+    background-size: 24px 24px;
+  }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .fade-up { animation: fadeUp 0.5s ease-out both; }
+</style>
+</head>
+<body class="text-zinc-100 antialiased grain">
+<div id="root"></div>
+
+<!-- Spec data — replaced by spec-visualization skill at render time -->
+<script id="spec-data" type="application/json">
+{
+  "meta": {
+    "title": "Untitled Spec",
+    "specPath": "",
+    "version": "Draft",
+    "issueRef": "",
+    "branch": "",
+    "statusBadges": [],
+    "summary": "No summary provided."
+  },
+  "planes": [],
+  "pipelineNodes": [],
+  "pipelineEdges": [],
+  "reviewRounds": [],
+  "waves": [],
+  "decisions": [],
+  "components": {},
+  "openItemsByWave": [],
+  "boundaries": []
+}
+</script>
+
+<script src="https://unpkg.com/@babel/standalone@7.26.0/babel.min.js"></script>
+<script type="text/babel" data-type="module" data-presets="react">
+import React, { useState, useMemo } from 'https://esm.sh/react@18.3.1';
+import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
+import {
+  ReactFlow, Background, Controls, MiniMap, Handle, Position, MarkerType,
+} from 'https://esm.sh/@xyflow/react@12.3.5?deps=react@18.3.1,react-dom@18.3.1';
+import {
+  AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+} from 'https://esm.sh/recharts@2.13.0?deps=react@18.3.1,react-dom@18.3.1';
+import * as Icons from 'https://esm.sh/lucide-react@0.460.0?deps=react@18.3.1';
+
+const DATA = JSON.parse(document.getElementById('spec-data').textContent);
+
+const ICON = (name) => Icons[name] || Icons.Box;
+
+const COLOR_MAP = {
+  violet:  { bg: 'bg-violet-500/10',  border: 'border-violet-500/40',  text: 'text-violet-300',  icon: 'text-violet-400',  hex: '#7c3aed', edge: '#a78bfa', dot: 'bg-violet-500' },
+  indigo:  { bg: 'bg-indigo-500/10',  border: 'border-indigo-500/40',  text: 'text-indigo-300',  icon: 'text-indigo-400',  hex: '#6366f1', edge: '#818cf8', dot: 'bg-indigo-500' },
+  cyan:    { bg: 'bg-cyan-500/10',    border: 'border-cyan-500/40',    text: 'text-cyan-300',    icon: 'text-cyan-400',    hex: '#06b6d4', edge: '#22d3ee', dot: 'bg-cyan-500' },
+  emerald: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/40', text: 'text-emerald-300', icon: 'text-emerald-400', hex: '#10b981', edge: '#34d399', dot: 'bg-emerald-500' },
+  amber:   { bg: 'bg-amber-500/10',   border: 'border-amber-500/40',   text: 'text-amber-300',   icon: 'text-amber-400',   hex: '#f59e0b', edge: '#fbbf24', dot: 'bg-amber-500' },
+  rose:    { bg: 'bg-rose-500/10',    border: 'border-rose-500/40',    text: 'text-rose-300',    icon: 'text-rose-400',    hex: '#f43f5e', edge: '#fb7185', dot: 'bg-rose-500' },
+};
+const BORDER_LEFT = {
+  violet: 'border-l-violet-500', indigo: 'border-l-indigo-500', cyan: 'border-l-cyan-500',
+  emerald: 'border-l-emerald-500', amber: 'border-l-amber-500', rose: 'border-l-rose-500',
+};
+
+// ============================================================
+// REACT FLOW NODE
+// ============================================================
+
+const PipelineNode = ({ data }) => {
+  const c = COLOR_MAP[data.plane] || COLOR_MAP.indigo;
+  const Icon = ICON(data.icon);
+  return (
+    <div className={`rounded-lg border ${c.border} ${c.bg} backdrop-blur-sm px-3 py-2.5 min-w-[140px] shadow-sm`}>
+      <Handle type="target" position={Position.Left} />
+      <div className="flex items-center gap-2">
+        <Icon size={14} className={c.icon} />
+        <div>
+          <div className={`text-xs font-semibold ${c.text}`}>{data.label}</div>
+          {data.sub && <div className="text-[10px] text-zinc-500 font-mono mt-0.5">{data.sub}</div>}
+        </div>
+      </div>
+      <Handle type="source" position={Position.Right} />
+    </div>
+  );
+};
+
+const nodeTypes = { pipeline: PipelineNode };
+
+const buildEdges = (rawEdges) => rawEdges.map(e => {
+  const color = COLOR_MAP[e.color]?.edge || '#52525b';
+  return {
+    ...e,
+    type: 'smoothstep',
+    style: {
+      stroke: color,
+      strokeWidth: e.animated ? 2 : 1.5,
+      strokeDasharray: e.dashed ? '4 4' : undefined,
+    },
+    markerEnd: { type: MarkerType.ArrowClosed, color },
+    labelBgStyle: { fill: '#18181b', stroke: '#27272a' },
+    labelStyle: { fill: '#a1a1aa', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' },
+    labelBgPadding: [4, 2],
+    labelBgBorderRadius: 2,
+  };
+});
+
+const buildNodes = (rawNodes) => rawNodes.map(n => ({ ...n, type: 'pipeline' }));
+
+// ============================================================
+// PRIMITIVES
+// ============================================================
+
+const Badge = ({ children, variant = 'default' }) => {
+  const variants = {
+    default: 'border-zinc-700 text-zinc-400 bg-zinc-900/60',
+    success: 'border-emerald-500/30 text-emerald-300 bg-emerald-500/10',
+    warning: 'border-amber-500/30 text-amber-300 bg-amber-500/10',
+    danger:  'border-rose-500/30 text-rose-300 bg-rose-500/10',
+    accent:  'border-indigo-500/40 text-indigo-300 bg-indigo-500/10',
+  };
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md border ${variants[variant] || variants.default} text-[11px] font-mono font-medium`}>
+      {children}
+    </span>
+  );
+};
+
+const SectionHeader = ({ children, hint }) => (
+  <div className="mb-6 flex items-end justify-between">
+    <h2 className="text-[11px] uppercase tracking-[0.14em] text-zinc-500 font-semibold">{children}</h2>
+    {hint && <div className="text-xs text-zinc-600 font-mono">{hint}</div>}
+  </div>
+);
+
+const Card = ({ children, className = '' }) => (
+  <div className={`bg-zinc-900/40 border border-zinc-800 rounded-xl ${className}`}>{children}</div>
+);
+
+const Stat = ({ value, label, color = 'zinc' }) => {
+  const colorMap = { zinc: 'text-zinc-100', indigo: 'text-indigo-400', emerald: 'text-emerald-400', amber: 'text-amber-400', rose: 'text-rose-400' };
+  return (
+    <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-4">
+      <div className={`text-2xl font-mono font-bold tracking-tight ${colorMap[color]}`}>{value}</div>
+      <div className="text-[11px] text-zinc-500 uppercase tracking-wider mt-1.5">{label}</div>
+    </div>
+  );
+};
+
+// ============================================================
+// SECTIONS
+// ============================================================
+
+const Header = () => {
+  const m = DATA.meta;
+  return (
+    <header className="border-b border-zinc-800/60 pb-8 mb-12 fade-up">
+      <div className="flex items-start justify-between gap-8 flex-wrap">
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <Icons.Layers size={14} className="text-indigo-400" />
+            <span className="text-[11px] uppercase tracking-[0.14em] text-zinc-500 font-medium">
+              {m.specPath || 'Spec'} {m.issueRef && `· ${m.issueRef}`}
+            </span>
+          </div>
+          <h1 className="text-3xl font-semibold tracking-tight mb-3">{m.title}</h1>
+          {m.summary && <p className="text-sm text-zinc-400 max-w-2xl leading-relaxed">{m.summary}</p>}
+        </div>
+        <div className="flex gap-2 flex-wrap justify-end">
+          {(m.statusBadges || []).map((b, i) => <Badge key={i} variant={b.variant}>{b.label}</Badge>)}
+          {m.branch && <Badge>{m.branch}</Badge>}
+        </div>
+      </div>
+    </header>
+  );
+};
+
+const VisionSection = () => {
+  if (!DATA.planes?.length) return null;
+  return (
+    <section className="mb-14 fade-up" style={{ animationDelay: '0.05s' }}>
+      <SectionHeader hint="architectural planes">Vision</SectionHeader>
+      <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 ${DATA.planes.length >= 4 ? 'lg:grid-cols-4' : DATA.planes.length === 3 ? 'lg:grid-cols-3' : ''}`}>
+        {DATA.planes.map((p) => {
+          const c = COLOR_MAP[p.color] || COLOR_MAP.indigo;
+          const Icon = ICON(p.icon);
+          return (
+            <div key={p.id} className={`bg-zinc-900/40 border border-zinc-800 ${BORDER_LEFT[p.color] || BORDER_LEFT.indigo} border-l-2 rounded-xl p-5 hover:bg-zinc-900/60 transition-colors`}>
+              <div className="flex items-center gap-2 mb-3">
+                <Icon size={14} className={c.icon} />
+                <span className="text-[10px] uppercase tracking-[0.14em] text-zinc-600 font-semibold">{p.label}</span>
+              </div>
+              <h3 className="text-base font-semibold mb-1">{p.title}</h3>
+              {p.store && <div className={`font-mono text-[11px] ${c.icon} mb-3`}>{p.store}</div>}
+              {p.desc && <p className="text-xs text-zinc-400 leading-relaxed mb-4">{p.desc}</p>}
+              {p.items?.length > 0 && (
+                <ul className="space-y-1">
+                  {p.items.map((item, i) => (
+                    <li key={i} className="font-mono text-[10.5px] text-zinc-500 truncate">▸ {item}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+};
+
+const PipelineSection = () => {
+  if (!DATA.pipelineNodes?.length) return null;
+  const nodes = useMemo(() => buildNodes(DATA.pipelineNodes), []);
+  const edges = useMemo(() => buildEdges(DATA.pipelineEdges || []), []);
+  const palette = [...new Set((DATA.planes || []).map(p => p.color))];
+
+  return (
+    <section className="mb-14 fade-up" style={{ animationDelay: '0.1s' }}>
+      <SectionHeader hint="interactive · drag to pan · scroll to zoom">Pipeline</SectionHeader>
+      <Card className="overflow-hidden">
+        <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <Icons.Workflow size={14} className="text-indigo-400" />
+            <span className="text-sm font-medium">End-to-end flow</span>
+          </div>
+          <div className="flex gap-3 text-[10px] font-mono">
+            {palette.map(c => (
+              <span key={c} className={COLOR_MAP[c]?.icon || 'text-zinc-500'}>● {c}</span>
+            ))}
+          </div>
+        </div>
+        <div style={{ height: 540 }}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.2 }}
+            minZoom={0.3}
+            maxZoom={1.5}
+          >
+            <Background color="#27272a" gap={20} size={1} />
+            <Controls position="bottom-right" showInteractive={false} />
+            <MiniMap
+              position="bottom-left"
+              nodeColor={(n) => COLOR_MAP[n.data?.plane]?.hex || '#52525b'}
+              nodeStrokeWidth={2}
+              maskColor="rgba(9, 9, 11, 0.7)"
+              style={{ background: '#18181b', border: '1px solid #27272a' }}
+            />
+          </ReactFlow>
+        </div>
+      </Card>
+    </section>
+  );
+};
+
+const ReviewEvolutionSection = () => {
+  if (!DATA.reviewRounds?.length) return null;
+  return (
+    <section className="mb-14 fade-up" style={{ animationDelay: '0.15s' }}>
+      <SectionHeader hint={`${DATA.reviewRounds.length} round${DATA.reviewRounds.length === 1 ? '' : 's'}`}>Review evolution</SectionHeader>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2">
+          <Card className="p-5 h-full">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-medium">Issues per round</h3>
+              <div className="flex gap-3 text-[10px] font-mono">
+                <span className="text-rose-400">● critical</span>
+                <span className="text-amber-400">● major</span>
+                <span className="text-zinc-500">● minor</span>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={DATA.reviewRounds} margin={{ top: 10, right: 10, bottom: 0, left: -20 }}>
+                <defs>
+                  <linearGradient id="cArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#fb7185" stopOpacity={0.6} />
+                    <stop offset="100%" stopColor="#fb7185" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="mArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#fbbf24" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="#fbbf24" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="nArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#71717a" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="#71717a" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="#27272a" strokeDasharray="2 4" />
+                <XAxis dataKey="round" stroke="#52525b" fontSize={11} tickLine={false} axisLine={{ stroke: '#27272a' }} />
+                <YAxis stroke="#52525b" fontSize={11} tickLine={false} axisLine={{ stroke: '#27272a' }} />
+                <Tooltip contentStyle={{ background: '#18181b', border: '1px solid #27272a', borderRadius: 6, fontSize: 12 }} labelStyle={{ color: '#e4e4e7' }} />
+                <Area type="monotone" dataKey="critical" stroke="#fb7185" strokeWidth={2} fill="url(#cArea)" />
+                <Area type="monotone" dataKey="major" stroke="#fbbf24" strokeWidth={2} fill="url(#mArea)" />
+                <Area type="monotone" dataKey="minor" stroke="#71717a" strokeWidth={1.5} fill="url(#nArea)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </Card>
+        </div>
+        <div>
+          <Card className="p-5 h-full">
+            <h3 className="text-sm font-medium mb-4">Round verdicts</h3>
+            <div className="space-y-3">
+              {DATA.reviewRounds.map((r) => (
+                <div key={r.round} className="flex items-start justify-between gap-3 pb-3 border-b border-zinc-800 last:border-0 last:pb-0">
+                  <div>
+                    <div className="font-mono text-xs text-indigo-400 mb-1">{r.round}</div>
+                    {r.verdict && <div className="text-[11px] text-zinc-500">{r.verdict}</div>}
+                  </div>
+                  <div className="flex gap-2 text-[10px] font-mono shrink-0">
+                    {r.critical != null && <span className="text-rose-400">{r.critical}c</span>}
+                    {r.major != null && <span className="text-amber-400">{r.major}m</span>}
+                    {r.minor != null && <span className="text-zinc-500">{r.minor}n</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      </div>
+    </section>
+  );
+};
+
+const WaveTimeline = () => {
+  if (!DATA.waves?.length) return null;
+  const [hover, setHover] = useState(null);
+  const doneIdx = DATA.waves.findIndex(w => w.state === 'next');
+  const progressPct = doneIdx >= 0 ? (doneIdx / Math.max(DATA.waves.length - 1, 1)) * 100 : 100;
+  return (
+    <section className="mb-14 fade-up" style={{ animationDelay: '0.2s' }}>
+      <SectionHeader hint={`${DATA.waves.length} waves · gating items inlined`}>Rollout timeline</SectionHeader>
+      <Card className="p-5">
+        <div className="relative mb-5">
+          <div className="h-1 bg-zinc-800 rounded-full" />
+          <div className="absolute inset-y-0 left-0 h-1 bg-gradient-to-r from-emerald-500 to-indigo-500 rounded-full" style={{ width: `${progressPct}%` }} />
+          <div className="absolute inset-0 flex justify-between -mt-1.5">
+            {DATA.waves.map((w, i) => (
+              <div key={w.id} className="flex flex-col items-center cursor-pointer" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+                <div className={`w-4 h-4 rounded-full border-2 ${
+                  w.state === 'done' ? 'bg-emerald-500 border-emerald-400' :
+                  w.state === 'next' ? 'bg-indigo-500 border-indigo-400 animate-pulse' :
+                  'bg-zinc-900 border-zinc-700'
+                }`} />
+                <div className="text-[10px] font-mono text-zinc-500 mt-2">W{w.id}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className={`grid grid-cols-2 md:grid-cols-4 gap-2 mt-12 ${DATA.waves.length <= 8 ? 'lg:grid-cols-' + DATA.waves.length : 'lg:grid-cols-8'}`}>
+          {DATA.waves.map((w, i) => (
+            <div key={w.id} className={`p-3 rounded-lg border transition-all ${
+              w.state === 'done' ? 'bg-emerald-500/5 border-emerald-500/30' :
+              w.state === 'next' ? 'bg-indigo-500/5 border-indigo-500/30' :
+              'bg-zinc-900/30 border-zinc-800'
+            } ${hover === i ? 'scale-[1.02] shadow-lg' : ''}`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-mono text-[10px] text-zinc-500">Wave {w.id}</span>
+                {w.state === 'done' && <Icons.CheckCircle2 size={12} className="text-emerald-400" />}
+              </div>
+              <h4 className="text-xs font-semibold mb-2 leading-tight">{w.title}</h4>
+              {w.ships?.length > 0 && (
+                <ul className="space-y-0.5 mb-3">
+                  {w.ships.map((s, j) => (
+                    <li key={j} className="text-[10px] text-zinc-500 leading-tight truncate" title={s}>· {s}</li>
+                  ))}
+                </ul>
+              )}
+              {w.gates?.length > 0 && (
+                <div className="pt-2 border-t border-zinc-800/60">
+                  <div className="text-[9px] uppercase tracking-wider text-amber-500/70 mb-1.5 font-semibold">Must close</div>
+                  <div className="space-y-0.5">
+                    {w.gates.map((g) => (
+                      <div key={g.id} className="font-mono text-[10px] flex items-center gap-1.5">
+                        <span className={
+                          g.sev === 'critical' ? 'text-rose-400' :
+                          g.sev === 'fixed' ? 'text-emerald-500 line-through' :
+                          'text-amber-400'
+                        }>{g.id}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Card>
+    </section>
+  );
+};
+
+const OpenItemsSection = () => {
+  if (!DATA.openItemsByWave?.length) return null;
+  const totalCritical = DATA.openItemsByWave.reduce((sum, w) => sum + (w.critical || 0), 0);
+  const totalMajor = DATA.openItemsByWave.reduce((sum, w) => sum + (w.major || 0), 0);
+  const fixedCount = (DATA.waves || []).flatMap(w => w.gates || []).filter(g => g.sev === 'fixed').length;
+  const rounds = DATA.reviewRounds?.length || 0;
+  return (
+    <section className="mb-14 fade-up" style={{ animationDelay: '0.25s' }}>
+      <SectionHeader hint="by wave · severity">Open gates</SectionHeader>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2">
+          <Card className="p-5 h-full">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-medium">Gates per wave</h3>
+              <div className="flex gap-3 text-[10px] font-mono">
+                <span className="text-rose-400">● critical</span>
+                <span className="text-amber-400">● major</span>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={DATA.openItemsByWave} margin={{ top: 10, right: 10, bottom: 0, left: -25 }}>
+                <CartesianGrid stroke="#27272a" strokeDasharray="2 4" vertical={false} />
+                <XAxis dataKey="wave" stroke="#52525b" fontSize={11} tickLine={false} axisLine={{ stroke: '#27272a' }} />
+                <YAxis stroke="#52525b" fontSize={11} tickLine={false} axisLine={{ stroke: '#27272a' }} />
+                <Tooltip cursor={{ fill: 'rgba(255,255,255,0.03)' }} contentStyle={{ background: '#18181b', border: '1px solid #27272a', borderRadius: 6, fontSize: 12 }} />
+                <Bar dataKey="critical" stackId="a" fill="#fb7185" />
+                <Bar dataKey="major" stackId="a" fill="#fbbf24" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Stat value={totalCritical} label="Critical open" color="rose" />
+          <Stat value={totalMajor} label="Major open" color="amber" />
+          <Stat value={fixedCount} label="Fixed inline" color="emerald" />
+          <Stat value={rounds} label="Review rounds" color="indigo" />
+        </div>
+      </div>
+    </section>
+  );
+};
+
+const DecisionsSection = () => {
+  if (!DATA.decisions?.length) return null;
+  const [expanded, setExpanded] = useState(null);
+  return (
+    <section className="mb-14 fade-up" style={{ animationDelay: '0.3s' }}>
+      <SectionHeader hint="prerequisites">Decisions</SectionHeader>
+      <Card className="overflow-hidden">
+        {DATA.decisions.map((d) => (
+          <div key={d.id}
+               className={`group border-b border-zinc-800 last:border-0 transition-colors hover:bg-zinc-900/40 ${d.note ? 'cursor-pointer' : ''} ${expanded === d.id ? 'bg-zinc-900/40' : ''}`}
+               onClick={() => d.note && setExpanded(expanded === d.id ? null : d.id)}>
+            <div className="px-5 py-4 flex items-center gap-4">
+              <span className="font-mono text-xs text-indigo-400 font-semibold w-8">{d.id}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-3 mb-1">
+                  <span className="text-sm font-medium">{d.topic}</span>
+                  {d.flag && <span className="text-[10px] font-mono text-zinc-600">{d.flag}</span>}
+                </div>
+                <div className={`text-xs text-zinc-500 leading-relaxed ${expanded === d.id ? '' : 'line-clamp-1 group-hover:line-clamp-none'}`}>
+                  {d.rec}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                {d.status === 'approved' ? <Badge variant="success">approved</Badge> :
+                 d.status === 'updated' ? <Badge variant="accent">updated</Badge> :
+                 <Badge variant="warning">pending</Badge>}
+                {d.owner && <span className="text-[11px] text-zinc-600 font-mono w-32 text-right">{d.owner}</span>}
+                {d.note && <Icons.ChevronRight size={14} className={`text-zinc-600 transition-transform ${expanded === d.id ? 'rotate-90' : ''}`} />}
+              </div>
+            </div>
+            {expanded === d.id && d.note && (
+              <div className="px-5 pb-4 ml-12">
+                <div className="text-xs text-zinc-400 bg-indigo-500/5 border border-indigo-500/20 rounded-md px-3 py-2">
+                  <span className="text-indigo-400 font-medium">Note · </span>{d.note}
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </Card>
+    </section>
+  );
+};
+
+const ComponentsSection = () => {
+  const entries = Object.entries(DATA.components || {});
+  if (!entries.length) return null;
+  return (
+    <section className="mb-14 fade-up" style={{ animationDelay: '0.35s' }}>
+      <SectionHeader hint="infrastructure inventory">Components</SectionHeader>
+      <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 ${entries.length >= 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-' + entries.length}`}>
+        {entries.map(([key, comp]) => {
+          const Icon = ICON(comp.icon);
+          return (
+            <Card key={key} className="p-5">
+              <div className="flex items-center justify-between mb-4 pb-3 border-b border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <Icon size={14} className="text-indigo-400" />
+                  <span className="text-sm font-medium">{comp.label}</span>
+                </div>
+                {comp.count && <span className="font-mono text-[10px] text-zinc-500">{comp.count}</span>}
+              </div>
+              <ul className="space-y-3 max-h-[420px] overflow-y-auto nice-scroll pr-1">
+                {(comp.items || []).map((it, i) => (
+                  <li key={i}>
+                    <div className="font-mono text-[11.5px] text-zinc-200 leading-tight">{it.name}</div>
+                    {it.note && <div className="text-[10.5px] text-zinc-500 mt-1 leading-snug">{it.note}</div>}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          );
+        })}
+      </div>
+    </section>
+  );
+};
+
+const DataBoundariesSection = () => {
+  if (!DATA.boundaries?.length) return null;
+  return (
+    <section className="mb-14 fade-up" style={{ animationDelay: '0.4s' }}>
+      <SectionHeader hint="data-store separation">Data boundaries</SectionHeader>
+      <Card className="p-6">
+        <div className={`grid grid-cols-1 md:grid-cols-${DATA.boundaries.length} gap-6`}>
+          {DATA.boundaries.map((b, i) => {
+            const c = COLOR_MAP[b.color] || COLOR_MAP.indigo;
+            return (
+              <div key={i} className={`border-l-2 ${BORDER_LEFT[b.color] || BORDER_LEFT.indigo} pl-4`}>
+                <div className={`text-[10px] uppercase tracking-wider ${c.icon} font-semibold mb-2`}>{b.label}</div>
+                <h4 className="text-base font-medium mb-2">{b.title}</h4>
+                <p className="text-xs text-zinc-400 leading-relaxed">{b.contents}</p>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </section>
+  );
+};
+
+const Footer = () => {
+  const m = DATA.meta || {};
+  return (
+    <footer className="pt-8 border-t border-zinc-800 text-[11px] text-zinc-600 font-mono">
+      <div className="flex justify-between flex-wrap gap-2">
+        <span>{m.specPath}</span>
+        <span>{m.version} {m.branch && `· ${m.branch}`}</span>
+      </div>
+    </footer>
+  );
+};
+
+// ============================================================
+// APP
+// ============================================================
+
+const App = () => (
+  <div className="max-w-[1400px] mx-auto px-8 py-10">
+    <Header />
+    <VisionSection />
+    <PipelineSection />
+    <ReviewEvolutionSection />
+    <WaveTimeline />
+    <OpenItemsSection />
+    <DecisionsSection />
+    <ComponentsSection />
+    <DataBoundariesSection />
+    <Footer />
+  </div>
+);
+
+createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

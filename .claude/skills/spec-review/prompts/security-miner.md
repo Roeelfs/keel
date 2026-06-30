@@ -154,4 +154,3 @@ prompt: |
 
   ## Output the table only — no preamble, no summary
 ```
-</content>

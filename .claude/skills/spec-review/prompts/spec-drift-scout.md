@@ -150,4 +150,3 @@ prompt: |
   worktree, or spec section, put it in No-Action Notes instead of Drift
   Candidates.
 ```
-</content>

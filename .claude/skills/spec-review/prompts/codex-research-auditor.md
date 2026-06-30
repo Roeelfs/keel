@@ -64,4 +64,3 @@ Two severity tags are meaningful here:
 
 Neither maps to CRITICAL/MAJOR/MINOR. Present them in their own section.
 ```
-</content>

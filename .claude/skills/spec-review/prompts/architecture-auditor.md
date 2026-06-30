@@ -153,4 +153,3 @@ prompt: |
   Simpler alternative available: [yes/no]
   ```
 ```
-</content>

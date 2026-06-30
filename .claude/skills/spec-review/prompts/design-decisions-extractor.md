@@ -154,4 +154,3 @@ prompt: |
   - "Evidence" should be 1-3 short markers (e.g. `apps/X.ts edited`, commit
     subject, exec cmd). Skip evidence for items where it would be noise.
 ```
-</content>

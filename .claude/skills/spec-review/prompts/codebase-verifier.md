@@ -72,4 +72,3 @@ prompt: |
   Phantoms: N | Duplicates: N | Stale: N | Hotspots: N | Orphans: N
   ```
 ```
-</content>

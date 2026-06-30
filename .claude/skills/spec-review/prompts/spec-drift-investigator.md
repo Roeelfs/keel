@@ -88,4 +88,3 @@ prompt: |
   Be strict about evidence. If the scout over-reached, say so clearly and mark
   the candidate false positive.
 ```
-</content>

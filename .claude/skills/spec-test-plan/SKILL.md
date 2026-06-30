@@ -57,7 +57,7 @@ Wait for it.
 
 For each E2E row, specify:
 - The real runner (Playwright on staging URL, Chrome extension for auth/visual, or the platform's automation runner).
-- **How to read the logs** — exact log group / `automation_logs` query / portal page — and what a healthy vs failed run looks like there. Reading logs is part of the test, not optional.
+- **How to read the logs** — exact log group / structured-log query / dashboard page — and what a healthy vs failed run looks like there. Reading logs is part of the test, not optional.
 - Tenant/org variants if behavior differs by org.
 
 ## Integration tests (only where they earn their place)

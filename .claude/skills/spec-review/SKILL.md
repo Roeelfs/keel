@@ -1,11 +1,11 @@
 ---
 name: spec-review
-description: Multi-model spec verification pipeline. Linear flow (no compaction) — mines session design decisions, dispatches 9 parallel reviewers (6 Claude including edge-case, security, and cross-worktree drift scout + 3 Codex including industry research), then reports findings and fixes only real design defects in the spec prose. Never injects review scaffolding (matrices/EC/Sec/Drift tables) into the spec.
+description: Multi-model spec verification pipeline. Linear flow (no compaction) — mines session design decisions, dispatches 9 parallel reviewers (6 Claude including edge-case, security, and cross-worktree drift scout + 3 Codex including industry research) plus the investigation skill's dynamic Workflow grounding the elevation lane (verified, code-anchored industry evidence), then reports findings and fixes only real design defects in the spec prose. Never injects review scaffolding (matrices/EC/Sec/Drift tables) into the spec.
 ---
 
 # Spec Review — Multi-Agent Verification Pipeline
 
-9 focused reviewers run in parallel — 6 Claude agents (completeness, codebase, architecture, edge-case miner, security miner, spec drift scout) + 3 Codex (standard + adversarial + industry research) — each with a tight prompt and one job. The drift lane scans sibling worktrees/specs across the project scope so parallel work does not silently diverge. All Codex agents have web access enabled. The coordinator synthesizes and applies fixes.
+9 focused reviewers run in parallel — 6 Claude agents (completeness, codebase, architecture, edge-case miner, security miner, spec drift scout) + 3 Codex (standard + adversarial + industry research) — each with a tight prompt and one job, **plus the investigation skill's dynamic Workflow grounding the elevation lane** (it frames the spec's core themes against THIS codebase, fans out across sources, adversarially cross-verifies, and returns code-anchored industry-standard + best-in-class elevation evidence). The drift lane scans sibling worktrees/specs across the project scope so parallel work does not silently diverge. All Codex agents have web access enabled. The coordinator synthesizes and applies fixes.
 
 **Trigger:** "review this spec", "verify the spec", "run spec review", "gap analysis"
 
@@ -13,7 +13,7 @@ description: Multi-model spec verification pipeline. Linear flow (no compaction)
 
 ## Skill Memory (LEARNINGS.md)
 
-**Before starting:** Read `LEARNINGS.md` in this skill directory. Apply entries under **What Worked** and **Patterns**; use **Open Questions** to spot decisions that still need care.
+**Before starting:** Read `LEARNINGS.md` in this skill directory. Also read the private overlay if present — `~/.claude/skills-overlay/spec-review/LEARNINGS.md` (adopter-private accumulated learnings; never in this public repo). Apply entries under **What Worked** and **Patterns**; use **Open Questions** to spot decisions that still need care.
 
 **Before ending:** Append one dated bullet per non-trivial finding under the appropriate section. If an entry now recurs ≥3 times across runs, promote it into this SKILL.md and archive the raw entry.
 
@@ -43,6 +43,7 @@ A spec written in a long session accumulates blind spots. This skill breaks that
 5. **Semantic boundary mining** — the edge-case miner enumerates entity/state/value boundaries the spec is silent on (cardinality, lifecycle, tenancy, encoding, time, concurrency, permission, resource, schema-evolution, forbidden-but-syntactically-valid)
 6. **Project-policy security mining** — the security miner reads `docs/security-policy.md` (filled by the user from `templates/security-policy.example.md`) plus the project root `CLAUDE.md`/`AGENTS.md`, and audits the spec against your project's stated rules plus portable security categories (authN/authZ, secret/credential storage, tenant/org isolation, input validation & injection, data-boundary separation, privilege escalation, allowlist/denylist gaps, output sanitization). Cites the project's own policy in every finding — no inventing rules
 7. **Cross-worktree drift scouting** — the spec drift scout checks recently pushed changes, dirty worktrees, architecture changes, sibling specs, and in-progress parallel work across the same project scope, then dispatches narrow follow-up investigators only when material drift is found
+8. **Code-grounded industry elevation** — the **investigation skill** runs as a dynamic Workflow over the spec's core themes: it frames them against THIS codebase first (every claim cites a real `file:line`), fans out across primary sources, adversarially cross-verifies each load-bearing claim *in code* (refuted/unchecked claims are partitioned out before synthesis), and returns a verified industry-standard + best-in-class elevation brief. This **deepens the elevation lane** — it is the evidence-and-industry backbone that the Codex Industry Research Auditor's single-model external scan gets cross-checked against, so an ELEVATE suggestion two independent lanes agree on lands at high confidence, and an unverified one is flagged as such
 
 > **Findings, not procedures.** This skill reports problems and fixes real design defects in the spec *prose*. It must NEVER inject its own scaffolding into the spec file — no traceability matrices, no EC-N / Sec-N / DRIFT-N tables, no "review lanes" or checklists. Those live in the **review report** (a sibling file or chat output), never in the spec. A spec describes the design; it does not carry the machinery of the review that touched it.
 
@@ -160,6 +161,18 @@ Read the spec with fresh eyes. Then dispatch ALL 9 primary reviewers simultaneou
 - **No JSON templates, no markers, no output format examples in the prompt** — Codex echoes them back as fake output
 - **Never use `companion review` or `companion adversarial-review`** — those review git diffs, not spec files
 
+**Agent 10 (same parallel wave) — Investigation Workflow (elevation grounding).** In the same wave as the 9 reviewers, launch the **investigation skill** on the spec's core themes — this is the deepened elevation lane (see Step 5c). It runs as a background dynamic Workflow, so launch it now and collect it in Step 4c alongside Codex.
+
+1. Scan the spec for its **3–6 core themes** — reuse the same scan that seeds the Codex Research Auditor (Agent 9).
+2. Invoke the investigation skill (it **always** runs as a dynamic Workflow — frame → research → adversarial-verify → synthesize) with a premise like:
+   > Ground the **industry standard + best-in-class elevation** for these spec themes, framed against THIS codebase: `<themes>`. Spec: `<spec path>`. Return the verified industry-standard + elevation evidence — each claim code-anchored (`file:line`) or carrying a live source URL.
+   Use `Skill(skill="investigation")` with that premise, or launch its `DEEP-WORKFLOW.md` template directly via the Workflow tool with `args.premise = <the premise>` and `args.n` sized to the theme count (3–6).
+3. It writes a grounded brief to `docs/investigations/YYYY-MM-DD-<slug>.md`. Its `industry_standard` + `elevation` sections feed the **Industry Insights** section in Step 5c — they do **not** enter the defect-classification pipeline (Step 5) and are **never** injected into the spec.
+
+**Why a separate lane from Codex Industry Research (Agent 9):** the investigation lane is **code-grounded** (it frames against this repo *before* searching) and **verified in code** (claims partitioned verified vs untrusted before synthesis); the Codex auditor is a **second model's external-only** scan. Run both — two independent lanes agreeing on an ELEVATE = high confidence; investigation's verified evidence wins when it contradicts an unverified Codex ELEVATE/CAUTION.
+
+**Runtime note:** the investigation skill + Workflow tool are **Claude Code-only**. When you drive spec-review from another runtime (e.g. Codex CLI, where Step 2b had no `$CLAUDE_SESSION_ID`), skip this lane — the Codex Industry Research Auditor (Agent 9) carries the elevation lane alone.
+
 ### Step 4b: Progressive Drift Investigation
 
 When the **Spec Drift Scout** returns, read its report immediately. Do not wait for Codex if the scout has already finished — use that time to dispatch narrow second-wave investigators while the Codex reviews continue.
@@ -183,9 +196,9 @@ When the **Spec Drift Scout** returns, read its report immediately. Do not wait 
 - `mark-intentional` entries go into the report and, if confirmed by the user, into project memory as an acknowledged divergence
 - False positives go under Resolved with the scout/investigator evidence
 
-### Step 4c: Wait for Codex reviews and drift investigators
+### Step 4c: Wait for Codex reviews, the Investigation Workflow, and drift investigators
 
-The 6 Claude agents return first (2-6 min; Drift Scout may take longer on projects with many worktrees). Codex reviews run in background and take longer. The Research Auditor may take the longest — web research has latency — budget 20-40 min. Drift investigators, if dispatched, should run in parallel with remaining Codex reviews.
+The 6 Claude agents return first (2-6 min; Drift Scout may take longer on projects with many worktrees). Codex reviews run in background and take longer. The Research Auditor may take the longest — web research has latency — budget 20-40 min. The **Investigation Workflow** (Agent 10) also runs in the background and notifies on completion — budget 10-30 min depending on theme count and width; read its saved brief (`docs/investigations/…`) when it lands. Drift investigators, if dispatched, should run in parallel with remaining Codex reviews.
 
 **How to wait:** Use `run_in_background: true` on the Bash dispatch calls. You get notified when each completes. Then **read the output file with the Read tool** and extract findings yourself. No grep, no sed, no checkpoint scripts — you're an LLM, just read the file.
 
@@ -195,11 +208,11 @@ pgrep -f "codex exec" && echo "still running" || echo "exited"
 ```
 If exited, read the file. If still running, let it finish — Codex legitimately runs 20-40 min on complex specs, and research can run longer.
 
-Wait for all 9 primary reviewers and any second-wave drift investigators to complete before starting Step 5.
+Wait for all 9 primary reviewers, the Investigation Workflow (Agent 10), and any second-wave drift investigators to complete before starting Step 5.
 
 ### Step 5: Merge & Classify
 
-Collect all 9 primary reports (6 Claude markdown + 3 Codex text/JSON) plus any second-wave drift investigator reports. The Research Auditor findings are handled separately — they go into their own section (see Step 5c) and do NOT feed the defect-classification pipeline below. The Edge-Case Miner, Security Miner, and Spec Drift Scout/Investigators are also handled in their own sections (see Step 5c) — CRITICAL/MAJOR Edge-Case rows with `Spec Coverage: MISSING`, CRITICAL/MAJOR Security rows, and CRITICAL/MAJOR drift findings with `update-current-spec` action are auto-applied like other consensus issues when scoped to the target spec, but they don't get cross-examined since they do not have a direct Codex peer in this skill. Classify each **defect** finding from the other 5 reviewers (completeness, codebase, architecture, codex-standard, codex-adversarial):
+Collect all 9 primary reports (6 Claude markdown + 3 Codex text/JSON) plus any second-wave drift investigator reports and the Investigation Workflow brief. The Research Auditor findings **and the Investigation Workflow brief** are handled separately — they go into the Industry Insights section (see Step 5c) and do NOT feed the defect-classification pipeline below. The Edge-Case Miner, Security Miner, and Spec Drift Scout/Investigators are also handled in their own sections (see Step 5c) — CRITICAL/MAJOR Edge-Case rows with `Spec Coverage: MISSING`, CRITICAL/MAJOR Security rows, and CRITICAL/MAJOR drift findings with `update-current-spec` action are auto-applied like other consensus issues when scoped to the target spec, but they don't get cross-examined since they do not have a direct Codex peer in this skill. Classify each **defect** finding from the other 5 reviewers (completeness, codebase, architecture, codex-standard, codex-adversarial):
 
 | Codex severity | Claude severity | Unified |
 |---|---|---|
@@ -283,10 +296,11 @@ After cross-examination resolves (or goes to user), compile the full report:
 ## Spec Review — Final Report
 
 ### Spec: <filename>
-### Reviewers: Completeness (Opus) + Codebase (Sonnet) + Architecture (Opus) + Edge-Case Miner (Opus) + Security Miner (Opus) + Spec Drift Scout (Sonnet) + Codex Standard (GPT-5.5) + Codex Adversarial (GPT-5.5) + Codex Industry Research (GPT-5.5, web-enabled)
+### Reviewers: Completeness (Opus) + Codebase (Sonnet) + Architecture (Opus) + Edge-Case Miner (Opus) + Security Miner (Opus) + Spec Drift Scout (Sonnet) + Codex Standard (GPT-5.5) + Codex Adversarial (GPT-5.5) + Codex Industry Research (GPT-5.5, web-enabled) + Investigation Workflow (code-grounded, verified)
 ### Codex Standard Verdict: <approve|needs-attention|timed-out>
 ### Codex Adversarial Verdict: <approve|needs-attention|timed-out>
 ### Codex Research Verdict: <N elevate suggestions / M cautions / timed-out>
+### Investigation Verdict: <N verified elevations / M cautions / brief path / skipped (non-Claude runtime) / timed-out>
 ### Spec Drift Verdict: <clean|N candidates|N investigators|timed-out>
 
 ### Consensus Issues (2+ reviewers)
@@ -369,14 +383,18 @@ confirmation and should become project memory if accepted.
 1. [severity] <standard finding> + <adversarial finding> — same file/concern
 ...
 
-### Industry Insights (from Codex Research Auditor — elevation, not defects)
-Kept in its own section on purpose — research suggestions are NOT severity-ranked against defects. Present as a separate decision surface.
+### Industry Insights (elevation, not defects) — Codex Research Auditor + Investigation Workflow
+Kept in its own section on purpose — elevation suggestions are NOT severity-ranked against defects. Present as a separate decision surface. **Two independent lanes feed it:** the Codex Industry Research Auditor (Agent 9 — external-only, single-model) and the Investigation Workflow (Agent 10 — code-grounded, adversarially verified in code). Merge them per theme:
+- Where **both lanes agree** on an ELEVATE/CAUTION → mark `lane: both` = high confidence.
+- Where only the **investigation lane's *verified* evidence** supports a point → keep it (it cleared the in-code verify partition).
+- Where a Codex ELEVATE/CAUTION is **unverified** by the investigation lane → flag it `(unverified)` and leave the call to the user; never auto-apply it.
+- The investigation brief lives at `docs/investigations/…` — cite it as a source for the points it grounds.
 
 **Theme: <spec theme>**
-- [ELEVATE] <OSS library or industry pattern> — <repo URL or blog URL>
-  Why it fits: <one line> | Refactor suggestion: <concrete change>
-- [CAUTION] <spec claim vs. established practice> — <authoritative URL>
-  What the spec says: <quote> | What the source says: <quote> | Your call: adopt / reject / flag
+- [ELEVATE] <OSS library or industry pattern> — <repo URL or blog URL> — `lane: codex | investigation | both`
+  Why it fits: <one line> | Evidence: <file:line or live URL> | Refactor suggestion: <concrete change>
+- [CAUTION] <spec claim vs. established practice> — <authoritative URL> — `lane: codex | investigation | both`
+  What the spec says: <quote> | What the source says: <quote> | Verified: yes/no | Your call: adopt / reject / flag
 
 **Theme: <next spec theme>**
 ...
@@ -400,7 +418,7 @@ The core review ends at Step 5c. Alignment investigation is an **optional deep a
 
 Even when requested, skip if: the spec is trivial (<50 lines), no prior specs exist in `docs/specs/`, or no session decisions were mined in Step 2b.
 
-If the user explicitly wants it and it's not skippable, the Alignment Investigator (agent #10) runs as follows:
+If the user explicitly wants it and it's not skippable, the Alignment Investigator (agent #11) runs as follows:
 
 This step is intentionally narrower than the Spec Drift Scout. Step 4 checks
 other worktrees/specs/recent changes for parallel drift. Step 6 checks whether
@@ -519,9 +537,9 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 | 2a | Coordinator | Write "why" context block (inline, no compaction) | — |
 | 2b | Coordinator | Generate session-decisions JSON (skippable) | — |
 | 3 | Agent (haiku) | Decisions JSON → design decisions dossier | — |
-| 4 | **9 Reviewers** | Completeness + Codebase + Architecture + Edge-Case Miner + Security Miner + Spec Drift Scout + Codex Standard + Codex Adversarial + Codex Industry Research | **ALL 9 PARALLEL** |
+| 4 | **9 Reviewers + Investigation Workflow** | Completeness + Codebase + Architecture + Edge-Case Miner + Security Miner + Spec Drift Scout + Codex Standard + Codex Adversarial + Codex Industry Research + **Investigation Workflow (elevation grounding)** | **ALL PARALLEL** |
 | 4b | Coordinator + optional agents | Progressive drift investigation from Scout candidates | Parallel when needed |
-| 4c | Coordinator | Wait for Codex reviews and drift investigators | — |
+| 4c | Coordinator | Wait for Codex reviews, the Investigation Workflow, and drift investigators | — |
 | 5 | Coordinator | Merge 9 primary reports plus drift investigations, classify findings | — |
 | 5b | Coordinator + Codex | Cross-examine MAJOR+ disagreements (Claude vs Codex debate) | Sequential |
 | 5c | Coordinator + User | Final report, user decides on contested issues | — |
@@ -546,7 +564,8 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 | 7 | **Codex Adversarial** | `prompts/codex-adversarial-reviewer.md` | **codex exec (web)** | **GPT-5.5** | **Attack surface, risks — cross-referenced against public CVEs/post-mortems** |
 | 8 | **Codex Standard** | `prompts/codex-standard-reviewer.md` | **codex exec (web)** | **GPT-5.5** | **Completeness, feasibility — API/library claims verified against primary sources** |
 | 9 | **Codex Industry Research** | `prompts/codex-research-auditor.md` | **codex exec (web)** | **GPT-5.5** | **Elevation: OSS libraries, big-company patterns, production gotchas with URL citations** |
-| 10 | **Alignment Investigator** | (coordinator-composed prompt) | **codex exec** | **GPT-5.5** | **Decision-reality drift** |
+| 10 | **Investigation Workflow** | `investigation` skill (`DEEP-WORKFLOW.md`) | **dynamic Workflow** | **multi-agent** | **Elevation grounding: spec themes framed against THIS codebase, fanned out across sources, adversarially verified in code → industry-standard + best-in-class elevation evidence (Claude Code-only)** |
+| 11 | **Alignment Investigator** | (coordinator-composed prompt) | **codex exec** | **GPT-5.5** | **Decision-reality drift** |
 
 ## When NOT to Use
 
@@ -556,5 +575,3 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 
 **Flags:**
 - `--skip-alignment` in trigger phrase — skips alignment investigation (Steps 6-8)
-</content>
-</invoke>

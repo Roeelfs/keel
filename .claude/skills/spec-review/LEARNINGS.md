@@ -94,4 +94,3 @@ migrations, data pipelines). They are starting wisdom, not project-specific.
 ## Open Questions
 
 - (none yet — append uncertainties here as runs surface them)
-</content>
