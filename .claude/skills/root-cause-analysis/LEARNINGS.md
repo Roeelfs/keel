@@ -85,6 +85,18 @@ The entries below are portable starting wisdom, not project-specific.
   or (c) route regulated data upstream of your only redaction boundary / force a BAA pricing
   floor. A gate that only ever says "buy" is miscalibrated.
 
+### The known-error ledger splits — derive occurrence, git-native curation
+- A ledger has two halves with opposite homes, and a single new datastore is usually the
+  wrong answer for both. **Occurrence** (signature × release × tenant × count) is runtime
+  telemetry → derive it with a GROUP BY over the log store you already own (`HAVING count ≥ 2`
+  = recurrence); a second event table beside your logs is a **dual-write anti-pattern**
+  (Kleppmann) — lossier than derivation. **Curation** (root cause / fix refs / status) is
+  agent bookkeeping with **zero runtime consumers** → version-control it (one file per
+  signature; VCS log + commit trailers give fixing-commit/issue/session for free). Residency
+  test: *does this data have a runtime/customer consumer?* No → git, not a DB. Add a derived
+  index over the git records only when a consumer appears (Backstage outgrow path). Never
+  co-locate RCA state with the plane it debugs; `resolved` is bake-gated (merged ≠ resolved).
+
 ## Industry grounding / References
 
 Standards the phases implement (URLs live here, not in the terse SKILL.md — Keel house style
@@ -108,6 +120,14 @@ for process skills). Liveness-verified 2026-07-01.
 - **ITIL known error / KEDB** — "a problem analysed but not resolved"; a queryable store with
   a mutable lifecycle (transition, never delete). — https://en.wikipedia.org/wiki/Known_error ·
   https://wiki.en.it-processmaps.com/index.php/Problem_Management
+- **Ledger store-split — curation in git, occurrence derived** — Google SRE stores postmortems
+  as documents in a repo and retrofits a derived index (Requiem) *over* them, never in the
+  serving DB; Sentry's own internals split curated mutable state (Postgres) from
+  fingerprint-keyed occurrence events (ClickHouse); a dual-write beside your log store is a
+  named anti-pattern (Kleppmann); when queryability outgrows grep, add a derived index over the
+  git source (Backstage), don't relocate authoring. — https://sre.google/sre-book/postmortem-culture/ ·
+  https://sre.google/workbook/postmortem-culture/ · https://develop.sentry.dev/application-architecture/overview/ ·
+  https://backstage.io/
 - **Agent RCA via distributed tracing** — an agent run is a span tree (invoke-agent → chat →
   execute-tool); content capture is opt-in because it can carry sensitive data. —
   https://opentelemetry.io/blog/2026/genai-observability/
