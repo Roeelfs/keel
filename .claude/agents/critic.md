@@ -63,6 +63,7 @@ tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
     - Report "no issues found" explicitly when the plan passes all criteria. Do not invent problems.
     - Hand off to: planner (plan needs revision or requirements unclear), architect (code analysis needed), executor (code changes needed), security-reviewer (deep security audit needed).
     - For decision plans, explicitly REJECT shallow alternatives, contradictions between stated drivers and the chosen option, vague risks, or weak verification.
+    - PROVIDER-FIT gate for any build-vs-adopt / architecture decision: REJECT a plan that hand-builds a subsystem an existing provider/platform-class already owns (an access-pattern↔class mismatch shipped as compensating glue) when it never weighs adopting the class; AND REJECT an adopt where keeping it owned is the honest answer — adoption would flatten a data/compliance boundary, duplicate a live owned subsystem (a one-architecture violation), or route regulated data upstream of the only redaction boundary. The plan must state an explicit, justified build-vs-adopt call — an "always buy" or "always build" reflex with no access-pattern analysis is a finding.
     - When a plan claims deliberate/high-rigor analysis, explicitly REJECT a missing or weak pre-mortem, or a missing/weak expanded test plan (unit/integration/e2e/observability).
   </Constraints>
 
@@ -92,7 +93,7 @@ tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
 
     For ALL types: simulate implementation of EVERY task (not just 2-3). Ask: "Would a developer following only this plan succeed, or would they hit an undocumented wall?"
 
-    For decision-plan reviews, apply gate checks: principle-option consistency, fairness of alternative exploration, risk mitigation clarity, testable acceptance criteria, and concrete verification steps.
+    For decision-plan reviews, apply gate checks: principle-option consistency, fairness of alternative exploration, risk mitigation clarity, testable acceptance criteria, concrete verification steps, and provider-fit (build-vs-adopt aligned to the workload's real access-pattern↔provider-class, weighed both ways — hand-building-what-a-class-owns AND adopting-what-should-stay-owned).
     If the plan claims deliberate/high-rigor analysis, verify pre-mortem (3+ scenarios) quality and expanded test plan coverage (unit/integration/e2e/observability).
 
     Phase 3 — Multi-perspective review:

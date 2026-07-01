@@ -51,8 +51,14 @@ level: 3
     - Track progress: "X/Y errors fixed" after each fix.
   </Constraints>
 
+  <See_Also>
+    - For the DIAGNOSIS LOOP itself (red-capable signal, ranked falsifiable hypotheses, minimise, instrument), the `diagnosing-bugs` skill is the canonical procedure — follow it if installed.
+    - When the task is a COMPLETE RCA (an incident / regression / outage owing not just a minimal fix but a *root cause + the right remediation + a prevention that holds*), the `root-cause-analysis` skill orchestrates the full flow (it calls the diagnosis loop, then decides build-vs-adopt, places the fix, and writes the finding back to the known-error ledger). Escalate to it rather than stopping at a minimal patch.
+  </See_Also>
+
   <Investigation_Protocol>
     ### Runtime Bug Investigation
+    0) READ THE TERMINAL SIGNAL FIRST — the run's terminal status / authoritative log, not the dispatch response (async invokes hide crashes behind a success code). A run that never acquired its resource ran no code, so a code-path hypothesis is dead on arrival. Pin onset-vs-change: a change deployed AFTER the symptom's onset is mechanically exonerated. If the project keeps a known-error ledger, query it for a matching fingerprint first — a prior RCA may already own this exact failure (or show it is a regression with a known prior fix).
     1) REPRODUCE: Can you trigger it reliably? What is the minimal reproduction? Consistent or intermittent?
     2) GATHER EVIDENCE (parallel): Read full error messages and stack traces. Check recent changes with git log/blame. Find working examples of similar code. Read the actual code at error locations.
     3) HYPOTHESIZE: Compare broken vs working code. Trace data flow from input to error. Document hypothesis BEFORE investigating further. Identify what test would prove/disprove it.

@@ -65,6 +65,68 @@ The entries below are portable starting wisdom, not project-specific.
   quietly off) is indistinguishable from a transient blip. Loud-fail or carry a health
   assertion — otherwise the "fix" ships a silently-disabled feature.
 
+### Key the known-error ledger on a stable, PHI-free fingerprint
+- Key on a normalized `action` + opaque-`ref` tuple, **never** a message/stack fingerprint.
+  The latter fails twice: it leaks PII/PHI into the grouping key, and it re-buckets on any
+  refactor that renames frames — so the "same" issue splits and regression detection misses
+  the recurrence. The fingerprint is doubly load-bearing: it keys both the ledger *and*
+  regression detection.
+
+### Provenance is trustworthy only if server-stamped; high-cardinality ids go on logs/traces
+- A provenance id consumed for RCA (correlation / session / release-SHA / PR / actor) is
+  trustworthy only if **server-stamped or deploy-time-derived** — a caller-asserted id is a
+  log-injection vector. And high-cardinality ids belong on **log fields / trace annotations,
+  never metric dimensions** (each unique label spawns a separately-billed time series).
+
+### Phase 5 is symmetric — three BUILD tripwires override the strongest ADOPT signal
+- The strongest ADOPT signal (a provider elastically owns a bounded resource your subsystem
+  only exists to arbitrate) is overridden when adopting would (a) flatten a data/compliance
+  boundary, (b) duplicate a live owned subsystem (relocating the problem, not deleting it),
+  or (c) route regulated data upstream of your only redaction boundary / force a BAA pricing
+  floor. A gate that only ever says "buy" is miscalibrated.
+
+## Industry grounding / References
+
+Standards the phases implement (URLs live here, not in the terse SKILL.md — Keel house style
+for process skills). Liveness-verified 2026-07-01.
+
+- **Blameless postmortem** — assume everyone acted reasonably on the information they had;
+  focus on *how*, not *who*. — https://sre.google/sre-book/postmortem-culture/ ·
+  https://postmortems.pagerduty.com/culture/blameless/
+- **Amazon Correction-of-Error (COE)** — quantified impact, timeline from the first trigger,
+  blame-free 5-Whys, action items (owner + priority + due) as the main output. —
+  https://aws.amazon.com/blogs/mt/why-you-should-develop-a-correction-of-error-coe/
+- **5-Whys is linear/single-cause** (isolates one cause, stops at the first symptom, drifts
+  to *who*) → prefer a causal **graph**. — https://www.infoq.com/news/2015/02/five-why/
+- **CAST / STAMP (Leveson)** — most accidents have many interacting causes; strengthen the
+  whole control structure, don't point-fix. —
+  https://github.com/joelparkerhenderson/causal-analysis-based-on-system-theory/blob/main/README.md
+- **Kepner-Tregoe IS / IS-NOT** — a valid cause explains every IS *and* every IS-NOT. —
+  https://kepner-tregoe.com/blogs/universal-principals-and-kt-problem-analysis/
+- **ICS incident command** (post-hoc RCA is a separate activity from live command; the IC
+  does not touch the system). — https://sre.google/workbook/incident-response/
+- **ITIL known error / KEDB** — "a problem analysed but not resolved"; a queryable store with
+  a mutable lifecycle (transition, never delete). — https://en.wikipedia.org/wiki/Known_error ·
+  https://wiki.en.it-processmaps.com/index.php/Problem_Management
+- **Agent RCA via distributed tracing** — an agent run is a span tree (invoke-agent → chat →
+  execute-tool); content capture is opt-in because it can carry sensitive data. —
+  https://opentelemetry.io/blog/2026/genai-observability/
+- **High-cardinality ids on traces/logs, not metric labels.** —
+  https://signoz.io/blog/high-cardinality-data/
+- **Redaction at the sink** (Temporal Payload Codec / OTel Collector / Sentry beforeSend —
+  scrub before the trail leaves the boundary). —
+  https://opentelemetry.io/docs/security/handling-sensitive-data/ ·
+  https://docs.temporal.io/payload-codec
+- **ADOPT — undifferentiated heavy lifting** (Vogels): own the differentiating core, buy the
+  commodity. — https://www.allthingsdistributed.com/2014/11/aws-lambda.html
+- **ADOPT exemplars** — fault attribution by a caller-supplied failure *type*
+  (https://docs.temporal.io/references/failures); tenant-vs-platform split by error code
+  (https://developers.cloudflare.com/workers/observability/errors/); microVM-per-session as
+  the managed on-demand-compute class (https://aws.amazon.com/lambda/lambda-microvms/ ·
+  https://github.com/firecracker-microvm/firecracker).
+- **BUILD tripwire — compliance/BAA floor** for routing regulated data to a third-party
+  sink. — https://docs.datadoghq.com/data_security/hipaa_compliance/
+
 ## Open Questions
 
 - (none yet — append as runs surface them)

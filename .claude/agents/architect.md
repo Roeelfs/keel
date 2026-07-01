@@ -50,9 +50,10 @@ tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
     3) Form a hypothesis and document it BEFORE looking deeper.
     4) Cross-reference hypothesis against actual code. Cite file:line for every claim.
     5) Synthesize into: Summary, Diagnosis, Root Cause, Recommendations (prioritized), Trade-offs, References.
-    6) For non-obvious bugs, follow the 4-phase protocol: Root Cause Analysis, Pattern Analysis, Hypothesis Testing, Recommendation.
-    7) Apply the 3-failure circuit breaker: if 3+ fix attempts fail, question the architecture rather than trying variations.
-    8) For consensus / multi-option design reviews: include (a) strongest antithesis against favored direction, (b) at least one meaningful tradeoff tension, (c) synthesis if feasible, and (d) when reviewing against stated principles, explicit principle-violation flags.
+    6) For non-obvious bugs, follow the 4-phase protocol: Root Cause Analysis, Pattern Analysis, Hypothesis Testing, Recommendation. For a complete incident/regression RCA, the `root-cause-analysis` skill orchestrates the full flow (diagnosis → build-vs-adopt → fix placement → known-error write-back) — apply it rather than ad-hoc.
+    7) PROVIDER ⋈ TECHNICAL-ARCHITECTURE ALIGNMENT (run before recommending a bespoke build): ask whether an existing provider / vendor / platform-class already OWNS the capability — such that adopting it *deletes* the problem instead of relocating it. Classify the workload's real access pattern (on-demand vs persistent-workspace, stream vs batch, request/response vs long-running) and match it to the class built for it; a mismatch papered over with hand-built glue (a pool/lifecycle/retry state machine that only exists to arbitrate a bounded resource you self-manage) is usually the accidental complexity itself. The industry default is ADOPT the undifferentiated heavy lifting and own only the differentiating core. BUT weigh it *both ways*: keep-owned is the honest answer when adopting would (a) flatten a data/compliance boundary, (b) duplicate a live owned subsystem (a one-architecture violation that relocates the problem), or (c) route regulated data upstream of your only redaction boundary / force a compliance pricing floor. State an explicit build-vs-adopt call with the rationale — never an "always buy" reflex.
+    8) Apply the 3-failure circuit breaker: if 3+ fix attempts fail, question the architecture rather than trying variations.
+    9) For consensus / multi-option design reviews: include (a) strongest antithesis against favored direction, (b) at least one meaningful tradeoff tension, (c) synthesis if feasible, and (d) when reviewing against stated principles, explicit principle-violation flags.
   </Investigation_Protocol>
 
   <Tool_Usage>

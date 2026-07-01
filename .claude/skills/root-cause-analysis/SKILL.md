@@ -33,7 +33,11 @@ Ground the symptom in the **authoritative signal** — the logs, the run's termi
 
 **Read the run's TERMINAL status first.** A run that ended in "resource/capacity/quota not acquired" means no work code ever ran — so a code-path wedge is *not* the cause, and theorizing about one wastes the RCA. A stuck or slow run is not evidence of a code wedge until you have read its terminal outcome. First read the outcome; then theorize.
 
-Establish and write down: the **exact symptom**, the **first-seen timestamp** (onset), the **blast radius**, and **which authoritative surface** you are reading (name it — reading the wrong log group manufactures a confident-but-wrong RCA).
+Establish and write down: the **exact symptom**, the **first-seen timestamp** (onset), the **blast radius**, and **which authoritative surface** you are reading (name it — reading the wrong log group manufactures a confident-but-wrong RCA). Frame blast radius as **Kepner-Tregoe IS / IS-NOT** — what *is* affected vs. what is *not*: a valid cause must explain **every IS and every IS-NOT**, and the IS-NOT column is the refutation data a single-cause chain never collects.
+
+**The authoritative signal includes the distributed trace.** Reconstruct the execution path from the span tree (invoke-agent → chat per model call → execute-tool per tool call), including **cross-agent** traces — one agent's failure is often another's ambiguous output several steps upstream. Provenance ids you consume (correlation / session / release-SHA / PR / actor) are trustworthy only if **server-stamped or deploy-time-derived** — a caller-asserted id is untrusted (log-injection class). And never read or forward an **un-scrubbed** trail: an error/trace sink captures *upstream* of business-data redaction, so it must be scrubbed at the write boundary before any agent consumes it.
+
+**Check the known-error ledger first.** Before theorizing, query the ledger (see Phase 8) for a matching **fingerprint** — a prior RCA may already own this exact failure, or show it was resolved-then-reopened (a **regression**, not a fresh bug, with a known prior root cause and fix to start from).
 
 ## Phase 2 — Pin onset vs. change timeline
 
@@ -42,7 +46,9 @@ Build the timeline before naming a culprit.
 - When did the symptom **start** (onset)?
 - What **changed** near it — deploys, config/flag flips, data migrations, dependency bumps, an upstream provider incident?
 
-**A change that shipped *after* onset is mechanically exonerated** — do not blame it, however suspicious it looks. A change that shipped just *before* onset is the prime suspect but still owes the Phase 3 loop. Any claim about *what changed* — including a sub-agent's or reviewer's — is **UNVERIFIED** until grounded in the diff, the deploy log, or a direct query.
+**A change that shipped *after* onset is mechanically exonerated** — do not blame it, however suspicious it looks. A change that shipped just *before* onset is the prime suspect but still owes the Phase 3 loop. Any claim about *what changed* — including a sub-agent's or reviewer's — is **UNVERIFIED** until grounded in the diff, the deploy log, or a direct query. Reconstruct the timeline as an **Amazon Correction-of-Error (COE)** chronology — from the *first trigger*, not from when you noticed.
+
+**Blameless, as an agent rule (Google SRE / PagerDuty).** Judge the systems and the change, never the author — the agent-equivalent of blaming a person is premature culprit-fixation on a suspicious diff. Ask *what could have led any reasonable change to produce this?* Suspicion is not causation.
 
 ## Phase 3 — Diagnose to the cause (invoke `diagnosing-bugs`)
 
@@ -64,6 +70,8 @@ With the cause in hand, classify it — the class dictates the prevention:
 
 Name the class explicitly. **Local green is necessary but not sufficient**: the suite mocks exactly the boundary where the config/data/contract classes live, so it can go green *because* the bug hits a tested-correct fail-open branch. The class you name is what Phase 8's prevention must target.
 
+A linear **5-Whys** chain is insufficient here — it isolates a single cause, stops at the first symptom, and drifts toward *who*. Think in a **causal graph** of interacting contributing factors (CAST / STAMP, Why-Because Analysis): most failures have several, and the fix strengthens the *class*, not the one point that broke.
+
 ## Phase 5 — Provider ⋈ Technical-Architecture Alignment (the remediation gate)
 
 **The paradigm.** Before designing a bespoke architecture to fix the root cause, ask: **does an existing provider / vendor / platform-class already own this capability — such that adopting it *deletes* the problem instead of relocating it?** Do not invent a new architecture when a capability class already solves it. The `><` is the *join* between what a provider gives you and the technical architecture you'd otherwise hand-build — align to the provider's capability rather than compensating for its absence in glue code.
@@ -78,7 +86,16 @@ Often the bug you are RCA-ing is a *symptom of a mismatch*: a workload forced on
 - **Cost is measured, not assumed.** A substrate swap's cost case is **proven on a real shadow bake**, never booked in advance. Name the one genuine trap of the new class (e.g. snapshotting large state per run can cost more than the compute of a short run) and design around it (resume-from-image per run, not tight suspend/resume loops).
 - **Gate, don't cut over.** Land the alignment as a **gated spike** with a measurement plan and a **concrete thin seam** (a provider-adapter interface with the right verbs), not an immediate migration. Keep the substrate-independent core — idempotency/dedup, terminal observability, the router — and delete only what existed to compensate for the mismatch.
 
-**Output of this phase:** an explicit **build-vs-adopt decision** with its rationale. If *adopt*: the capability class and the thin seam that survives. If *build*: a one-line statement of why no provider class fits — so the next RCA doesn't re-open it.
+The ADOPT rail is the industry default — the *undifferentiated heavy lifting* (provisioning, scaling, lifecycle, monitoring) belongs to a managed class; only the *differentiating* core stays owned. But **BUILD / keep-owned has equal billing — the paradigm is not "always adopt".** Adopting is the *wrong* answer, and keeping it owned is the honest one, when adoption would:
+
+- **flatten a data / compliance boundary** one external sink cannot honor (two planes forced into one);
+- **duplicate a live owned subsystem** that already does most of it — a delete-legacy / one-architecture violation that *relocates* the problem instead of deleting it;
+- **route regulated / customer data upstream of your only redaction boundary**, or force a compliance / BAA pricing floor the vendor must clear or be disqualified;
+- **buy nothing over what you must build anyway** (e.g. a release identifier you have to stamp regardless).
+
+When the verdict is BUILD, **scope any vendor to exactly the surface your own stack physically cannot reach** and no further — the disciplined way to consume a vendor is by the physical line, not politics.
+
+**Output of this phase:** an explicit **build-vs-adopt decision** with its rationale. If *adopt*: the capability class and the thin seam that survives. If *build / keep-owned*: a one-line statement of why no provider class fits (or which tripwire disqualified it) — so the next RCA doesn't re-open it.
 
 ## Phase 6 — Place the fix to deepen the codebase (apply `improve-codebase-architecture`)
 
@@ -92,6 +109,7 @@ Before trusting the remediation — **especially any guardrail** meant to preven
 - Does it assert the value is **present somewhere**, rather than **correct on the real surface**?
 - Does a test **exist** but not **exercise the failing path**? (a dry-run/safe-mode green that skipped the mutating phase; a test that sits in no CI merge-gate glob; a job that reports green while never running)
 - Is the guardrail **scoped to a broader class** than it actually covers?
+- Is a **known-error record's fingerprint release-fragile** — keyed on stack frames or message text so a refactor re-buckets it and its stale/regressed status silently never fires? (The ledger key must be a normalized `action` + opaque-`ref`, never raw stack/message — see Phase 8.)
 
 Empirically, a majority of proposed guardrails fail at least one of these on first draft. **Do not ship a prevention that has not survived this refutation.**
 
@@ -105,8 +123,10 @@ Produce the complete RCA document:
 - **Failure class** — from Phase 4.
 - **Remediation** — the build-vs-adopt decision and the Provider-alignment rationale from Phase 5.
 - **Fix placement** — how it deepens the codebase and which legacy path it deletes.
-- **Prevention — the standing invariant.** The lever is a **cheap invariant at the un-mockable layer**, *not* "understand the feature better". Add it in the **same change**: a synth/build-time infra assertion, a static lint that resolves the value to a *real / unique / known* target (presence alone is not enough), or an owner-identity behavioral test — chosen to convert **this exact failure class** from a deploy-only defect into a local-green failure. It must have survived Phase 7.
+- **Prevention — the standing invariant.** The lever is a **cheap invariant at the un-mockable layer**, *not* "understand the feature better". Add it in the **same change**: a synth/build-time infra assertion, a static lint that resolves the value to a *real / unique / known* target (presence alone is not enough), or an owner-identity behavioral test — chosen to convert **this exact failure class** from a deploy-only defect into a local-green failure. It must have survived Phase 7. Record it as a **COE-style action item** (named owner, priority, due date), not a vague intention.
 - **Fail-open note** — if any degraded branch silently returns a benign shape (empty result + 200, feature silently off), treat it as **permanent-disable until proven otherwise**: loud-fail or carry a health assertion.
+
+**Write it back to the known-error ledger (ITIL known error / KEDB).** A static RCA document is not queryable — the next agent can't inherit it. Emit the finding as a **KEDB-shaped record**: id / **fingerprint**, `root_cause`, `workaround`, `permanent_solution`, `status`, `owner`, related-incident refs — with a **mutable status lifecycle** (`open → resolved-in-change → superseded → stale/regressed`), updated when the permanent fix lands (transition, never delete). **Key it on a stable, PHI-free fingerprint: a normalized `action` + opaque-`ref` tuple — never raw stack frames or exception text.** A message/stack key fails twice: it leaks PII/PHI into the grouping key, *and* it is release-fragile (a refactor renames frames, the "same" issue splits into new buckets, and regression detection misses the recurrence). This closes the loop that makes the harness followable — Phase 1's check-first read is only as good as what prior RCAs wrote here.
 
 ### RCA discipline — the load-bearing rules (recap)
 
@@ -114,6 +134,10 @@ Produce the complete RCA document:
 2. Pin **onset vs. deploy timestamp** — a change deployed after onset is exonerated.
 3. A **red-capable loop before any fix** — no loop, no root cause.
 4. **Local green is structurally blind** to the config / data / contract / architecture classes — name the class, then prevent it at the un-mockable layer.
-5. Before inventing architecture, run the **Provider ⋈ Technical-Architecture Alignment** gate — adopt the capability class that owns the problem; don't hand-build what the platform layer solves.
+5. Before inventing architecture, run the **Provider ⋈ Technical-Architecture Alignment** gate — adopt the capability class that owns the problem *or* keep-owned when adopting would flatten a boundary / duplicate a live subsystem / breach a data-compliance line; don't hand-build what the platform layer solves, and don't buy what would relocate the problem.
 6. **Adversarially refute** every guardrail before trusting it.
 7. The prevention is a **cheap standing invariant added in the same change**, proven on real signal — not a promise to be more careful.
+8. **Consume and contribute to the known-error ledger** — check the fingerprint first (is this a regression with a known prior fix?), and write the finding back (KEDB-shaped, stable PHI-free fingerprint) so the next agent inherits it. A static RCA doc is not a ledger.
+9. **Blameless** — judge the change and the systems, never the author; scrub the trail at the write boundary before consuming it.
+
+> **See also — incident command (ICS).** This skill drives *post-hoc RCA*, a separate activity from *live* incident command (Google SRE / PagerDuty): during an incident the Incident Commander coordinates mitigation and does **not** touch the system, and the postmortem is written *after*. Don't fold firefighting into the RCA — mitigate first (elsewhere), root-cause here.

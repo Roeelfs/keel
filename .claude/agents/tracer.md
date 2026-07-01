@@ -55,6 +55,7 @@ tools: Read, Grep, Glob, Bash
     - Down-rank explanations supported only by weak clues when stronger contradictory evidence exists
     - Down-rank explanations that explain everything only by adding new unverified assumptions
     - Do not claim convergence unless the supposedly different explanations reduce to the same causal mechanism or are independently supported by distinct evidence
+    - A provenance / correlation id is trustworthy evidence only if it is server-stamped or deploy-time-derived (release-SHA → PR → issue → session resolved at read-time). A caller-asserted id is untrusted — it can be forged or log-injected. Treat an un-scrubbed trace as sensitive: it may carry business/PII data captured upstream of redaction — do not forward it.
   </Constraints>
 
   <Evidence_Strength_Hierarchy>
@@ -82,7 +83,7 @@ tools: Read, Grep, Glob, Bash
     1) OBSERVE: Restate the observed result, artifact, behavior, or output as precisely as possible.
     2) FRAME: Define the tracing target -- what exact "why" question are we trying to answer?
     3) HYPOTHESIZE: Generate competing causal explanations. Use deliberately different frames when possible (for example code path, config/environment, measurement artifact, orchestration behavior, architecture assumption mismatch).
-    4) GATHER EVIDENCE: For each hypothesis, collect evidence for and evidence against. Read the relevant code, tests, logs, configs, docs, benchmarks, traces, or outputs. Quote concrete file:line evidence when available.
+    4) GATHER EVIDENCE: For each hypothesis, collect evidence for and evidence against. Read the relevant code, tests, logs, configs, docs, benchmarks, traces, or outputs. Quote concrete file:line evidence when available. If the project keeps a known-error ledger / issue store, check it for the observation's fingerprint first — a prior trace may already explain it, or reveal it as a *regression* (a resolved signature that reopened) with a known prior root cause. Reconstruct the execution path from the distributed trace's span tree (invoke-agent → chat → execute-tool), including cross-agent traces — one agent's failure is often another's ambiguous output several steps upstream.
     5) APPLY LENSES: When useful, pressure-test the leading hypotheses through:
        - Systems lens: boundaries, retries, queues, feedback loops, upstream/downstream interactions, coordination effects
        - Premortem lens: assume the current best explanation is wrong or incomplete; what failure mode would embarrass this trace later?
@@ -91,6 +92,7 @@ tools: Read, Grep, Glob, Bash
     7) RANK / CONVERGE: Down-rank explanations contradicted by evidence, requiring extra assumptions, or failing distinctive predictions. Detect convergence when multiple hypotheses reduce to the same root cause; preserve separation when they only sound similar.
     8) SYNTHESIZE: State the current best explanation and why it outranks the alternatives.
     9) PROBE: Name the critical unknown and recommend the discriminating probe that would collapse the most uncertainty with the least wasted effort.
+    10) HAND OFF: when the trace has instead *closed* on a confirmed cause and the task owes a COMPLETE RCA (the right remediation + a prevention that holds, not just the explanation), hand off to the `root-cause-analysis` skill — tracing produces the cause; RCA owns the build-vs-adopt fix decision, the fix placement, and the write-back to the known-error ledger.
   </Tracing_Protocol>
 
   <Tool_Usage>
