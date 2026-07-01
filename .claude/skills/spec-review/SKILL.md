@@ -110,7 +110,7 @@ Read the spec with fresh eyes. Then dispatch ALL 9 primary reviewers simultaneou
 **Agent 3 — Architecture & Simplicity** (`prompts/architecture-auditor.md`):
 - **Type:** `general-purpose` | **Model:** `opus`
 - **Input:** spec path, project root
-- **Job:** Architectural fit, abstraction level, peer consistency, simplicity, workaround detection, maintenance burden, **platform invariants compliance** (if the project has a `docs/PLATFORM-INVARIANTS.md` file, spec claims are cross-checked against every invariant — violations are CRITICAL/MAJOR by default).
+- **Job:** Architectural fit, abstraction level, peer consistency, simplicity, workaround detection, maintenance burden, **platform invariants compliance** (if the project has a `docs/PLATFORM-INVARIANTS.md` file, spec claims are cross-checked against every invariant — violations are CRITICAL/MAJOR by default), and **deep-module fit** — it loads the `improve-codebase-architecture` + `codebase-design` principles *by reference* (so future updates to them propagate) and audits the spec's proposed design against the deletion test, shallow-vs-deep modules, and testability-through-the-interface, naming the deeper shape where the spec bolts on a shallow layer.
 
 **Agent 4 — Edge-Case Miner** (`prompts/edge-case-miner.md`):
 - **Type:** `general-purpose` | **Model:** `opus`
@@ -556,7 +556,7 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 | 0 | Design Decisions Extractor | `prompts/design-decisions-extractor.md` | general-purpose | haiku | JSONL → dossier |
 | 1 | Completeness Reviewer | `prompts/completeness-reviewer.md` | general-purpose | opus | Dossier × spec cross-check |
 | 2 | Codebase Verifier | `prompts/codebase-verifier.md` | Explore | sonnet | File refs, duplicates, stale code |
-| 3 | Architecture Auditor | `prompts/architecture-auditor.md` | general-purpose | opus | Fit, simplicity, maintenance |
+| 3 | Architecture Auditor | `prompts/architecture-auditor.md` | general-purpose | opus | Fit, simplicity, maintenance, **deep-module fit** (applies `improve-codebase-architecture` + `codebase-design` principles by reference: deletion test, shallow-vs-deep, testability-through-the-interface) |
 | 4 | **Edge-Case Miner** | `prompts/edge-case-miner.md` | general-purpose | opus | **Semantic boundary enumeration: cardinality / lifecycle / tenancy / encoding / time / concurrency / permission / resource / schema-evolution / forbidden-but-valid** |
 | 5 | **Security Miner** | `prompts/security-miner.md` | general-purpose | opus | **Project-policy security mining: reads `docs/security-policy.md` + `CLAUDE.md`/`AGENTS.md` and audits against your project's stated rules + portable categories (authN/authZ, secret storage, tenant isolation, injection, data boundaries, privilege escalation, allowlist gaps, output sanitization)** |
 | 6 | **Spec Drift Scout** | `prompts/spec-drift-scout.md` | general-purpose | sonnet | **Cross-worktree/project-scope drift: recent pushed refs, dirty worktrees, sibling specs, architecture changes, feature overlap, missing spec updates** |

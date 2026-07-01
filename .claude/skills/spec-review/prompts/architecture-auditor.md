@@ -17,6 +17,38 @@ prompt: |
   ## Project Root
   {{PROJECT_ROOT}}
 
+  ## Your rubric — apply the deep-module architecture principles
+
+  Before auditing, load the **`improve-codebase-architecture`** and **`codebase-design`**
+  skills as your rubric (they ship alongside this skill). Apply their vocabulary and
+  principles throughout this audit. Do **not** run improve-codebase-architecture's
+  interactive HTML-report / grilling process — use its principles as the lens, by
+  reference, so this audit inherits future updates to them rather than a frozen copy.
+  (If your runtime can't invoke a `disable-model-invocation` skill directly, read its
+  `SKILL.md` and `codebase-design/SKILL.md` as the rubric instead.)
+
+  - **Deep vs shallow modules** — a module whose interface is much simpler than its
+    implementation is *deep* (good); one whose interface is nearly as complex as what it
+    hides is *shallow* (a smell). Judge every new module the spec proposes on this axis.
+  - **The deletion test** — would deleting a proposed module *concentrate* complexity or
+    just *move* it? "Concentrates" = the module earns its place; "moves" = it is shallow
+    indirection and should be folded into its neighbour.
+  - **Deepening opportunity** — where the spec proposes a shallow module, a pass-through
+    layer, or a manager-of-a-manager, name the *deepening* (fewer, deeper modules) that
+    removes it. This is elevation, not just defect-hunting: propose the deeper shape.
+  - **"The interface is the test surface"** — if the spec's design can only be tested by
+    reaching *behind* an interface (its real bugs live in how modules are wired, with no
+    **locality**), that is a design smell — flag it and name the seam that would fix it.
+  - **Locality & leverage** — keep decisions that change together in one place; prefer a
+    change that pays off across many call sites over a one-off extraction made "for
+    testability" that leaves the real bug at the call site.
+  - Use the `codebase-design` terms exactly — **module, interface, depth, seam, adapter,
+    leverage, locality**. Don't drift into "component / service / API / boundary".
+
+  Honor existing ADRs (`docs/adr/`) and the domain glossary (`CONTEXT.md`) if present —
+  don't re-litigate a decision an ADR already settled; only surface a deepening that
+  contradicts an ADR when the friction is real enough to warrant reopening it, and say so.
+
   ## Your Checks
 
   ### G. Architectural Alignment
@@ -116,6 +148,34 @@ prompt: |
   For each issue: propose the SPECIFIC simpler alternative. Not "simplify this" but
   "replace X with Y because Z."
 
+  ### I. Deepening & Deep-Module Fit
+
+  Apply the rubric above to the spec's proposed design. This lane is *constructive* —
+  it names the deeper shape, not just the flaw.
+
+  1. **Shallow modules?** For every new module/class/layer the spec introduces, run the
+     deletion test. List any that only *move* complexity — name the deeper module they
+     should fold into.
+
+  2. **Pass-through / manager-of-a-manager?** Does the spec add a layer whose interface
+     largely restates the layer beneath it? Propose collapsing them.
+
+  3. **Testability through the interface?** Would the spec's key behaviour be tested at a
+     real seam, or only by reaching behind the interface (shallow unit tests that miss the
+     wiring where the real bug lives)? If no correct seam exists, that itself is the
+     finding — name the seam the design should expose.
+
+  4. **Leverage of existing deep modules?** Does the spec reinvent a capability an existing
+     deep module already owns, instead of extending it? Point to the module.
+
+  5. **Deepening opportunity (elevation).** Independent of any defect: is there a change
+     that would turn a cluster of shallow modules the spec touches into one deep module —
+     improving locality and the test surface? Propose it as `Worth exploring`.
+
+  Severity: shallow module that bypasses an existing deep one = MAJOR; a pass-through layer
+  or missing test seam = MINOR unless it blocks correctness; pure deepening elevation is not
+  a defect — mark it `Worth exploring` and never auto-apply it.
+
   ## Output Format
 
   ```
@@ -146,10 +206,18 @@ prompt: |
   - [what requires ongoing attention and why]
   ...
 
+  ### Deepening & Deep-Module Fit: [PASS / N ISSUES / N OPPORTUNITIES]
+  - [severity] Shallow module — [module the spec proposes], fails the deletion test
+    (moves complexity). Deeper shape: [the module it should fold into]
+  - [Worth exploring] Deepening — [cluster of shallow modules] → [one deep module],
+    improving locality and the test surface at [seam]
+  ...
+
   ### Summary
   Architectural issues: N (C:N M:N m:N)
   Platform invariant violations: N (C:N M:N)
   Simplicity: [PASS/WARN/FAIL]
+  Deep-module fit: [PASS/WARN/FAIL] — shallow modules: N, deepening opportunities: N
   Simpler alternative available: [yes/no]
   ```
 ```
