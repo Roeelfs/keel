@@ -13,7 +13,7 @@ Standalone skill for browsing and maintaining the project's flow registry at `te
 
 **Before starting:** Read `LEARNINGS.md` in this skill directory. Apply entries under **What Worked** and **Patterns**; use **Open Questions** to spot decisions that still need care. Also read the private overlay if present: `~/.claude/skills-overlay/flows/LEARNINGS.md` (adopter-private; never in this public repo) — it carries accumulated, project-specific findings layered on top of the portable patterns here.
 
-**Before ending:** Append one dated bullet per non-trivial finding under the appropriate section. If an entry now recurs ≥3 times across runs, promote it into this SKILL.md and archive the raw entry.
+**Before ending — route each learning by scope; NEVER append to this repo's committed `LEARNINGS.md` (a read-only curated seed):** operator-private skill craft → `~/.claude/skills-overlay/flows/LEARNINGS.md` (create if absent); project-specific facts → the project's `.claude/memory/`; universal craft worth publishing → note it for `/improve-harness` to promote (de-identified) into the seed via PR. Full routing: [`docs/skill-memory.md`](../../../docs/skill-memory.md).
 
 ---
 

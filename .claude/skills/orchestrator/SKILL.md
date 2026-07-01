@@ -432,17 +432,16 @@ Project memories live at `~/.claude/projects/<slug>/memory/MEMORY.md`. The orche
 - `reference_soak_tracking_via_github_issues` — soak issue conventions
 - plus any project-specific references for your deploy/migration/auth patterns and the canonical repo location + frozen-branch facts
 
-When you encounter a NEW pattern that should persist across orchestrator sessions, save it to memory AND log it in this skill's `LEARNINGS.md`.
+When you encounter a NEW pattern that should persist across orchestrator sessions, **route it by scope** (below) — never append per-run to this repo's committed `LEARNINGS.md`.
 
-## LEARNINGS.md
+## Skill Memory (LEARNINGS)
 
-See `LEARNINGS.md` for cross-session patterns this skill has acquired. Update it when:
-- A bug in a tool (claude-sessions skill, codex CLI, etc.) is found and fixed
-- A new convention emerges (heredoc quoting, lifecycle in one session)
-- A failure mode is identified (e.g. false-positive test failure during a multi-PR push window)
-- An orchestration anti-pattern is observed (over-parallelizing, lane collisions)
+**Read at start:** this skill's committed `LEARNINGS.md` (curated seed of cross-session orchestration patterns) + the private overlay if present (`~/.claude/skills-overlay/orchestrator/LEARNINGS.md`).
 
-Treat LEARNINGS.md as persistent memory for the orchestrator role itself.
+**Write at end — route by scope, NEVER append to the committed seed here** (full routing: [`docs/skill-memory.md`](../../../docs/skill-memory.md)):
+- **Operator-private orchestration craft** (a tool bug like claude-sessions/codex CLI, a heredoc-quoting convention, a false-positive-test failure mode during a multi-PR push window, an over-parallelizing / lane-collision anti-pattern) → `~/.claude/skills-overlay/orchestrator/LEARNINGS.md` (create if absent).
+- **Project-specific facts** → the project's `.claude/memory/`.
+- **Universal craft worth publishing** → note it for `/improve-harness` to promote (de-identified) into the seed via PR.
 
 Also read the private overlay if present: `~/.claude/skills-overlay/orchestrator/LEARNINGS.md` (adopter-private; never in this public repo). It holds the dated, incident-specific cross-session lessons the maintainer has accumulated; the generic skill works standalone without it, and picks it up automatically when present.
 

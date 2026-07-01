@@ -9,6 +9,12 @@ Produces a test plan whose center of gravity is **proving the feature works in r
 
 **Trigger:** "generate test plan", "test plan for this spec", "testing plan".
 
+## Skill Memory (LEARNINGS)
+
+**Before starting:** Read `LEARNINGS.md` in this skill directory (curated seed) + the private overlay if present (`~/.claude/skills-overlay/spec-test-plan/LEARNINGS.md`).
+
+**Before ending — route each learning by scope; NEVER append to this repo's committed `LEARNINGS.md`** (full routing: [`docs/skill-memory.md`](../../../docs/skill-memory.md)): operator-private skill craft → the overlay (create if absent); project-specific facts → the project's `.claude/memory/`; universal craft → note it for `/improve-harness` to promote (de-identified) into the seed via PR.
+
 ## Principles (read first)
 
 1. **E2E on real staging is the spine, not the tip.** The plan leads with: deploy to staging → run the real feature/automation as a customer would → read the actual logs → confirm the actual customer-facing output. Unit and integration tests are supporting cast — include them only where they're cheap and catch a regression a human would otherwise miss.
