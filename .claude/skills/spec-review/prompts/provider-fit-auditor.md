@@ -11,7 +11,9 @@ This is a **distinct lane from the Architecture Auditor.** Architecture audits d
 fit and simplicity *within* the chosen build; Provider-Fit audits the prior question —
 *whether to build at all, or align to a provider-class* — so a mismatch never ships as a
 hand-built compensating subsystem (the accidental complexity that becomes tomorrow's
-incident).
+incident). It audits **both** what the spec builds anew **and** the pre-existing
+architecture the spec extends (PF-7's inherited-premise audit) — a gate that only fires on
+new capability structurally never re-questions the subsystem the spec keeps deepening.
 
 **Agent type:** `general-purpose` (Opus)
 **Model:** `opus`
@@ -58,12 +60,15 @@ prompt: |
   becomes the bug — name it and name the provider class built for the actual pattern.
   - Severity: a real pattern↔class mismatch the spec papers over with glue = MAJOR.
 
-  ### PF-3. "Nobody hand-builds this" heuristic
+  ### PF-3. "Nobody hand-builds this" heuristic — run it as a field survey per use-case
   Does the spec reimplement in-app a capability the industry solves at the platform layer
   (warm-pool/lifecycle management, retries/queues, distributed locks, secret rotation,
   observability/issue-tracking, auth)? If no serious shop reimplements it, that is strong
-  evidence to adopt. State whether the spec's build is genuinely differentiated or
-  undifferentiated heavy lifting.
+  evidence to adopt. Ground it concretely: **name 3+ real providers/platforms in the same
+  class and how each serves this exact workload** (in their docs' own vocabulary) — if all
+  of them serve it with provider-owned lifecycle and the spec hand-rolls a different
+  paradigm, the hand-build is the anomaly that owes the justification. State whether the
+  spec's build is genuinely differentiated or undifferentiated heavy lifting.
   - Severity: reinventing an undifferentiated platform-layer capability = MAJOR.
 
   ### PF-4. Build-vs-buy gradient (ownership + data posture)
@@ -106,6 +111,32 @@ prompt: |
   - name the one genuine trap of the new class and design around it?
   - Severity: a substrate swap with no measured cost gate or no adapter seam = MAJOR.
 
+  ### PF-7. Inherited-premise audit (the inverse question — fires on PRE-EXISTING architecture)
+  This lane must fire on architecture that predates the spec, not only on what the spec
+  adds. When the spec extends, hardens, or fixes an EXISTING subsystem wrapped around a
+  vendor/provider, ask the inverse of PF-1: **does that subsystem exist only to accommodate
+  a provider mismatch** — an invented paradigm compensating for a vendor gap, on premises
+  nobody measured? A real vendor gap does not settle it: the failure mode is accommodating
+  a real gap with an invented paradigm instead of re-selecting the primitive/vendor — and
+  never measuring the premise. Check these tripwires (any one = audit the subsystem's
+  premise before endorsing the spec's extension of it):
+  - **Fix-cluster history** — VCS/issue history shows ≥3 prior fixes in this subsystem, all
+    symptom-scoped, none re-questioning its premise (each fix landed *inside* the premise);
+  - **Management-to-workload ratio** — the subsystem's lifecycle/orchestration code dwarfs
+    the workload it dispatches;
+  - **Invented vocabulary** — the subsystem's nouns (pool, floor, convergence, admission,
+    wake) appear nowhere in the vendor's docs: a shadow platform for the vendor's missing
+    paradigm;
+  - **Unmeasured premise numbers** — the latency/cost figures that justified the subsystem
+    trace to a timeout constant / hard cap / model, not to a **measurement or an invoice** —
+    or no metric even splits the provider's layer from the stack's own (the premise is
+    unfalsifiable by construction);
+  - **Defined-but-never-wired vendor primitives** — the vendor's canonical primitive for
+    this exact use-case is declared in the codebase with zero call sites.
+  - Severity: the spec deepens a subsystem whose founding premise fails the provenance
+    audit = MAJOR; CRITICAL if that subsystem is the spec's core surface and a
+    provider-class primitive for the workload sits unwired/unevaluated.
+
   ## Output Format
 
   ```
@@ -117,7 +148,7 @@ prompt: |
 
   ### Findings
   - [severity] PF-N [ownership-inversion / pattern-mismatch / hand-builds-undifferentiated /
-    wrong-rung / wrongful-adopt / no-cost-gate] — spec section [N]
+    wrong-rung / wrongful-adopt / no-cost-gate / inherited-premise] — spec section [N]
     What the spec proposes: [build X / adopt Y]
     The mismatch / risk: [the access-pattern↔class mismatch, flattened boundary, duplicated
     subsystem, or PHI hazard]
@@ -133,6 +164,8 @@ prompt: |
   Provider-fit findings: N (C:N M:N m:N)
   Access-pattern mismatch: [yes/no]
   Wrongful-adopt detected: [yes/no]
+  Inherited-premise tripwires fired: [none / fix-cluster ≥3 / mgmt-to-workload ratio /
+  invented vocabulary / unmeasured premise / unwired vendor primitive]
   ```
 
   ## Rules

@@ -85,6 +85,26 @@ The entries below are portable starting wisdom, not project-specific.
   or (c) route regulated data upstream of your only redaction boundary / force a BAA pricing
   floor. A gate that only ever says "buy" is miscalibrated.
 
+### Symptom-scoped RCAs never fire on the subsystem's premise — count the fixes
+- Observed at scale in one adopter stack: **~35k LOC of pool/lifecycle orchestration** grown
+  to accommodate two *real* gaps of a persistent-workspace provider — and **66 lifecycle
+  fixes all landed inside the premise**; none asked "should the pool exist?". The premise was
+  finally attacked from *outside* (the vendor's own rebuttal), never by an RCA. Per-incident,
+  symptom-scoped analysis is structurally blind here: the machine's size reads as evidence of
+  its necessity. The tripwire is mechanical — **count prior fixes in the same subsystem at
+  Phase 1's ledger check; at ≥3, Phase 5 runs at the subsystem level before fix N lands.**
+
+### An unmeasured premise is unfalsifiable by construction
+- In the same case, the founding "~4 min create" was a **dispatcher timeout constant
+  remembered as a measurement** (measured provider create: sub-3 s — 1–3% of the pipeline;
+  the rest was self-imposed convergence), and the cost fear was **modeled, never invoiced**
+  (actual ≈ 1/10th the model). No metric split the provider's layer from the stack's own — so
+  no incident could ever contradict the premise. Companion smells found beside it: the
+  vendor's canonical primitive for the exact use-case **defined in-code with zero call
+  sites**, and a subsystem vocabulary (pool / floor / convergence / admission) absent from
+  the vendor's docs. Any number that justifies an architecture must trace to a **measurement
+  or an invoice**, and the provider-vs-own-layer split must be instrumented *first*.
+
 ### The known-error ledger splits — derive occurrence, git-native curation
 - A ledger has two halves with opposite homes, and a single new datastore is usually the
   wrong answer for both. **Occurrence** (signature × release × tenant × count) is runtime
