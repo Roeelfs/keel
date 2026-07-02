@@ -121,9 +121,10 @@ keel/
 │   │   ├── spec-test-execute/   # tier-by-tier execution + failure triage
 │   │   ├── claude-sessions/     # live-session survey + decision-mining (Python)
 │   │   └── harness-onboarding/  # survey a machine's state + integrate keel (symlinks, scope, links)
-│   ├── agents/                  # 11 generic sub-agents the skills dispatch
-│   │   #   architect · critic · debugger · executor · explore · git-master
-│   │   #   planner · security-reviewer · tracer · verifier · code-reviewer
+│   ├── agents/                  # generic sub-agents the skills dispatch
+│   │   #   architect · critic · debugger · executor · explore
+│   │   #   security-reviewer · tracer · code-reviewer · refactorer
+│   │   #   scientist · sql-specialist
 │   ├── hooks/                   # session lifecycle, id capture, worktree warn,
 │   │   #                          heavy-op serializer, crashed-session reaper
 │   └── settings.example.json    # model routing, permissions, hook wiring
