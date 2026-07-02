@@ -37,13 +37,15 @@ Most of keel is in service of three convictions.
 
 ### 1. One model reviewing its own work is a blind spot. Use a panel.
 
-The headline skill, [`spec-review`](.claude/skills/spec-review/), runs **nine
-independent reviewers in parallel** against a spec — six Claude agents
-(completeness, codebase grounding, architecture, an edge-case *boundary miner*, a
-security miner that audits against *your* policy, and a cross-worktree drift scout)
-plus three [Codex](https://openai.com/codex/) GPT-class reviewers (standard,
-adversarial, and a web-enabled industry-research auditor that cites real OSS and
-post-mortems). Each gets a tight prompt and one job.
+The headline skill, [`spec-review`](.claude/skills/spec-review/), runs **ten
+independent reviewers in parallel** against a spec — seven Claude agents
+(completeness, codebase grounding, architecture, a provider-fit auditor that runs
+the build-vs-adopt check both ways — including on the *inherited* architecture a
+spec extends, an edge-case *boundary miner*, a security miner that audits against
+*your* policy, and a cross-worktree drift scout) plus three
+[Codex](https://openai.com/codex/) GPT-class reviewers (standard, adversarial, and
+a web-enabled industry-research auditor that cites real OSS and post-mortems). Each
+gets a tight prompt and one job.
 
 The coordinator then does the part everyone skips: when Claude and Codex
 **disagree** on something that matters, it stages an actual cross-examination —
@@ -114,10 +116,11 @@ with, rather than republishing them.
 keel/
 ├── .claude/
 │   ├── skills/
-│   │   ├── spec-review/         # 9-reviewer multi-model spec verification
+│   │   ├── spec-review/         # 10-reviewer multi-model spec verification
 │   │   ├── spec-test-plan/      # E2E-first test planning from a spec
 │   │   ├── spec-test-execute/   # tier-by-tier execution + failure triage
-│   │   └── claude-sessions/     # live-session survey + decision-mining (Python)
+│   │   ├── claude-sessions/     # live-session survey + decision-mining (Python)
+│   │   └── harness-onboarding/  # survey a machine's state + integrate keel (symlinks, scope, links)
 │   ├── agents/                  # 11 generic sub-agents the skills dispatch
 │   │   #   architect · critic · debugger · executor · explore · git-master
 │   │   #   planner · security-reviewer · tracer · verifier · code-reviewer
