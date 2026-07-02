@@ -19,19 +19,26 @@ flow:
    check the spec against what you actually *decided*, not just what got written
    down. (Skippable if the spec arrived from elsewhere.)
 
-2. **Dispatch nine reviewers in parallel**, each with one job:
+2. **Dispatch ten reviewers in parallel**, each with one job:
 
    | Lane | Model | Job |
    |------|-------|-----|
    | Completeness | Claude (Opus) | Does the spec honor the mined decisions and corrections? |
    | Codebase verifier | Claude (Sonnet, Explore) | Do referenced files exist? Duplicates? Stale code? |
    | Architecture auditor | Claude (Opus) | Fit, simplicity, abstraction level, maintenance cost |
+   | Provider-fit auditor | Claude (Opus) | Build-vs-adopt, run both ways — does a provider class already own this capability, and does the *inherited* architecture the spec extends rest on a measured premise? |
    | Edge-case miner | Claude (Opus) | Semantic boundary enumeration — cardinality, lifecycle, tenancy, encoding, time, concurrency, permission, resource, schema-evolution, forbidden-but-valid |
    | Security miner | Claude (Opus) | Audits against **your** `docs/security-policy.md` + portable categories; cites the rule each finding violates |
    | Spec-drift scout | Claude (Sonnet) | Scans sibling worktrees/specs/recent pushes for parallel work that conflicts |
    | Codex standard | GPT-class (web) | Completeness/feasibility, API claims checked against primary sources |
    | Codex adversarial | GPT-class (web) | Attack surface, race conditions, rollback safety, cross-referenced to real CVEs/post-mortems |
    | Codex research auditor | GPT-class (web) | *Elevation, not defects* — OSS libraries and big-company patterns that already solve this, with URLs |
+
+   In parallel, the **`investigation` skill's dynamic Workflow grounds the
+   elevation lane**: it frames the spec's core themes against *this* codebase,
+   fans out across sources, adversarially cross-verifies, and returns
+   code-anchored industry-standard + best-in-class evidence — so "what the
+   industry does" comes from live primary sources, not the model's recollection.
 
 3. **Cross-examine genuine disagreements.** When Claude and Codex disagree on a
    MAJOR+ finding, the coordinator feeds each model the other's argument (up to two

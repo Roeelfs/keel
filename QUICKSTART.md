@@ -14,6 +14,14 @@ cd /path/to/your/project          # a git repo
 `tooling/` into your repo, and scaffolds the template files **only if they don't
 already exist**. It never overwrites your `CLAUDE.md`, `settings.json`, or docs.
 
+> **Working across several repos on one machine?** Skip the per-repo copy and run
+> the `harness-onboarding` skill instead (open a session in the keel clone and say
+> "onboard this machine"). It surveys your machine, proposes the integration plan,
+> and wires every consumer as a **symlink to the one canonical clone** — so a skill
+> edit propagates everywhere instantly and there is nothing to re-install. The
+> per-repo files below (rules, security policy, testing config, settings) still
+> live in each repo; only the skills/agents/hooks are shared.
+
 ## 2. Fill in the three files that make it yours
 
 The harness needs to know your project to be useful. Fill these (the scaffolded
@@ -64,10 +72,11 @@ then in Claude Code:
 
 > Run spec-review on docs/specs/0001-task-sharing.md
 
-The `spec-review` skill mines your session's decisions, dispatches the 9 reviewers
-in parallel, cross-examines any Claude↔Codex disagreements, and reports findings —
-applying only real design fixes to the spec prose. (No Codex CLI installed? It runs
-the Claude lanes and skips the Codex ones.)
+The `spec-review` skill mines your session's decisions, dispatches the 10 reviewers
+in parallel (plus the `investigation` Workflow grounding the elevation lane in real
+industry evidence), cross-examines any Claude↔Codex disagreements, and reports
+findings — applying only real design fixes to the spec prose. (No Codex CLI
+installed? It runs the Claude lanes and skips the Codex ones.)
 
 ### Plan and execute tests
 

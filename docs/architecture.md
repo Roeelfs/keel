@@ -9,13 +9,13 @@ coding CLI (primarily Claude Code) behaves. Four layers, each doing one thing:
 │               docs/testing-config.md                              │
 │               → the contract every agent reads; the law of the repo│
 ├──────────────────────────────────────────────────────────────────┤
-│  SKILLS       spec-review · spec-test-plan · spec-test-execute     │
-│               claude-sessions                                      │
+│  SKILLS       investigation · spec-review · spec-test-plan/execute │
+│               root-cause-analysis · improve-harness · … (36 total) │
 │               → multi-step procedures the agent invokes on demand  │
 ├──────────────────────────────────────────────────────────────────┤
-│  AGENTS       architect · critic · debugger · executor · explore   │
-│               git-master · planner · security-reviewer · tracer    │
-│               verifier · code-reviewer                             │
+│  AGENTS       architect · code-reviewer · critic · debugger        │
+│               executor · explore · refactorer · scientist          │
+│               security-reviewer · sql-specialist · tracer          │
 │               → focused sub-agents the skills dispatch in parallel │
 ├──────────────────────────────────────────────────────────────────┤
 │  SUBSTRATE    hooks (session lifecycle, id capture, heavy-op lock) │
@@ -33,7 +33,9 @@ Each layer answers a different failure mode of naive agent use:
   agent can't rationalize around them.
 - **Skills** answer *"complex work needs a repeatable procedure, not improvisation."*
   A skill is a checked-in playbook: the spec-review pipeline always mines decisions,
-  always dispatches the same nine lanes, always cross-examines disagreements.
+  always dispatches the same ten lanes, always cross-examines disagreements — and
+  the grounding skills (`investigation`, the RCA gate) always fan out for outside
+  evidence instead of trusting the model's baked-in knowledge.
 - **Agents** answer *"one context doing everything does each thing worse."* A
   dispatched sub-agent has a tight prompt, its own context window, and one job —
   and several run in parallel.
@@ -49,7 +51,7 @@ Each layer answers a different failure mode of naive agent use:
    dispatches the review **agents** in parallel.
 3. You invoke **`spec-test-plan`** then **`spec-test-execute`** (skills), which read
    `docs/testing-config.md` (**rules**) to run real tests and dispatch
-   **`debugger`/`verifier` agents** on failures.
+   **`debugger`/diagnostician agents** on failures.
 4. Throughout, the **substrate** keeps your session's file claims registered, shows
    the in-flight registry so parallel sessions don't duplicate work, and serializes
    heavy test/build commands.

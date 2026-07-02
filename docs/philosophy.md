@@ -5,13 +5,23 @@ worth running. These are the convictions baked into the
 [`CLAUDE.md` template](../templates/CLAUDE.md.template) and the agent definitions —
 the rules an agent should never have to be told twice.
 
+### Ground before acting
+
+A model's trained knowledge is plausible by construction and current by accident.
+Any claim that depends on the outside world — a third-party API's shape, an
+"industry standard," what real providers do — is grounded in a live source before
+it's acted on (the `investigation` skill exists solely for this); any claim about
+*your own* system is grounded in your own logs, database, and git history, never
+the web. Familiarity is not currency: the confidently-remembered API is exactly
+the one that changed.
+
 ### Verify before claiming done
 
 An agent will tell you it's finished because the code *looks* finished. "It should
 work" is not "it works." Every claim of done is backed by an actual command and its
 actual output — the build ran, the tests passed, the feature was exercised the way
-its user would. The `verifier` agent exists solely to enforce this: it trusts
-observed output, including over the claims of whoever asked it.
+its user would. The test-execution skills enforce this: they trust observed
+output, including over the claims of whoever asked.
 
 ### Leave exactly one architecture behind
 

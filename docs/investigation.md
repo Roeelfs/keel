@@ -133,8 +133,8 @@ layer:
   doesn't, so those discovered behaviors accumulate across cycles instead of being
   re-learned each session. For the *domain* side of durable knowledge — a
   ubiquitous-language glossary and architecture-decision records — pair it with
-  Matt Pocock's `domain-modeling` skill (credited below), which writes those
-  artifacts as you go.
+  the [`domain-modeling`](../.claude/skills/domain-modeling/) skill (vendored from
+  Matt Pocock's set, credited below), which writes those artifacts as you go.
 - **The `Session-Id` trailer convention** means months later you can answer "which
   session wrote this, and why" by reading the trailer back through `claude-sessions`
   — investigation of the codebase's *own* history.
@@ -150,23 +150,23 @@ See [parallel-agents.md](parallel-agents.md) for the coordination layer.
 
 ## Standing on the shoulders of
 
-keel ships the *agents and coordination* above as its own clean-room work. For the
-disciplined **discovery and research skills** that pair naturally with them, it
-points you to excellent open source rather than republishing it:
+keel ships the *agents and coordination* above as its own clean-room work. The
+disciplined **discovery skills** that pair with them are vendored in this repo —
+sanitized and adapted, with credit:
 
-- **[Matt Pocock's skills](https://github.com/mattpocock/skills)** — `domain-modeling`
-  (build a ubiquitous-language glossary + ADRs as durable cross-session artifacts),
-  `codebase-design` (a precise deep-module vocabulary — Module / Interface / Adapter
-  / Depth / seams — for describing an unknown module's shape), `diagnosing-bugs`
-  (signal-first hard-bug loop), and `grilling` (a relentless one-question-at-a-time
-  interview that explores the codebase to answer its own questions). Pair
-  `domain-modeling` with keel's `testing/flows.json` registry: one captures the
-  language, the other captures the behaviors.
+- **[Matt Pocock's skills](https://github.com/mattpocock/skills)** — the origin of
+  [`domain-modeling`](../.claude/skills/domain-modeling/) (build a
+  ubiquitous-language glossary + ADRs as durable cross-session artifacts),
+  [`codebase-design`](../.claude/skills/codebase-design/) (a precise deep-module
+  vocabulary — Module / Interface / Adapter / Depth / seams — for describing an
+  unknown module's shape), [`diagnosing-bugs`](../.claude/skills/diagnosing-bugs/)
+  (signal-first hard-bug loop), and [`grilling`](../.claude/skills/grilling/) (a
+  relentless one-question-at-a-time interview that explores the codebase to answer
+  its own questions). Pair `domain-modeling` with keel's `testing/flows.json`
+  registry: one captures the language, the other captures the behaviors.
 - **[superpowers](https://github.com/obra/superpowers)** — `deep-research` (fan-out
   web search with adversarial verification and cited synthesis — the external-research
-  half of new-project investigation), `systematic-debugging` (root-cause-before-fix),
-  and `brainstorming` (surface requirements and intent before touching code).
-
-Add those alongside keel; this page describes how keel's own primitives compose,
-and where the borrowed ones plug in. The line is deliberate: keel ships the
-mechanics that are mine to ship, and credits the skills that aren't.
+  half of new-project investigation; keel's own `investigation` skill escalates to
+  it), `systematic-debugging` (root-cause-before-fix), and `brainstorming` (surface
+  requirements and intent before touching code). These are not republished here —
+  add superpowers alongside keel.
