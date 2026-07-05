@@ -1,15 +1,15 @@
 ---
 name: spec-review
-description: Multi-model spec verification pipeline. Linear flow (no compaction) — mines session design decisions, dispatches 10 parallel reviewers (7 Claude including provider-fit, edge-case, security, and cross-worktree drift scout + 3 Codex including industry research) plus the investigation skill's dynamic Workflow grounding the elevation lane (verified, code-anchored industry evidence), then reports findings and fixes only real design defects in the spec prose. Never injects review scaffolding (matrices/EC/Sec/Drift tables) into the spec.
+description: Multi-model spec verification pipeline. Linear flow (no compaction) — mines session design decisions, dispatches 11 parallel reviewers (8 Claude including provider-fit, edge-case, security, observability, and cross-worktree drift scout + 3 Codex including industry research) plus the investigation skill's dynamic Workflow grounding the elevation lane (verified, code-anchored industry evidence), then reports findings and fixes only real design defects in the spec prose. Never injects review scaffolding (matrices/EC/Sec/Obs/Drift tables) into the spec.
 ---
 
 # Spec Review — Multi-Agent Verification Pipeline
 
-10 focused reviewers run in parallel — 7 Claude agents (completeness, codebase, architecture, provider-fit, edge-case miner, security miner, spec drift scout) + 3 Codex (standard + adversarial + industry research) — each with a tight prompt and one job, **plus the investigation skill's dynamic Workflow grounding the elevation lane** (it frames the spec's core themes against THIS codebase, fans out across sources, adversarially cross-verifies, and returns code-anchored industry-standard + best-in-class elevation evidence). The drift lane scans sibling worktrees/specs across the project scope so parallel work does not silently diverge. All Codex agents have web access enabled. The coordinator synthesizes and applies fixes.
+11 focused reviewers run in parallel — 8 Claude agents (completeness, codebase, architecture, provider-fit, edge-case miner, security miner, observability auditor, spec drift scout) + 3 Codex (standard + adversarial + industry research) — each with a tight prompt and one job, **plus the investigation skill's dynamic Workflow grounding the elevation lane** (it frames the spec's core themes against THIS codebase, fans out across sources, adversarially cross-verifies, and returns code-anchored industry-standard + best-in-class elevation evidence). The drift lane scans sibling worktrees/specs across the project scope so parallel work does not silently diverge. All Codex agents have web access enabled. The coordinator synthesizes and applies fixes.
 
 **Trigger:** "review this spec", "verify the spec", "run spec review", "gap analysis"
 
-**Prompt templates:** `prompts/design-decisions-extractor.md`, `prompts/completeness-reviewer.md`, `prompts/codebase-verifier.md`, `prompts/architecture-auditor.md`, `prompts/provider-fit-auditor.md`, `prompts/edge-case-miner.md`, `prompts/security-miner.md`, `prompts/spec-drift-scout.md`, `prompts/spec-drift-investigator.md`, `prompts/codex-standard-reviewer.md`, `prompts/codex-adversarial-reviewer.md`, `prompts/codex-research-auditor.md`
+**Prompt templates:** `prompts/design-decisions-extractor.md`, `prompts/completeness-reviewer.md`, `prompts/codebase-verifier.md`, `prompts/architecture-auditor.md`, `prompts/provider-fit-auditor.md`, `prompts/edge-case-miner.md`, `prompts/security-miner.md`, `prompts/observability-auditor.md`, `prompts/spec-drift-scout.md`, `prompts/spec-drift-investigator.md`, `prompts/codex-standard-reviewer.md`, `prompts/codex-adversarial-reviewer.md`, `prompts/codex-research-auditor.md`
 
 ## Skill Memory (LEARNINGS.md)
 
@@ -37,7 +37,7 @@ Research Auditor's **ELEVATE** and **CAUTION** tags are NOT in this scale — th
 
 A spec written in a long session accumulates blind spots. This skill breaks that with:
 1. **Session decision-mining** — recovers the design decisions, rejected alternatives, and user corrections from the session so reviewers judge against intent, not just the prose. Runs as a direct agent dispatch — **no compaction, no hooks, no resume dance.**
-2. **10 parallel reviewers** — each with a focused prompt and one job
+2. **11 parallel reviewers** — each with a focused prompt and one job
 3. **Multi-model** — Claude (Opus/Sonnet) + 3x Codex GPT-5.5 (standard + adversarial + industry research)
 4. **Web-enabled research** — all Codex agents run with network access so findings are grounded in real public implementations, CVEs, post-mortems, and RFCs — not just training-data recall
 5. **Semantic boundary mining** — the edge-case miner enumerates entity/state/value boundaries the spec is silent on (cardinality, lifecycle, tenancy, encoding, time, concurrency, permission, resource, schema-evolution, forbidden-but-syntactically-valid)
@@ -45,6 +45,7 @@ A spec written in a long session accumulates blind spots. This skill breaks that
 7. **Cross-worktree drift scouting** — the spec drift scout checks recently pushed changes, dirty worktrees, architecture changes, sibling specs, and in-progress parallel work across the same project scope, then dispatches narrow follow-up investigators only when material drift is found
 8. **Code-grounded industry elevation** — the **investigation skill** runs as a dynamic Workflow over the spec's core themes: it frames them against THIS codebase first (every claim cites a real `file:line`), fans out across primary sources, adversarially cross-verifies each load-bearing claim *in code* (refuted/unchecked claims are partitioned out before synthesis), and returns a verified industry-standard + best-in-class elevation brief. This **deepens the elevation lane** — it is the evidence-and-industry backbone that the Codex Industry Research Auditor's single-model external scan gets cross-checked against, so an ELEVATE suggestion two independent lanes agree on lands at high confidence, and an unverified one is flagged as such
 9. **Provider-fit auditing** — the **Provider-Fit Auditor** runs the **Provider ⋈ Technical-Architecture Alignment** check: does the spec hand-build an architecture a provider/platform-class already owns (an access-pattern↔class mismatch that ships as compensating glue — tomorrow's incident), *or* adopt a vendor where keeping it owned is the honest answer (adoption would flatten a data/compliance boundary, duplicate a live owned subsystem, or route regulated data upstream of redaction)? Balanced both ways — it flags hand-building-what-a-class-owns AND adopting-what-should-stay-owned, so the "should we build this at all?" question is answered *before* the design ships. And it fires on **inherited** architecture too (PF-7): when the spec extends an existing vendor-adjacent subsystem, it audits whether that subsystem exists only to *accommodate a provider mismatch* — tripwires: fix-cluster history ≥3, management-to-workload LOC ratio, invented vocabulary absent from the vendor's docs, premise numbers that trace to constants/models instead of measurements/invoices, and the vendor's canonical primitive defined with zero call sites
+10. **Observability & traceability auditing** — the **Observability & Traceability Auditor** audits whether the spec ships its own telemetry: named structured events with a request-threading correlation id + a release/version stamp, an **authoritative terminal status** for async work (never inferred from a dispatch/`202` ack), metrics emitted at a granularity their alarms can actually see, a stable PII-free error fingerprint, observable fail-open branches, and a nameable log/telemetry destination. Its premise: a change that ships without its instrumentation is a future RCA run blind — the false-positive, wrong-source, and "we can't tell what failed" incidents all trace back to a spec that never said how the thing would be seen. Distinct lane from the security miner (policy) and edge-case miner (semantic boundaries)
 
 > **Findings, not procedures.** This skill reports problems and fixes real design defects in the spec *prose*. It must NEVER inject its own scaffolding into the spec file — no traceability matrices, no EC-N / Sec-N / DRIFT-N tables, no "review lanes" or checklists. Those live in the **review report** (a sibling file or chat output), never in the spec. A spec describes the design; it does not carry the machinery of the review that touched it.
 
@@ -94,9 +95,9 @@ Dispatch the **Design Decisions Extractor** agent using `prompts/design-decision
 
 The agent reads the structured JSON (user-turn windows, files-edited, commits, tool distribution) and returns a dossier: key decisions, rejected alternatives, user corrections, scope, concerns, requirement quotes, gaps & ambiguities. **You do NOT read the JSON yourself.** (Skip this step if 2b was skipped.)
 
-### Step 4: Dispatch 10 Reviewers in Parallel
+### Step 4: Dispatch 11 Reviewers in Parallel
 
-Read the spec with fresh eyes. Then dispatch ALL 10 primary reviewers simultaneously — they are independent.
+Read the spec with fresh eyes. Then dispatch ALL 11 primary reviewers simultaneously — they are independent.
 
 **Agent 1 — Completeness & Alignment** (`prompts/completeness-reviewer.md`):
 - **Type:** `general-purpose` | **Model:** `opus`
@@ -111,7 +112,7 @@ Read the spec with fresh eyes. Then dispatch ALL 10 primary reviewers simultaneo
 **Agent 3 — Architecture & Simplicity** (`prompts/architecture-auditor.md`):
 - **Type:** `general-purpose` | **Model:** `opus`
 - **Input:** spec path, project root
-- **Job:** Architectural fit, abstraction level, peer consistency, simplicity, workaround detection, maintenance burden, **platform invariants compliance** (if the project has a `docs/PLATFORM-INVARIANTS.md` file, spec claims are cross-checked against every invariant — violations are CRITICAL/MAJOR by default), and **deep-module fit** — it loads the `improve-codebase-architecture` + `codebase-design` principles *by reference* (so future updates to them propagate) and audits the spec's proposed design against the deletion test, shallow-vs-deep modules, and testability-through-the-interface, naming the deeper shape where the spec bolts on a shallow layer.
+- **Job:** Architectural fit, abstraction level, peer consistency, simplicity, workaround detection, maintenance burden, **platform invariants compliance** (if the project has a `docs/PLATFORM-INVARIANTS.md` file, spec claims are cross-checked against every invariant — violations are CRITICAL/MAJOR by default), and **deep-module fit** — it invokes the `improve-codebase-architecture` + `codebase-design` rubric (reading their `SKILL.md`s directly, since `improve-codebase-architecture` is `disable-model-invocation`, rather than paraphrasing from memory — so future updates to them propagate) and audits the spec's proposed design against the deletion test, shallow-vs-deep modules, and testability-through-the-interface, naming the deeper shape where the spec bolts on a shallow layer — **plus a delete-legacy / one-architecture gate**: does the spec delete the code path it replaces in the same change, and how many architectures exist for the touched capability afterward? A shim / dual old-new path / "keep it just in case" flag is a CRITICAL FAIL.
 
 **Agent 3b — Provider-Fit Auditor** (`prompts/provider-fit-auditor.md`) — first-wave primary (co-dispatched with 1–9; the letter suffix groups it with the Architecture Auditor #3, its sibling — unlike the second-wave 6b):
 - **Type:** `general-purpose` | **Model:** `opus`
@@ -127,6 +128,11 @@ Read the spec with fresh eyes. Then dispatch ALL 10 primary reviewers simultaneo
 - **Type:** `general-purpose` | **Model:** `opus`
 - **Input:** spec path, project root, dossier content
 - **Job:** Project-policy security mining. Reads `docs/security-policy.md` (filled by the user from `templates/security-policy.example.md`) + the project-root `CLAUDE.md`/`AGENTS.md`, then audits the spec against your project's stated rules plus portable security categories: authentication & authorization (correct identity source for authz claims, least privilege), secret & credential storage, tenant/org isolation, input validation & injection (SQL/command/path-traversal/SSRF), data-boundary separation, privilege escalation, allowlist/denylist gaps, output sanitization. Flags every Sec-N policy violation. Distinct lane from edge-case-miner (semantic boundaries) and Codex Adversarial (generic infra/race/IAM). Minimum 8 Sec-N rows for non-trivial security-touching specs. **Cites source policy** in every finding — no inventing rules.
+
+**Agent 5b — Observability & Traceability Auditor** (`prompts/observability-auditor.md`) — first-wave primary (co-dispatched with 1–9; the letter suffix groups it with the Security Miner #5, its sibling):
+- **Type:** `general-purpose` | **Model:** `opus`
+- **Input:** spec path, project root, dossier content
+- **Job:** Audit the spec's production observability, tracing, and debuggability plan — does it ship its instrumentation in the same change (observability-driven development); name its structured events + fields + a request-threading **correlation id**; propagate standard **trace context** (W3C `traceparent`) across service/async boundaries; stamp telemetry with the **release/version** (onset-vs-deploy); record an **authoritative terminal status** for async/queued work rather than inferring success from a dispatch/`202` ack; emit **metrics at a granularity its alarms can see**; keep high-cardinality/PII out of metric labels and secrets/PII/PHI out of all fields; fingerprint failures on a **stable PII-free action+ref key**; make **fail-open branches observable**; and name the **log/telemetry destination** that serves the surface. Distinct lane from the Security Miner (policy violations) and Edge-Case Miner (semantic boundaries). Minimum 6 Obs-N rows for a runtime-touching spec, severity per the prompt's taxonomy. Its findings get their own report section (like Edge-Case/Security) — not cross-examined.
 
 **Agent 6 — Spec Drift Scout** (`prompts/spec-drift-scout.md`):
 - **Type:** `general-purpose` | **Model:** `sonnet`
@@ -155,7 +161,7 @@ Read the spec with fresh eyes. Then dispatch ALL 10 primary reviewers simultaneo
 
 **Composing the Codex prompts:** Use the exact dispatch patterns from `prompts/codex-standard-reviewer.md`, `prompts/codex-adversarial-reviewer.md`, and `prompts/codex-research-auditor.md`. Before dispatching, scan the spec for 3-6 specific risk concerns to inject into the adversarial prompt's `<FOCUS_TEXT_FROM_COORDINATOR_IF_ANY>`.
 
-**All 10 primary reviewers dispatch at the same time.** The 7 Claude agents via the Agent tool, all 3 Codex reviews via separate Bash calls.
+**All 11 primary reviewers dispatch at the same time.** The 8 Claude agents via the Agent tool, all 3 Codex reviews via separate Bash calls.
 
 **Dispatch invariants** (all mandatory):
 - `run_in_background: true` on the Bash tool — **no trailing `&`** in the command. Three separate Bash calls = parallel execution with completion notifications.
@@ -204,7 +210,7 @@ When the **Spec Drift Scout** returns, read its report immediately. Do not wait 
 
 ### Step 4c: Wait for Codex reviews, the Investigation Workflow, and drift investigators
 
-The 7 Claude agents return first (2-6 min; Drift Scout may take longer on projects with many worktrees). Codex reviews run in background and take longer. The Research Auditor may take the longest — web research has latency — budget 20-40 min. The **Investigation Workflow** (Agent 11) also runs in the background and notifies on completion — budget 10-30 min depending on theme count and width; read its saved brief (`docs/investigations/…`) when it lands. Drift investigators, if dispatched, should run in parallel with remaining Codex reviews.
+The 8 Claude agents return first (2-6 min; Drift Scout may take longer on projects with many worktrees). Codex reviews run in background and take longer. The Research Auditor may take the longest — web research has latency — budget 20-40 min. The **Investigation Workflow** (Agent 11) also runs in the background and notifies on completion — budget 10-30 min depending on theme count and width; read its saved brief (`docs/investigations/…`) when it lands. Drift investigators, if dispatched, should run in parallel with remaining Codex reviews.
 
 **How to wait:** Use `run_in_background: true` on the Bash dispatch calls. You get notified when each completes. Then **read the output file with the Read tool** and extract findings yourself. No grep, no sed, no checkpoint scripts — you're an LLM, just read the file.
 
@@ -214,11 +220,11 @@ pgrep -f "codex exec" && echo "still running" || echo "exited"
 ```
 If exited, read the file. If still running, let it finish — Codex legitimately runs 20-40 min on complex specs, and research can run longer.
 
-Wait for all 10 primary reviewers, the Investigation Workflow (Agent 11), and any second-wave drift investigators to complete before starting Step 5.
+Wait for all 11 primary reviewers, the Investigation Workflow (Agent 11), and any second-wave drift investigators to complete before starting Step 5.
 
 ### Step 5: Merge & Classify
 
-Collect all 10 primary reports (7 Claude markdown + 3 Codex text/JSON) plus any second-wave drift investigator reports and the Investigation Workflow brief. The Research Auditor findings **and the Investigation Workflow brief** are handled separately — they go into the Industry Insights section (see Step 5c) and do NOT feed the defect-classification pipeline below. The Edge-Case Miner, Security Miner, and Spec Drift Scout/Investigators are also handled in their own sections (see Step 5c) — CRITICAL/MAJOR Edge-Case rows with `Spec Coverage: MISSING`, CRITICAL/MAJOR Security rows, and CRITICAL/MAJOR drift findings with `update-current-spec` action are auto-applied like other consensus issues when scoped to the target spec, but they don't get cross-examined since they do not have a direct Codex peer in this skill. Classify each **defect** finding from the other 6 reviewers (completeness, codebase, architecture, provider-fit, codex-standard, codex-adversarial):
+Collect all 11 primary reports (8 Claude markdown + 3 Codex text/JSON) plus any second-wave drift investigator reports and the Investigation Workflow brief. The Research Auditor findings **and the Investigation Workflow brief** are handled separately — they go into the Industry Insights section (see Step 5c) and do NOT feed the defect-classification pipeline below. The Edge-Case Miner, Security Miner, Observability Auditor, and Spec Drift Scout/Investigators are also handled in their own sections (see Step 5c) — CRITICAL/MAJOR Edge-Case rows with `Spec Coverage: MISSING`, CRITICAL/MAJOR Security rows, CRITICAL/MAJOR Observability rows, and CRITICAL/MAJOR drift findings with `update-current-spec` action are auto-applied like other consensus issues when scoped to the target spec, but they don't get cross-examined since they do not have a direct Codex peer in this skill. Classify each **defect** finding from the other 6 reviewers (completeness, codebase, architecture, provider-fit, codex-standard, codex-adversarial):
 
 | Codex severity | Claude severity | Unified |
 |---|---|---|
@@ -302,7 +308,7 @@ After cross-examination resolves (or goes to user), compile the full report:
 ## Spec Review — Final Report
 
 ### Spec: <filename>
-### Reviewers: Completeness (Opus) + Codebase (Sonnet) + Architecture (Opus) + Provider-Fit (Opus) + Edge-Case Miner (Opus) + Security Miner (Opus) + Spec Drift Scout (Sonnet) + Codex Standard (GPT-5.5) + Codex Adversarial (GPT-5.5) + Codex Industry Research (GPT-5.5, web-enabled) + Investigation Workflow (code-grounded, verified)
+### Reviewers: Completeness (Opus) + Codebase (Sonnet) + Architecture (Opus) + Provider-Fit (Opus) + Edge-Case Miner (Opus) + Security Miner (Opus) + Observability Auditor (Opus) + Spec Drift Scout (Sonnet) + Codex Standard (GPT-5.5) + Codex Adversarial (GPT-5.5) + Codex Industry Research (GPT-5.5, web-enabled) + Investigation Workflow (code-grounded, verified)
 ### Codex Standard Verdict: <approve|needs-attention|timed-out>
 ### Codex Adversarial Verdict: <approve|needs-attention|timed-out>
 ### Codex Research Verdict: <N elevate suggestions / M cautions / timed-out>
@@ -354,6 +360,24 @@ not auto-applied. If a CRITICAL row touches a surface outside the spec's
 scope (e.g. spec is about feature X but security finding is about platform
 primitive Y), file a separate GitHub issue rather than expanding scope —
 hand the rationale to the user as part of the Final Report.
+
+### Observability & Traceability Findings (from Observability Auditor)
+Kept in its own section — a spec's production telemetry plan is structurally
+different from defect-hunting. Output is the Obs-N table from
+`prompts/observability-auditor.md`. Each row names the checklist category (1-12)
+or the project's own observability convention it maps to.
+
+| Obs-ID | Category | Spec Section | Gap | Severity | Recommended Resolution |
+|---|---|---|---|---|---|
+| Obs-1 | <1-12> | §X.Y | <what the spec is silent on / gets wrong> | CRITICAL / MAJOR / MINOR | <one-line behavioral spec-text fix> |
+
+CRITICAL/MAJOR Observability rows are auto-applied to the spec in Step 9 (same
+path as Edge Cases and Security) — but as a **one-line behavioral statement in
+prose** (e.g. "the run's terminal status is persisted to the run store, not
+inferred from the dispatch ack"), NEVER as a pasted Obs-N table. MINOR rows are
+reported, not auto-applied. A CRITICAL row that touches a surface outside the
+spec's scope (e.g. the project has no correlation-id primitive at all) → file a
+separate issue rather than expanding scope.
 
 ### Spec Drift Findings (from Spec Drift Scout + optional investigators)
 Kept in its own section — this lane checks whether the target spec is drifting
@@ -428,7 +452,7 @@ Kept in its own section on purpose — elevation suggestions are NOT severity-ra
 
 **Apply fixes — design defects only, in prose.** Apply CRITICAL and MAJOR consensus issues by **fixing the actual design problem in the spec's own prose** (correct the mechanism, the boundary, the auth rule, etc.). That is the only thing that gets written into the spec.
 
-**Never inject review scaffolding into the spec file.** Edge-case (EC-N), Security (Sec-N), and Drift (DRIFT-N) findings, traceability matrices, and "lanes" stay in the **review report** — they are NOT auto-applied as new tables/sections/checklists in the spec. When an EC/Sec/Drift finding reveals a genuine design defect, fix the design in prose (e.g. "deletes are idempotent" as a one-line behavioral statement) — do not paste the finding's table row into the spec. Present every EC/Sec/Drift/Industry finding to the user in the report and let them decide what, if anything, changes. Industry Insights and CAUTION items are never auto-applied. Out-of-scope findings → file a separate issue, don't expand the spec.
+**Never inject review scaffolding into the spec file.** Edge-case (EC-N), Security (Sec-N), Observability (Obs-N), and Drift (DRIFT-N) findings, traceability matrices, and "lanes" stay in the **review report** — they are NOT auto-applied as new tables/sections/checklists in the spec. When an EC/Sec/Obs/Drift finding reveals a genuine design defect, fix the design in prose (e.g. "deletes are idempotent" or "terminal status is persisted, not inferred from the ack" as a one-line behavioral statement) — do not paste the finding's table row into the spec. Present every EC/Sec/Obs/Drift/Industry finding to the user in the report and let them decide what, if anything, changes. Industry Insights and CAUTION items are never auto-applied. Out-of-scope findings → file a separate issue, don't expand the spec.
 
 ### Step 6: Alignment Investigation (OPTIONAL — off by default)
 
@@ -516,7 +540,7 @@ When the investigation completes, read the output file and extract findings your
 
 ```bash
 git add <spec-file>
-git commit -m "docs(<scope>): spec review fixes — <N> issues from 10-lane pipeline + alignment investigation"
+git commit -m "docs(<scope>): spec review fixes — <N> issues from 11-lane pipeline + alignment investigation"
 ```
 
 ### Step 10: Visualize (optional)
@@ -555,10 +579,10 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 | 2a | Coordinator | Write "why" context block (inline, no compaction) | — |
 | 2b | Coordinator | Generate session-decisions JSON (skippable) | — |
 | 3 | Agent (haiku) | Decisions JSON → design decisions dossier | — |
-| 4 | **10 Reviewers + Investigation Workflow** | Completeness + Codebase + Architecture + **Provider-Fit** + Edge-Case Miner + Security Miner + Spec Drift Scout + Codex Standard + Codex Adversarial + Codex Industry Research + **Investigation Workflow (elevation grounding)** | **ALL PARALLEL** |
+| 4 | **11 Reviewers + Investigation Workflow** | Completeness + Codebase + Architecture + **Provider-Fit** + Edge-Case Miner + Security Miner + **Observability Auditor** + Spec Drift Scout + Codex Standard + Codex Adversarial + Codex Industry Research + **Investigation Workflow (elevation grounding)** | **ALL PARALLEL** |
 | 4b | Coordinator + optional agents | Progressive drift investigation from Scout candidates | Parallel when needed |
 | 4c | Coordinator | Wait for Codex reviews, the Investigation Workflow, and drift investigators | — |
-| 5 | Coordinator | Merge 10 primary reports plus drift investigations, classify findings | — |
+| 5 | Coordinator | Merge 11 primary reports plus drift investigations, classify findings | — |
 | 5b | Coordinator + Codex | Cross-examine MAJOR+ disagreements (Claude vs Codex debate) | Sequential |
 | 5c | Coordinator + User | Final report, user decides on contested issues | — |
 | 6 | Coordinator | Alignment investigation — OPTIONAL, off by default, only if user asks | — |
@@ -569,17 +593,18 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 
 ## Agent Summary
 
-> Numbering: the **10 primary reviewers** are agents 1–9 **+ Provider-Fit (3b)** (the `Nb` suffix groups a reviewer with its sibling — 3b with Architecture #3, 6b with Drift Scout #6). Agents **11–12** are the non-reviewer lanes (Investigation Workflow, Alignment Investigator), so **no agent bears the number 10 by design** — it is not a gap.
+> Numbering: the **11 primary reviewers** are agents 1–9 **+ Provider-Fit (3b) + Observability Auditor (5b)** (the `Nb` suffix groups a reviewer with its sibling — 3b with Architecture #3, 5b with Security Miner #5, 6b with Drift Scout #6). Agents **11–12** are the non-reviewer lanes (Investigation Workflow, Alignment Investigator), so **no agent bears the number 10 by design** — it is not a gap.
 
 | # | Agent | Prompt File | Type | Model | Focus |
 |---|-------|------------|------|-------|-------|
 | 0 | Design Decisions Extractor | `prompts/design-decisions-extractor.md` | general-purpose | haiku | JSONL → dossier |
 | 1 | Completeness Reviewer | `prompts/completeness-reviewer.md` | general-purpose | opus | Dossier × spec cross-check |
 | 2 | Codebase Verifier | `prompts/codebase-verifier.md` | Explore | sonnet | File refs, duplicates, stale code |
-| 3 | Architecture Auditor | `prompts/architecture-auditor.md` | general-purpose | opus | Fit, simplicity, maintenance, **deep-module fit** (applies `improve-codebase-architecture` + `codebase-design` principles by reference: deletion test, shallow-vs-deep, testability-through-the-interface) |
+| 3 | Architecture Auditor | `prompts/architecture-auditor.md` | general-purpose | opus | Fit, simplicity, maintenance, **deep-module fit** (invokes the `improve-codebase-architecture` + `codebase-design` rubric by reading their SKILL.md: deletion test, shallow-vs-deep, testability-through-the-interface) **+ delete-legacy/one-architecture gate (CRITICAL if the spec keeps the replaced path alongside the new one)** |
 | 3b | **Provider-Fit Auditor** | `prompts/provider-fit-auditor.md` | general-purpose | opus | **First-wave. Provider ⋈ Technical-Architecture Alignment: ownership-inversion, access-pattern↔provider-class match, "nobody hand-builds this" as a field survey per use-case, build-vs-buy gradient, the BUILD-is-correct counter-check (wrongful-adopt = flatten boundary / duplicate live subsystem / regulated-data-upstream = CRITICAL), gate-don't-cutover, + the inherited-premise audit (PF-7: fires on pre-existing architecture the spec extends — fix-cluster ≥3, LOC ratio, invented vocabulary, unmeasured premise numbers, unwired vendor primitives). Balanced both ways — never an "always buy" bias. Feeds the Step 5 defect pipeline with Architecture.** |
 | 4 | **Edge-Case Miner** | `prompts/edge-case-miner.md` | general-purpose | opus | **Semantic boundary enumeration: cardinality / lifecycle / tenancy / encoding / time / concurrency / permission / resource / schema-evolution / forbidden-but-valid** |
 | 5 | **Security Miner** | `prompts/security-miner.md` | general-purpose | opus | **Project-policy security mining: reads `docs/security-policy.md` + `CLAUDE.md`/`AGENTS.md` and audits against your project's stated rules + portable categories (authN/authZ, secret storage, tenant isolation, injection, data boundaries, privilege escalation, allowlist gaps, output sanitization)** |
+| 5b | **Observability & Traceability Auditor** | `prompts/observability-auditor.md` | general-purpose | opus | **First-wave. Ships-its-own-telemetry audit: named structured events + a request-threading correlation id, W3C `traceparent` trace context, release/version stamping (onset-vs-deploy), an authoritative terminal status for async work (not a dispatch/`202` ack), alarm-visible metric granularity, cardinality + PII/PHI discipline, a stable PII-free error fingerprint, observable fail-open branches, and a nameable log/telemetry destination. Own report section (like Edge-Case/Security), not cross-examined.** |
 | 6 | **Spec Drift Scout** | `prompts/spec-drift-scout.md` | general-purpose | sonnet | **Cross-worktree/project-scope drift: recent pushed refs, dirty worktrees, sibling specs, architecture changes, feature overlap, missing spec updates** |
 | 6b | **Spec Drift Investigator** | `prompts/spec-drift-investigator.md` | general-purpose | opus | **Second-wave deep dive on one drift candidate: update current/other spec, combine, move, split, create missing spec, or mark intentional** |
 | 7 | **Codex Adversarial** | `prompts/codex-adversarial-reviewer.md` | **codex exec (web)** | **GPT-5.5** | **Attack surface, risks — cross-referenced against public CVEs/post-mortems** |

@@ -17,15 +17,17 @@ prompt: |
   ## Project Root
   {{PROJECT_ROOT}}
 
-  ## Your rubric — apply the deep-module architecture principles
+  ## Your rubric — invoke the deep-module architecture principles
 
-  Before auditing, load the **`improve-codebase-architecture`** and **`codebase-design`**
-  skills as your rubric (they ship alongside this skill). Apply their vocabulary and
-  principles throughout this audit. Do **not** run improve-codebase-architecture's
-  interactive HTML-report / grilling process — use its principles as the lens, by
-  reference, so this audit inherits future updates to them rather than a frozen copy.
-  (If your runtime can't invoke a `disable-model-invocation` skill directly, read its
-  `SKILL.md` and `codebase-design/SKILL.md` as the rubric instead.)
+  Before auditing, **invoke the `improve-codebase-architecture` and `codebase-design`
+  rubric and apply it** (they ship alongside this skill). `improve-codebase-architecture`
+  is `disable-model-invocation: true`, so pull its principles by reading its `SKILL.md`
+  and `codebase-design/SKILL.md` directly rather than firing them via the Skill tool —
+  that is the correct way to consume a user-invoked skill's rubric, not a downgrade to
+  paraphrase-from-memory. Use their vocabulary and principles as **binding checks this
+  audit must answer**, not background color. Do **not** run improve-codebase-architecture's
+  interactive HTML-report / grilling process (that's for a standalone codebase scan) — but
+  do run every one of its Explore-phase questions (below) against the spec, and answer each.
 
   - **Deep vs shallow modules** — a module whose interface is much simpler than its
     implementation is *deep* (good); one whose interface is nearly as complex as what it
@@ -168,7 +170,23 @@ prompt: |
   4. **Leverage of existing deep modules?** Does the spec reinvent a capability an existing
      deep module already owns, instead of extending it? Point to the module.
 
-  5. **Deepening opportunity (elevation).** Independent of any defect: is there a change
+  5. **Delete-legacy / one-architecture gate.** A GATE, not a soft observation — answer all
+     three explicitly:
+     - **Does the spec replace an existing code path?** Name it (file/module) if yes. If it
+       genuinely adds a *new* capability that replaces nothing (not a fix/workaround pair),
+       that is a legitimate "none" — say so, don't manufacture a violation.
+     - **Does the spec delete that path in the same change?** A spec that ships the new path
+       and leaves the old one running — "for backwards compat", "behind a flag", "clean up
+       later" — FAILS. CRITICAL.
+     - **How many architectures does the touched capability have after the spec ships?**
+       State the number. Anything but one requires an explicit, load-bearing justification
+       (a genuinely unrelated capability, a staged rollout with a committed removal date) —
+       absent that, FAIL. CRITICAL. A shim, a dual old/new path, or a "keep it just in case"
+       flag is the default FAIL.
+     This is independent of the deletion test above (which asks whether a *module* earns its
+     place) — this asks whether the *spec* leaves exactly one path for one capability.
+
+  6. **Deepening opportunity (elevation).** Independent of any defect: is there a change
      that would turn a cluster of shallow modules the spec touches into one deep module —
      improving locality and the test surface? Propose it as `Worth exploring`.
 
@@ -213,11 +231,17 @@ prompt: |
     improving locality and the test surface at [seam]
   ...
 
+  ### Delete-Legacy / One-Architecture Gate: [PASS / FAIL / NOT APPLICABLE]
+  - Path replaced: [none / <file:module>]
+  - Deleted in this change: [yes / no — if no, the stated justification, or FAIL]
+  - Architectures for this capability after ship: [N] — [one → PASS / N>1 justified / FAIL]
+
   ### Summary
   Architectural issues: N (C:N M:N m:N)
   Platform invariant violations: N (C:N M:N)
   Simplicity: [PASS/WARN/FAIL]
   Deep-module fit: [PASS/WARN/FAIL] — shallow modules: N, deepening opportunities: N
+  Delete-legacy gate: [PASS/FAIL/N/A] — architectures left behind: N
   Simpler alternative available: [yes/no]
   ```
 ```
