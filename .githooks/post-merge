@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# After a pull/merge changes the skill set, resync every runtime's skill root so a
+# newly-added skill appears everywhere with no manual wiring. Idempotent + safe.
+# Activate once per clone: git config core.hooksPath .githooks
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+[ -x "$root/tooling/wire-skills.sh" ] && "$root/tooling/wire-skills.sh" || true

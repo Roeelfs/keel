@@ -52,6 +52,12 @@ Build the state table before touching anything. Enumerate **every** surface:
     cross-runtime surfaces are the ones everyone forgets;
   - per-repo `.claude/skills/` across the user's code root (`for d in <code-root>/*/;
     do ls $d/.claude/skills 2>/dev/null; done`).
+  - **Completeness, not just classification.** For each machine-wide root, which keel
+    skills are MISSING: `comm -23 <(ls <clone>/.claude/skills | sort) <(ls <root> |
+    sort)`. A hand-wired root silently omits every skill added since it was last
+    touched — that is how a skill (e.g. `root-cause-analysis`) becomes invisible to a
+    whole runtime like Codex. `~/.codex/skills/` is Codex's discovery root; its
+    `.system/` built-ins are runtime-owned — never touch them.
 - **Agent roots — same split as skills.** For each `~/.claude/agents/` and per-repo
   `.claude/agents/`, classify every entry `symlink→clone` / `real-copy` / `absent`
   **and** generic-craft vs project-specific: does its prompt name a specific
@@ -128,7 +134,13 @@ Each row carries a risk note. Anything destructive names its backup.
 
 1. **Backup first**: lean tar of every root/dir about to change (skill roots, any
    diverged copies, instructions files being consolidated).
-2. Apply symlinks + links per the confirmed plan.
+2. Apply symlinks + links per the confirmed plan. For the machine-wide skill roots,
+   run `tooling/wire-skills.sh` from the clone — it symlinks every keel skill into
+   every runtime root (Claude Code, Codex, agents.md), adds only what's missing,
+   prunes its own stale links, and leaves real copies + runtime built-ins untouched.
+   Then activate the sync hook once: `git config core.hooksPath .githooks` — so a
+   future `git pull` that adds a skill re-wires every runtime automatically, no
+   re-onboard needed (see [`docs/cross-runtime-skills.md`](../../../docs/cross-runtime-skills.md)).
 3. **Verify mechanically**: every new symlink resolves (`find <root> -type l
    ! -exec test -e {} \; -print` → empty); no `real-copy` entries remain for
    machine-wide skills; invoke one skill end-to-end to confirm loading; re-run the

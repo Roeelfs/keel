@@ -21,6 +21,11 @@ already exist**. It never overwrites your `CLAUDE.md`, `settings.json`, or docs.
 > edit propagates everywhere instantly and there is nothing to re-install. The
 > per-repo files below (rules, security policy, testing config, settings) still
 > live in each repo; only the skills/agents/hooks are shared.
+>
+> Skills reach **every runtime** (Claude Code, Codex, agents.md) through
+> `tooling/wire-skills.sh`, and a git hook re-runs it on every `git pull` so a
+> newly-added skill never goes missing from a runtime — see
+> [docs/cross-runtime-skills.md](docs/cross-runtime-skills.md).
 
 ## 2. Fill in the three files that make it yours
 
