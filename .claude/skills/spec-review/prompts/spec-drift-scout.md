@@ -150,3 +150,5 @@ prompt: |
   worktree, or spec section, put it in No-Action Notes instead of Drift
   Candidates.
 ```
+
+**Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.

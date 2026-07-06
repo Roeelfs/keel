@@ -264,7 +264,8 @@ The session cache (`last-state.json`) captures **active lanes**. The snapshot be
 3. Self-register the post-compact hook in the project's `.claude/settings.local.json` (idempotent — same pattern as `spec-review`):
 
    ```python
-   # SessionStart matcher=compact → ~/.claude/hooks/orchestrator-resume.sh
+   # SessionStart matcher=compact → <this skill's dir>/scripts/orchestrator-resume.sh
+   # (resolves via the installed skill path, e.g. ~/.claude/skills/orchestrator/scripts/orchestrator-resume.sh)
    ```
 
 4. Tell the user to run `/compact preserve grand-project context — see snapshot`.

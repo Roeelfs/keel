@@ -33,3 +33,5 @@ When you get the background completion notification, read the output file with R
 ## Focus text
 
 The coordinator adds 3-6 specific concerns from scanning the spec.
+
+**Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.

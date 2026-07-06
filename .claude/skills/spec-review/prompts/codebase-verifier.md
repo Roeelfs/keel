@@ -72,3 +72,5 @@ prompt: |
   Phantoms: N | Duplicates: N | Stale: N | Hotspots: N | Orphans: N
   ```
 ```
+
+**Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.

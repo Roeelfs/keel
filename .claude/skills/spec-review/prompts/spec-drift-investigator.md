@@ -88,3 +88,5 @@ prompt: |
   Be strict about evidence. If the scout over-reached, say so clearly and mark
   the candidate false positive.
 ```
+
+**Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.

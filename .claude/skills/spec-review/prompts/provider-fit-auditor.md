@@ -177,3 +177,5 @@ prompt: |
     CRITICAL/MAJOR and inside the spec's scope, are applied as prose fixes to the spec's
     design — never as a new scaffolding table in the spec.
 ```
+
+**Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.

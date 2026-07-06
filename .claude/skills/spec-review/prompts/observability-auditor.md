@@ -158,3 +158,5 @@ prompt: |
 ## Grounding (frameworks this lane applies — cited by name, not injected into specs)
 
 Observability-driven development / ship-telemetry-with-code (Charity Majors, *Observability Engineering*); canonical log lines (Stripe) + OpenTelemetry Logs Data Model (stable event name + severity); correlation-ID pattern + OpenTelemetry Traces + W3C Trace Context (`traceparent`); release stamping via OTel `service.version` + Sentry Releases (onset-vs-deploy, suspect commit); async ack ≠ terminal outcome (AWS Lambda async `202`; Temporal Open vs Closed); SLI/SLO discipline (Google SRE); high-cardinality / PII-in-labels (Prometheus naming) + secrets/PII exclusion (OWASP Logging Cheat Sheet); release-fragile grouping and normalized fingerprints (Sentry grouping/fingerprint rules); known-error ledger (ITIL KEDB). All portable, product-agnostic craft — no project internals.
+
+**Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.

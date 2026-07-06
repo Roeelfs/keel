@@ -29,3 +29,5 @@ cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
 ## Reading results
 
 When you get the background completion notification, read `/tmp/codex-spec-std-*.txt` with the Read tool. Parse whatever Codex produced. No grep, no sed. You're an LLM — just read it.
+
+**Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.

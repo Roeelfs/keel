@@ -245,3 +245,5 @@ prompt: |
   Simpler alternative available: [yes/no]
   ```
 ```
+
+**Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.

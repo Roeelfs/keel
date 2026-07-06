@@ -154,3 +154,5 @@ prompt: |
 
   ## Output the table only — no preamble, no summary
 ```
+
+**Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.

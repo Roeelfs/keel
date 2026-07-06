@@ -91,3 +91,5 @@ prompt: |
   Only flag issues that would cause real problems during implementation.
   Stylistic preferences are NOT issues.
 ```
+
+**Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.

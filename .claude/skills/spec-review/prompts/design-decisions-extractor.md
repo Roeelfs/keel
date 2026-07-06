@@ -154,3 +154,5 @@ prompt: |
   - "Evidence" should be 1-3 short markers (e.g. `apps/X.ts edited`, commit
     subject, exec cmd). Skip evidence for items where it would be noise.
 ```
+
+**Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.

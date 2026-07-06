@@ -64,3 +64,5 @@ Two severity tags are meaningful here:
 
 Neither maps to CRITICAL/MAJOR/MINOR. Present them in their own section.
 ```
+
+**Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.
