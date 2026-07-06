@@ -31,14 +31,28 @@ any real (non-keel) skill copies the runtime installed itself.
 ## The tool: `tooling/wire-skills.sh`
 
 Syncs the canonical skill set into every runtime root. **Idempotent and safe** — it
-only ever creates symlinks into the source and prunes *its own* dangling
+only ever creates symlinks into a source and prunes *its own* dangling
 skill-symlinks; it never touches real skill copies, other vendors' skills, or a
 runtime's built-ins.
 
 ```sh
-tooling/wire-skills.sh            # sync keel skills into all detected roots
+tooling/wire-skills.sh            # sync keel + machine-local skills into all roots
 tooling/wire-skills.sh --dry-run  # show what would change; mutate nothing
 ```
+
+It syncs **two** sources by default:
+
+1. **keel's canonical set** (`<clone>/.claude/skills`) → every runtime root.
+2. **the Claude Code root's machine-local skills** — real skill dirs that live only in
+   `~/.claude/skills` (e.g. a personal `transcribe-audio`), never in keel → the *other*
+   runtime roots (Codex, agents.md). Claude Code discovers those natively; Codex and
+   agents.md read only their one global root. Without this mirror, a machine-local skill
+   added *after* a root was first wired is invisible to those runtimes — the same drift,
+   one source over. This is exactly how Codex ended up missing `transcribe-audio` while
+   Claude Code had it.
+
+An explicit `--src <dir>` syncs **only** that dir and skips the machine-local mirror —
+that's the opt-in path for pushing a single project's skills into one runtime (below).
 
 Runtimes that aren't installed (no home dir) are skipped. Skills load at invocation
 time, so a newly-wired skill is available on its next use — no restart.
