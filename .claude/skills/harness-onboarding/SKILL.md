@@ -111,6 +111,16 @@ role in the clone. When a generic-craft agent needs project specifics, the proje
 that put a clinical eval-judge and a Vercel-branded deploy agent into keel and made
 them machine-wide — the failure this row exists to prevent.)
 
+**Cross-runtime memory is already one store — verify, don't symlink.** Curated project
+memory lives at `~/.claude/projects/<slug>/memory/` (`MEMORY.md` + one `*.md` per fact),
+and both Claude Code and Codex address it by the *same* cwd-slug — so there is nothing to
+symlink; they converge by convention. What onboarding checks: (1) Codex's
+`~/.codex/AGENTS.md` has the per-project block that **reads the whole store** (index →
+topic files, not just `MEMORY.md`) and **writes durable facts back** into it in the same
+format; (2) memory stays machine-local (PHI/secrets never in keel or a remote). Codex's
+native `memories_1.sqlite` is a separate auto-cache — leave it. Full model:
+[`docs/cross-runtime-memory.md`](../../../docs/cross-runtime-memory.md).
+
 ## Phase 3 — Propose (dry-run plan; nothing mutates yet)
 
 Emit the full plan as a table — every mutation listed, then **stop for confirmation**:
@@ -141,6 +151,10 @@ Each row carries a risk note. Anything destructive names its backup.
    Then activate the sync hook once: `git config core.hooksPath .githooks` — so a
    future `git pull` that adds a skill re-wires every runtime automatically, no
    re-onboard needed (see [`docs/cross-runtime-skills.md`](../../../docs/cross-runtime-skills.md)).
+   Also ensure Codex's `~/.codex/AGENTS.md` carries the shared-memory per-project block
+   (read the whole `~/.claude/projects/<slug>/memory/` store, not just the index, and
+   write durable facts back into it) — template + rationale in
+   [`docs/cross-runtime-memory.md`](../../../docs/cross-runtime-memory.md).
 3. **Verify mechanically**: every new symlink resolves (`find <root> -type l
    ! -exec test -e {} \; -print` → empty); no `real-copy` entries remain for
    machine-wide skills; invoke one skill end-to-end to confirm loading; re-run the

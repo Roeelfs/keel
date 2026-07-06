@@ -33,24 +33,36 @@ python3 ~/.claude/skills/codex-sessions/scripts/sessions.py mine --limit 20 --no
 python3 ~/.claude/skills/codex-sessions/scripts/sessions.py mine --since 2026-01-01 --limit 20 --no-gh
 ```
 
-Artifacts are written to `STATE_DIR/`:
-- `last-state.json`
-- `state-miner-<timestamp>.md`
-- `survey-<timestamp>.json`
+Artifacts (`last-state.json`, `state-miner-<timestamp>.md`, `survey-<timestamp>.json`)
+land in `~/.claude/projects/<slug>/codex-mining/` — `<slug>` is the cwd path with `/`
+replaced by `-`, the same per-project convention as Claude's memory dir. The script
+never writes into the cwd (a prior version created `./tools/codex-sessions/state/` at
+import time, polluting whatever repo you ran it in).
 
-`STATE_DIR` defaults to:
-- `<cwd>/tools/codex-sessions/state/` if that directory exists in the cwd (in-repo layout — back-compat)
-- otherwise `~/.claude/projects/<slug>/codex-mining/` where `<slug>` is the cwd path with `/` replaced by `-`
-
-### `export-messages`
-Normalize a Codex rollout into Claude-shaped JSONL records (`{"message": {"role": ..., "content": ...}}`) so downstream extractors that assume Claude's schema (e.g. `spec-review`/prompts/design-decisions-extractor.md) work unchanged across both runtimes.
+### `extract-decisions`
+Deep-walk one Codex rollout into the **cross-runtime structured-decisions JSON** — the
+*identical* schema `claude-sessions` `extract-decisions` emits (`runtime: "codex"`), so
+`spec-review`'s `design-decisions-extractor` and `improve-harness` consume Codex and
+Claude sessions with the same prompt. This is the Codex half of the decision-mining
+backbone.
 
 ```bash
-python3 ~/.claude/skills/codex-sessions/scripts/sessions.py export-messages \
-  --sid <session-id> --output /tmp/codex-export.jsonl
+python3 ~/.claude/skills/codex-sessions/scripts/sessions.py extract-decisions \
+  --sid <session-id> --output /tmp/codex-decisions-<sid>.json
 ```
 
-The output is a JSONL where each line has the same shape as a Claude session record. Walking codex's `event_msg.user_message`, `event_msg.assistant_message`/`agent_message`/`final_answer`, and `response_item.message` payloads. Tool calls and metadata are dropped — only conversational turns are emitted.
+The walker maps Codex's event schema onto the shared contract:
+- **user_turns** from `event_msg.user_message` only — the canonical typed input.
+  `response_item.message` frames (the model-IO echo of each turn) are dropped so a turn
+  isn't double-counted and its tool attribution isn't split; harness-injected user
+  frames (`# AGENTS.md instructions`, attachment manifests, `<skill>` invocations) are
+  filtered like Claude's `<…>` frames.
+- **tools_after** in codex form (`exec: <cmd>`, `apply_patch: <files>`, `mcp: <tool>`),
+  **files_edited_after** from `patch_apply_end.changes`.
+- **session_meta** carries the codex-specific `model` / `approval_policy` /
+  `sandbox_policy` from `turn_context`.
+- **commits_during_session** mined from `git log --grep=Session-Id: <rollout-id>` in the
+  session's own cwd (Codex stamps the rollout id as the `Session-Id` trailer).
 
 ## Notes
 - The script is designed to tolerate partial/missing event fields in transcripts.

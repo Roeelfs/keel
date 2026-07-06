@@ -83,7 +83,13 @@ Skip implementation details, design debates, and rejected alternatives. Keep thi
     --output "/tmp/spec-review-decisions-${CLAUDE_SESSION_ID:0:8}.json"
   ```
   (The path is repo-relative; if the skill is installed globally, use its installed path — e.g. `~/.claude/skills/claude-sessions/sessions.py` — instead.)
-- **Other runtimes:** If you drive this from Codex instead of Claude Code, mine decisions with your Codex session equivalent, or skip decision-mining entirely (the reviewers still run). keel ships only the Claude session miner.
+- **Codex** (driving from a Codex session instead): same command, Codex miner, identical output schema (`runtime: "codex"`):
+  ```bash
+  python3 .claude/skills/codex-sessions/scripts/sessions.py extract-decisions \
+    --sid "<codex-rollout-id>" \
+    --output "/tmp/spec-review-decisions-codex.json"
+  ```
+  (The rollout id is the newest `~/.codex/sessions/**/rollout-*.jsonl`'s `session_id`, or `codex-sessions/scripts/sessions.py list`. Use `~/.claude/skills/...` paths if installed globally.)
 
 If decision-mining fails or there's no session to mine (e.g. the spec arrived from elsewhere), skip it — proceed with just the spec + the 2a context block. The reviewers still run; they simply lose the decisions cross-check. Not a blocker.
 

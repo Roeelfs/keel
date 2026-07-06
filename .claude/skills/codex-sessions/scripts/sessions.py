@@ -14,8 +14,20 @@ from typing import Any, Dict, List, Optional
 
 INDEX_PATH = Path.home() / ".codex/session_index.jsonl"
 SESSIONS_ROOT = Path.home() / ".codex/sessions"
-STATE_DIR = Path("tools/codex-sessions/state")
-STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def cwd_slug() -> str:
+    return str(Path.cwd()).replace("/", "-")
+
+
+def resolve_state_dir() -> Path:
+    """Where `mine` writes artifacts: the harness-side per-project dir, same slug
+    convention as Claude's ~/.claude/projects/<slug>/memory. Created lazily, never at
+    import time — the old bug was a module-level Path('tools/codex-sessions/state')
+    that mkdir'd into the cwd on every run, polluting whatever repo you were in."""
+    state = Path.home() / ".claude" / "projects" / cwd_slug() / "codex-mining"
+    state.mkdir(parents=True, exist_ok=True)
+    return state
 
 
 def ts_from_iso(value: Optional[str]) -> Optional[float]:
@@ -617,15 +629,13 @@ def survey_text(sid: Optional[str], sessions: List[SessionRecord]) -> None:
                 print(f"- {ts}: {label}: {(item.get('text') or '')[:120]}")
 
 
-def collect_git_commits(sid: str) -> List[Dict[str, str]]:
-    repo = Path.cwd()
+def collect_git_commits_for(repo: str, sid: str) -> List[Dict[str, str]]:
+    if not repo or not Path(repo).is_dir():
+        return []
     try:
         out = subprocess.check_output(
             [
-                "git",
-                "-C",
-                str(repo),
-                "log",
+                "git", "-C", str(repo), "log", "--all",
                 "--format=%H%x01%s%x01%ad",
                 "--date=iso-strict",
                 "--max-count=15",
@@ -644,6 +654,10 @@ def collect_git_commits(sid: str) -> List[Dict[str, str]]:
         sha, subject, date = parts[0], parts[1], parts[2]
         entries.append({"sha": sha, "subject": subject, "date": date})
     return entries
+
+
+def collect_git_commits(sid: str) -> List[Dict[str, str]]:
+    return collect_git_commits_for(str(Path.cwd()), sid)
 
 
 def get_prs_and_issues(sid: str, no_gh: bool) -> Dict[str, Any]:
@@ -671,6 +685,7 @@ def get_prs_and_issues(sid: str, no_gh: bool) -> Dict[str, Any]:
 
 def write_state_miners(sessions: List[SessionRecord], filter_text: Optional[str], no_gh: bool) -> Dict[str, Any]:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    state_dir = resolve_state_dir()
     latest_sid = sessions[0].sid if sessions else ""
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -692,9 +707,9 @@ def write_state_miners(sessions: List[SessionRecord], filter_text: Optional[str]
                 f"{s.sid}: unresolved in-flight task started without completion"
             )
 
-    cache_file = STATE_DIR / f"state-miner-{ts}.json"
-    survey_file = STATE_DIR / f"survey-{ts}.json"
-    state_file = STATE_DIR / "last-state.json"
+    cache_file = state_dir / f"state-miner-{ts}.json"
+    survey_file = state_dir / f"survey-{ts}.json"
+    state_file = state_dir / "last-state.json"
     cache_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     survey_file.write_text(json.dumps(payload["sessions"], indent=2), encoding="utf-8")
 
@@ -752,7 +767,7 @@ def write_state_miners(sessions: List[SessionRecord], filter_text: Optional[str]
     ]
     prompt.append(json.dumps(payload, indent=2))
     prompt.append("```")
-    prompt_file = STATE_DIR / f"state-miner-{ts}.md"
+    prompt_file = state_dir / f"state-miner-{ts}.md"
     prompt_file.write_text("\n".join(prompt) + "\n", encoding="utf-8")
 
     return {
@@ -761,6 +776,205 @@ def write_state_miners(sessions: List[SessionRecord], filter_text: Optional[str]
         "state_file": str(state_file),
         "prompt_file": str(prompt_file),
     }
+
+
+def _codex_msg_text(payload: Dict[str, Any]) -> str:
+    """Conversational text from an event_msg user/agent message OR a
+    response_item message (whose content is a list of {type, text} parts)."""
+    t = payload.get("text") or payload.get("message")
+    if isinstance(t, str) and t.strip():
+        return t
+    content = payload.get("content")
+    if isinstance(content, list):
+        parts = [
+            str(p.get("text") or "")
+            for p in content
+            if isinstance(p, dict) and p.get("type") in {"input_text", "output_text", "text"}
+        ]
+        return "\n".join(x for x in parts if x).strip()
+    return ""
+
+
+def _is_injected_user_frame(text: str) -> bool:
+    """True for harness-injected 'user' frames that aren't real asks — Codex loads
+    AGENTS.md, environment context, attachment manifests, and skill invocations as
+    user-role messages. The claude extractor skips the equivalent `<...>` frames."""
+    head = text.lstrip()
+    if head.startswith("<"):  # <skill>, <environment_context>, <user_instructions>, tool results
+        return True
+    for marker in (
+        "# AGENTS.md instructions",
+        "# Files mentioned by the user",
+        "# Environment",
+        "<environment_context",
+        "<user_instructions",
+    ):
+        if head.startswith(marker):
+            return True
+    return False
+
+
+def _codex_tool_after(name: str, arguments: Any) -> str:
+    """One-line codex-runtime tool summary matching the cross-runtime schema's
+    codex examples (`exec: <cmd>`, `apply_patch: ...`, `mcp: <tool>`)."""
+    args: Dict[str, Any] = {}
+    if isinstance(arguments, str) and arguments:
+        try:
+            args = json.loads(arguments)
+        except Exception:
+            args = {}
+    elif isinstance(arguments, dict):
+        args = arguments
+    if name in {"exec_command", "shell", "local_shell"}:
+        cmd = args.get("cmd") or args.get("command") or ""
+        if isinstance(cmd, list):
+            cmd = " ".join(str(c) for c in cmd)
+        cmd = " ".join(str(cmd).split())
+        return f"exec: {cmd[:160]}"
+    if name in {"apply_patch", "patch"}:
+        return "apply_patch: (patch)"
+    if name.startswith("mcp"):
+        return f"mcp: {name}"
+    return f"{name}: {json.dumps(args)[:120]}" if args else name
+
+
+def find_rollout_for_sid(sid: str) -> Optional[Path]:
+    cache: Dict[str, Path] = {}
+    for entry in load_index():
+        eid = str(entry.get("id") or "")
+        if eid == sid or eid.startswith(sid):
+            p = find_transcript_for_session(eid, cache, entry)
+            if p:
+                return p
+    if SESSIONS_ROOT.exists():
+        matches = list(SESSIONS_ROOT.rglob(f"*{sid}*.jsonl"))
+        if matches:
+            return max(matches, key=lambda p: p.stat().st_mtime)
+    return None
+
+
+def extract_decisions(sid: str, output_path: Path) -> Path:
+    """Deep-walk one Codex rollout and emit the cross-runtime structured-decisions
+    JSON — the SAME schema claude-sessions.extract-decisions produces, so
+    spec-review's design-decisions-extractor and improve-harness consume Codex and
+    Claude sessions identically (runtime tag distinguishes them)."""
+    path = find_rollout_for_sid(sid)
+    if path is None or not path.exists():
+        raise SystemExit(f"no Codex rollout found for sid {sid!r}")
+
+    session_meta: Dict[str, Any] = {
+        "cwd": None, "started_at": None,
+        "model": None, "approval_policy": None, "sandbox_policy": None,
+    }
+    session_id_full = sid
+    user_turns: List[Dict[str, Any]] = []
+    assistant_summary: List[Dict[str, Any]] = []
+    files_touched: set = set()
+    tool_dist: Dict[str, int] = {}
+    current: Optional[Dict[str, Any]] = None
+
+    def flush(turn: Optional[Dict[str, Any]]) -> None:
+        if turn is not None:
+            user_turns.append(turn)
+
+    with path.open("r", encoding="utf-8") as fh:
+        for raw in fh:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                obj = json.loads(raw)
+            except Exception:
+                continue
+            etype = obj.get("type")
+            payload = obj.get("payload", {}) or {}
+            ts = obj.get("timestamp") or payload.get("timestamp")
+
+            if etype == "session_meta":
+                session_meta["cwd"] = session_meta["cwd"] or safe_get(payload, "cwd")
+                session_meta["started_at"] = session_meta["started_at"] or safe_get(payload, "timestamp") or ts
+                sid_val = safe_get(payload, "id") or safe_get(payload, "session_id")
+                if sid_val:
+                    session_id_full = str(sid_val)
+                continue
+            if etype == "turn_context":
+                session_meta["cwd"] = safe_get(payload, "cwd") or session_meta["cwd"]
+                session_meta["model"] = safe_get(payload, "model") or session_meta["model"]
+                session_meta["approval_policy"] = safe_get(payload, "approval_policy") or session_meta["approval_policy"]
+                if safe_get(payload, "sandbox_policy") is not None:
+                    session_meta["sandbox_policy"] = safe_get(payload, "sandbox_policy")
+                continue
+
+            ptype = payload.get("type")
+
+            # response_item.message frames are model-IO echoes of turns already
+            # captured via event_msg — skip them so a turn isn't double-counted (which
+            # splits its tool attribution across a real copy and an empty one).
+            if etype == "response_item" and ptype == "message":
+                continue
+
+            if etype == "event_msg" and ptype == "user_message":
+                text = _codex_msg_text(payload)
+                if not text or _is_injected_user_frame(text):
+                    continue
+                flush(current)
+                current = {"ts": ts, "content": text[:4000], "tools_after": [], "files_edited_after": []}
+                continue
+
+            if etype == "event_msg" and ptype in {"agent_message", "final_answer"}:
+                text = _codex_msg_text(payload)
+                if text and len(text.strip()) >= 40 and current is not None:
+                    assistant_summary.append({"ts": ts, "text": text[:1200]})
+                continue
+
+            if etype == "response_item" and ptype == "function_call":
+                name = safe_get(payload, "name") or "function_call"
+                tool_dist[name] = tool_dist.get(name, 0) + 1
+                if current is not None:
+                    current["tools_after"].append(_codex_tool_after(name, safe_get(payload, "arguments")))
+                continue
+            if etype == "response_item" and ptype in {"custom_tool_call", "tool_search_call"}:
+                name = safe_get(payload, "name") or ptype
+                tool_dist[name] = tool_dist.get(name, 0) + 1
+                if current is not None:
+                    current["tools_after"].append(f"{ptype}: {name}")
+                continue
+            if etype == "event_msg" and ptype == "patch_apply_end":
+                changes = safe_get(payload, "changes")
+                files = list(changes.keys()) if isinstance(changes, dict) else []
+                tool_dist["apply_patch"] = tool_dist.get("apply_patch", 0) + 1
+                for f in files:
+                    files_touched.add(str(f))
+                    if current is not None:
+                        current["files_edited_after"].append(str(f))
+                if current is not None and files:
+                    current["tools_after"].append(f"apply_patch: {', '.join(str(f) for f in files)[:160]}")
+                continue
+            if etype == "event_msg" and ptype == "mcp_tool_call_end":
+                tool_dist["mcp"] = tool_dist.get("mcp", 0) + 1
+                continue
+
+    flush(current)
+
+    cwd = session_meta.get("cwd") or ""
+    commits = collect_git_commits_for(cwd, session_id_full) if cwd else []
+
+    payload_out = {
+        "session_id": session_id_full,
+        "runtime": "codex",
+        "session_meta": session_meta,
+        "user_turns": user_turns,
+        "assistant_summary": assistant_summary[-30:],
+        "commits_during_session": [
+            {"line": f"{c['sha'][:9]} {c['subject']} ({c['date']})"} for c in commits
+        ],
+        "files_touched": sorted(files_touched),
+        "tool_call_distribution": dict(sorted(tool_dist.items(), key=lambda kv: -kv[1])),
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload_out, indent=2) + "\n", encoding="utf-8")
+    print(f"wrote {len(user_turns)} user turns / {len(commits)} commits → {output_path}")
+    return output_path
 
 
 def parse_args() -> argparse.Namespace:
@@ -786,11 +1000,24 @@ def parse_args() -> argparse.Namespace:
     add_common(mine_parser)
     mine_parser.add_argument("--no-gh", action="store_true")
 
+    ed_parser = subparsers.add_parser(
+        "extract-decisions",
+        help="Deep-walk one Codex rollout into the cross-runtime design-decisions JSON (spec-review / improve-harness feed)",
+    )
+    ed_parser.add_argument("--sid", required=True, help="Codex session id (full or prefix)")
+    ed_parser.add_argument("--output", help="Output JSON path (default /tmp/codex-decisions-<sid>.json)")
+
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+
+    if args.command == "extract-decisions":
+        out = Path(args.output) if args.output else Path(f"/tmp/codex-decisions-{args.sid[:8]}.json")
+        extract_decisions(args.sid, out)
+        return
+
     days = args.days
     if args.command == "mine" and args.since is None and days is None:
         days = 2

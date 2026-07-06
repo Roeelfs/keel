@@ -17,8 +17,12 @@ export const meta = {
   phases: [{ title: 'Mine' }, { title: 'Survey' }, { title: 'Consolidate' }],
 }
 
-// Bucket the past-week transcripts so each miner gets a slice (find them first, inline):
-//   ls -t ~/.claude/projects/*/*.jsonl | head -N   (and ~/.claude/history.jsonl)
+// Bucket the past-week transcripts so each miner gets a slice (find them first, inline).
+// BOTH runtimes — friction lessons must correlate across the WHOLE harness, not just Claude:
+//   ls -t ~/.claude/projects/*/*.jsonl                    (Claude Code sessions)
+//   ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl         (Codex rollouts)
+//   ~/.claude/history.jsonl
+// Mix both runtimes into the buckets; the miner prompt below handles either schema.
 const BUCKETS = args.transcriptBuckets // [[path,...], ...]  passed in by the skill
 const LESSON_SCHEMA = { type:'object', additionalProperties:false, required:['report_markdown','lessons'], properties:{
   report_markdown:{type:'string'},
@@ -33,7 +37,7 @@ const LESSON_SCHEMA = { type:'object', additionalProperties:false, required:['re
 
 phase('Mine')
 const minings = await parallel(BUCKETS.map((b,i)=>()=>agent(
-  `Mine these transcripts for harness lessons. Extract THREE things: (1) human-typed turns + corrections; (2) the assistant's own self-flagged mistakes; (3) RECURRING FRICTION LOOPS — the same operation retried ≥3× to no effect, repeated identical errors, repeated permission denials, a merge/push/CI step attempted-and-blocked over and over. Friction loops are usually SILENT (the agent never flags them) — detect them by counting repeated near-identical tool calls and their failures, not by looking for an apology. Files: ${b.join(', ')}. Rank by impact — a recurring friction loop ranks at the TOP, it is the highest-signal lesson there is. Quote evidence with the session file (include the repeated-call count). Set change_kind per lesson: a friction loop that is mechanically detectable at a tool boundary MUST be change_kind:settings-hook (a PreToolUse/Stop guard that blocks the wrong move) — never demote a mechanical block to a prose rule the model "should remember" (a remembered rule is exactly what failed in the stuck-on-merge case). Return report_markdown + lessons[].`,
+  `Mine these transcripts for harness lessons. Extract THREE things: (1) human-typed turns + corrections; (2) the assistant's own self-flagged mistakes; (3) RECURRING FRICTION LOOPS — the same operation retried ≥3× to no effect, repeated identical errors, repeated permission denials, a merge/push/CI step attempted-and-blocked over and over. Friction loops are usually SILENT (the agent never flags them) — detect them by counting repeated near-identical tool calls and their failures, not by looking for an apology. Files: ${b.join(', ')}. Transcripts are EITHER Claude JSONL (\`{message:{role,content}}\`; tool_use frames, human turns are type:"user" with string content) OR Codex rollout JSONL (\`{type:"event_msg"|"response_item", payload:{type,...}}\`; human turns are \`event_msg.user_message.text\`, tool calls are \`response_item.function_call\` name+arguments and \`event_msg.patch_apply_end\`, and \`response_item.message\` frames are model-IO echoes to IGNORE) — parse whichever a file is; friction = the same \`exec_command\`/\`function_call\` (codex) or \`Bash\`/tool_use (claude) payload repeated to no effect. Rank by impact — a recurring friction loop ranks at the TOP, it is the highest-signal lesson there is. Quote evidence with the session file (include the repeated-call count). Set change_kind per lesson: a friction loop that is mechanically detectable at a tool boundary MUST be change_kind:settings-hook (a PreToolUse/Stop guard that blocks the wrong move) — never demote a mechanical block to a prose rule the model "should remember" (a remembered rule is exactly what failed in the stuck-on-merge case). Return report_markdown + lessons[].`,
   {label:`mine:${i}`, phase:'Mine', schema:LESSON_SCHEMA, agentType:'general-purpose'})))
 
 phase('Survey')
@@ -202,4 +206,4 @@ return await agent(`Synthesize a tight, ACTIONABLE production-stability program 
 
 ## Launching
 
-Read the live inventory inline first (`~/.claude/plugins/*.json`, `ls -t ~/.claude/projects/*/*.jsonl`, and for C `~/.claude/agents/*.md`), pass it as `args`, launch the Workflows, then **stop and wait** for the completion notifications. Do not poll.
+Read the live inventory inline first (`~/.claude/plugins/*.json`, `ls -t ~/.claude/projects/*/*.jsonl` **and** `ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl` — bucket BOTH runtimes for Workflow A, and for C `~/.claude/agents/*.md`), pass it as `args`, launch the Workflows, then **stop and wait** for the completion notifications. Do not poll.

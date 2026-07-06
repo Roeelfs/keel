@@ -7,7 +7,7 @@ Dispatch this agent to mine the structured-decisions JSON for design context the
 
 **Cross-runtime input.** The `{{DECISIONS_JSON_PATH}}` is the output of either:
 - `python3 .claude/skills/claude-sessions/sessions.py extract-decisions --sid <SID> --output <path>` (when `{{RUNTIME}}` is `claude`; the path is repo-relative and also works if the skill is installed globally — use `~/.claude/skills/claude-sessions/sessions.py` in that case)
-- Your Codex session equivalent (when `{{RUNTIME}}` is `codex`). keel ships only the Claude session miner; if you drive this from Codex, produce the same JSON schema with your Codex session tooling, or skip decision-mining entirely (the reviewers still run).
+- `python3 .claude/skills/codex-sessions/scripts/sessions.py extract-decisions --sid <SID> --output <path>` (when `{{RUNTIME}}` is `codex`; emits the identical schema with `runtime: "codex"` — `<SID>` is the rollout `session_id`. Use `~/.claude/skills/codex-sessions/scripts/sessions.py` if installed globally).
 
 Both miners emit the **same JSON schema** so the prompt below is runtime-agnostic. The schema is structured walk over the session, not keyword heuristics:
 
