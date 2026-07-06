@@ -52,6 +52,13 @@ Build the state table before touching anything. Enumerate **every** surface:
     cross-runtime surfaces are the ones everyone forgets;
   - per-repo `.claude/skills/` across the user's code root (`for d in <code-root>/*/;
     do ls $d/.claude/skills 2>/dev/null; done`).
+- **Agent roots — same split as skills.** For each `~/.claude/agents/` and per-repo
+  `.claude/agents/`, classify every entry `symlink→clone` / `real-copy` / `absent`
+  **and** generic-craft vs project-specific: does its prompt name a specific
+  project's stack, files, credentials, domain, or a vendor-branded platform? A
+  project-specific agent living in (or symlinked from) the canonical clone is
+  machine-wide contamination — it surfaces in every repo and leaks project-private
+  facts into a public repo. Flag every one.
 - **Overlay + seeds.** Does `~/.claude/skills-overlay/` exist? Which skills have
   overlay `LEARNINGS.md` files?
 - **Instructions files.** The global `~/.claude/CLAUDE.md`; per repo: does it have
@@ -72,6 +79,8 @@ Output: one table — surface × state × verdict (`ok` / `stale-copy` / `diverg
 |---|---|---|
 | Engineering-craft skills (the keel set) | **Machine-wide**: `<root>/<skill> → clone` symlink in *every* skill root (Claude Code + cross-runtime) | one edit/`git pull` propagates everywhere; skills load at invocation time so updates are instant |
 | Repo-specific skills (deploy runbooks, project scripts) | **Repo-local** `.claude/skills/` in that repo only | they version with the code they operate |
+| Engineering-craft agents (`.claude/agents/` — the keel crew: verifier, debugger, deployment-engineer…) | **Machine-wide**: symlinked into every agents root, same as the skill set | vendor-neutral roles load in every repo; a project *extends* them, never edits them |
+| Project-specific agents (a clinical eval-judge, a platform-branded deploy agent, an app's login gotchas/credentials) | **Repo-local** `.claude/agents/` in that project only | they name that project's stack/files/creds — in the clone they go machine-wide AND leak project-private facts into a public, marker-free repo |
 | Private learnings | `~/.claude/skills-overlay/<skill>/LEARNINGS.md` | the committed seed is read-only; private craft never enters the public repo |
 | Project facts/status | that repo's `.claude/memory/` (in-repo, optionally symlinked from the harness projects dir) — keep PHI/secrets machine-local | memory versions with the project; sensitive facts stay off any remote |
 | Personal cross-repo rules | `~/.claude/CLAUDE.md` (harness repo) | user-global contract |
@@ -82,6 +91,19 @@ machine-wide skill**. A copy shadows the canonical one (repo-local wins in Claud
 Code) and silently drifts — the "why is this machine still doing the old thing"
 class. Copies are only correct when a team deliberately vendors a pinned snapshot
 into a shared repo (`install.sh`'s job), and then that repo owns updating it.
+
+The second anti-pattern, the one this skill now guards explicitly: **authoring a
+project's agents or facts INTO the canonical clone.** Onboarding *must* survey the
+project's scope — its stack, workflow (Linear/git/CI), deploy target, login quirks,
+credentials — to embed the work-pipeline harness. But that knowledge is
+project-private and the clone is public and marker-free, so it lands in the *project
+repo*, never the clone: a project-scoped `CLAUDE.md`/`AGENTS.md`, project-local
+`.claude/agents/` and per-skill context, and project memory (`.claude/memory/`) for
+secrets/PHI. Never a customer name, project file path, credential, or vendor-branded
+role in the clone. When a generic-craft agent needs project specifics, the project
+*extends* it repo-locally — it does not edit the machine-wide one. (This is the class
+that put a clinical eval-judge and a Vercel-branded deploy agent into keel and made
+them machine-wide — the failure this row exists to prevent.)
 
 ## Phase 3 — Propose (dry-run plan; nothing mutates yet)
 

@@ -20,6 +20,11 @@ install step.
   end.
 - **One skill, one directory** under `.claude/skills/<name>/` with a `SKILL.md`;
   scripts live in the skill's `scripts/`; no cross-skill runtime coupling.
+- **Agents follow the same split as skills.** `.claude/agents/` holds only
+  vendor-neutral engineering-craft roles — no customer names, project file paths,
+  credentials, or platform-branded agents (they go machine-wide via symlink, so a
+  leak surfaces in every repo). A project's own agents live in that project's
+  repo-local `.claude/agents/`, extending the craft roles, never here.
 - **Skills load at invocation time** (edits apply to running sessions on next use);
   instructions files load at session start. Say which class a change is when
   claiming "applied".
