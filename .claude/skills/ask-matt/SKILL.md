@@ -37,6 +37,8 @@ A starting situation that generates work, then merges onto the main flow.
 
   Triage is only for issues **you didn't create** — bug reports, incoming feature requests, anything that arrives raw. Issues that `/to-issues` produced are already agent-ready, so **don't triage them**.
 
+- **A huge, foggy effort that cannot fit one session** → compose `/orchestrator` + `/investigation` around the issue tracker. First chart only the decision questions visible now; each session claims one unblocked question, invokes `/investigation` when it depends on external facts, and records its evidence + decision on that issue. Repeat until no unresolved decision blocks a coherent PRD, then merge onto `/to-prd`. This on-ramp intentionally spans sessions; the main-flow one-window rule starts only after it merges. It carries upstream's `wayfinder` pattern without installing a second orchestration architecture.
+
 ## Codebase health
 
 Not feature work — upkeep.
@@ -55,6 +57,7 @@ Off the main flow entirely.
 - **`/grill-me`** — the same relentless interview as `/grill-with-docs`, but for when you have **no codebase**. Stateless: it saves nothing locally, builds no `CONTEXT.md`. Reach for it to sharpen any plan or design that doesn't live in a repo.
 - **`/teach`** — learn a concept over multiple sessions, using the current directory as a stateful workspace.
 - **`/writing-great-skills`** — reference for writing and editing skills well.
+- **`/investigation`** — evidence-first external research using primary sources and adversarial verification; use it whenever a flow depends on facts outside the current codebase.
 
 ## Precondition
 
