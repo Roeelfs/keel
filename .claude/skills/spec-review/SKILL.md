@@ -490,7 +490,7 @@ review synthesis.
    ```bash
    TASK_TAG="alignment-$$"
    cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
-     -m gpt-5.5 \
+     -m gpt-5.6-sol \
      --config model_reasoning_effort="high" \
      --sandbox read-only \
      --full-auto \
@@ -527,7 +527,7 @@ When the investigation completes, read the output file and extract findings your
 
 ```markdown
 ### Alignment Findings
-**Model:** gpt-5.5 at high | **Mode:** single-pass [or adaptive]
+**Model:** gpt-5.6-sol at high | **Mode:** single-pass [or adaptive]
 
 #### Confirmed Misalignments
 - [severity] <description> — Evidence: <files/lines>. Action: <fix>

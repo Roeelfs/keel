@@ -8,7 +8,7 @@ Use Bash with `run_in_background: true` (no trailing `&`). You'll be notified wh
 
 ```bash
 cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
-  -m gpt-5.5 \
+  -m gpt-5.6-sol \
   --config model_reasoning_effort="high" \
   --config service_tier="fast" \
   --sandbox workspace-write \

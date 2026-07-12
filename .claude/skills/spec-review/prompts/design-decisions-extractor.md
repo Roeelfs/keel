@@ -19,7 +19,7 @@ Both miners emit the **same JSON schema** so the prompt below is runtime-agnosti
     "cwd": "/path/to/project",
     "git_branch": "feat/X",                  // claude only
     "started_at": "ISO-8601",
-    "model": "gpt-5.5",                      // codex only
+    "model": "gpt-5.6-sol",                  // codex only
     "approval_policy": "never",              // codex only
     "sandbox_policy": {"type": "..."}        // codex only
   },

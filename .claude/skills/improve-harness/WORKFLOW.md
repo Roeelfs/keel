@@ -1,6 +1,6 @@
 # Investigation Workflows
 
-Two background `Workflow` scripts. Launch both, then stop — they notify on completion. They are **read-only**: research and design, never mutate. Adapt the inventory/paths to the current machine before launching.
+Two asynchronous `Workflow` scripts. Launch both, then stop — they notify on completion. They are **read-only**: research and design, never mutate. Adapt the inventory/paths to the current machine before launching. `Workflow` is inherently asynchronous; do **not** pass an unsupported `run_in_background` parameter.
 
 Shared rules baked into every agent prompt: *"Investigation only — design the plan, do not mutate. WebFetch / read-only gh / local reads only. No CI polling, no sleep loops, no nested dispatch."*
 
