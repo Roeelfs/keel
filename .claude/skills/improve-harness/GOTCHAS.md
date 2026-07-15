@@ -30,7 +30,7 @@ Hard-won traps, by phase. Read the relevant block before running that phase of s
 - **Everything is scriptable** — `claude plugin marketplace update|remove` + `claude plugin update|install|enable` exist; no `/plugin` TUI needed. Only the **restart** (to apply) and the **bake** are human steps.
 - **Model audit is surgical.** Bump only genuinely-stale IDs (e.g. a prior-gen Opus). Leave anything already on the current flagship, and leave **intentional cheap-tier routing** (a deliberately-cheaper model in an orchestrator/rescue path) — bumping it defeats the tiering.
 - **Isolate MAJOR bumps and bake them.** A plugin major (e.g. superpowers 5→6) and the Codex CLI back skills/agents you rely on — do them last, flag a restart + re-test in a throwaway session. A global TypeScript major: hold until `npx tsc --noEmit` passes in the repo (global TS doesn't affect repo `tsc`, but don't assume).
-- Skills that configure GitHub/local trackers stay **dormant** if your source-of-truth is a different issue tracker. Tracker-mismatched vendored skills (`to-issues`/`to-prd`/`triage`-style) are worth keeping but **don't rely on them un-adapted**.
+- Tracker-coupled skills (`to-tickets`/`to-spec`/`triage`/`wayfinder`) stay **dormant until pointed at your source-of-truth** via `/setup-matt-pocock-skills` — keel ships GitHub / GitLab / Linear / local seeds, so configure the tracker first, then they're live. Don't rely on them un-configured.
 
 ## Hooks (step 4e)
 

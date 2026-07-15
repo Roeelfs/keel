@@ -198,7 +198,7 @@ flows (`/ask-matt` is the built-in router when you forget):
 | Stage | Skills |
 |---|---|
 | **Ground** | `investigation` — evidence before action, for everything below |
-| **Shape the idea** | `grilling` / `grill-with-docs` / `grill-me` · `prototype` · `domain-modeling` · `to-prd` · `to-issues` · `triage` |
+| **Shape the idea** | `grilling` / `grill-with-docs` / `grill-me` · `prototype` · `domain-modeling` · `wayfinder` · `to-spec` · `to-tickets` · `triage` |
 | **Build** | `implement` · `tdd` · `codebase-design` · `resolving-merge-conflicts` |
 | **Review** | `spec-review` · `standards-spec-review` · `spec-visualization` |
 | **Test & verify** | `spec-test-plan` · `spec-test-execute` · `flows` |
@@ -288,10 +288,12 @@ adapted, with gratitude — from excellent open source:
 
 - **[Matt Pocock's skills](https://github.com/mattpocock/skills)** — the
   idea→ship engineering flow (`grilling`, `domain-modeling`, `codebase-design`,
-  `diagnosing-bugs`, `triage`, `to-prd`, `to-issues`, `implement`, `prototype`,
-  `handoff`, `improve-codebase-architecture`, `writing-great-skills`). Run
-  `/setup-matt-pocock-skills` once to configure them; `/ask-matt` routes between
-  them.
+  `diagnosing-bugs`, `triage`, `to-spec`, `to-tickets`, `wayfinder`, `implement`,
+  `prototype`, `handoff`, `improve-codebase-architecture`, `writing-great-skills`,
+  `teach`). keel **tracks his canonical latest** and layers only specific,
+  documented deltas (see [docs/vendor-upstreams.md](docs/vendor-upstreams.md)). Run
+  `/setup-matt-pocock-skills` once to configure the issue tracker (GitHub / GitLab /
+  Linear / local); `/ask-matt` routes between them.
 - **[superpowers](https://github.com/obra/superpowers)** — the spec-driven
   workflow convention that shaped the spec pipeline, and the `deep-research` /
   `systematic-debugging` / `brainstorming` axis keel's grounding loops
