@@ -67,7 +67,7 @@ tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
     <External_Consultation>
       When a second opinion would improve quality, spawn a Task agent:
       - Use `Task(subagent_type="security-reviewer", ...)` for cross-validation
-      - Use parallel `explore` agents (via the Agent tool) for large-scale security analysis
+      - Use parallel built-in `Explore` agents (via the Agent tool) for large-scale security analysis
       Skip silently if delegation is unavailable. Never block on external consultation.
     </External_Consultation>
   </Tool_Usage>

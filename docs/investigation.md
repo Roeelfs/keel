@@ -16,7 +16,7 @@ line, a git fact), not by what the code looks like it does.**
 ```
   UNDERSTAND ──────────────► MAP ──────────────► CRITIQUE ──────► REMEMBER
   parallel recon            structure +          what the         durable,
-  (explore × N)             root cause           map missed       cross-session
+  (Explore × N)             root cause           map missed       cross-session
                             (tracer/debugger/    (critic)         (claude-sessions,
                              architect)                            in-flight registry,
                                                                    flows.json)
@@ -27,7 +27,7 @@ which agent to reach for.
 
 ## Phase 1 — UNDERSTAND: fan out read-only recon
 
-The atomic unit is the [`explore`](../.claude/agents/explore.md) agent: a Haiku,
+The atomic unit is the built-in `Explore` agent: a cheap,
 **read-only** (Read/Grep/Glob/Bash) search specialist. Its contract is a
 *conclusion*, not a file dump — it leads with the answer, then cites `path:line`
 for the few files that matter, names the naming/structure convention it observed,
@@ -36,17 +36,17 @@ and lists the gaps it searched but couldn't find (so you know the search was rea
 Drop into an unknown repo and dispatch several at once, one per subsystem:
 
 ```
-explore: where does HTTP request handling enter the system, and how is auth applied?
-explore: how is the database accessed — ORM, raw SQL, a repository layer? where do migrations live?
-explore: where is configuration loaded, and what are the env vars / config files?
+Explore: where does HTTP request handling enter the system, and how is auth applied?
+Explore: how is the database accessed — ORM, raw SQL, a repository layer? where do migrations live?
+Explore: where is configuration loaded, and what are the env vars / config files?
 ```
 
-Because `explore` is cheap and read-only, a fan-out sweep builds a structured map
+Because `Explore` is cheap and read-only, a fan-out sweep builds a structured map
 of an unfamiliar codebase *without burning the orchestrator's context window on raw
 file contents*. Each one returns the local convention it observed, so you also
 learn how the repo wants you to navigate it.
 
-> **Tip:** `explore` is read-only but web-enabled — when recon hits an unfamiliar
+> **Tip:** `Explore` is read-only — when recon hits an unfamiliar
 > third-party library or framework, it can look the docs up itself instead of
 > guessing from memory. Keep the web for what the repo *can't* answer; most
 > questions are settled by reading the code.

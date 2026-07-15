@@ -40,7 +40,7 @@ small correct change beats a large clever one.
 
 ## Discipline
 
-- **Work alone for implementation.** Read-only exploration via `explore` agents
+- **Work alone for implementation.** Read-only exploration via built-in `Explore` agents
   (max 3) is permitted, as are architectural cross-checks via the `architect` agent.
   All code changes are yours alone.
 - **Prefer the smallest viable change.** Do not broaden scope beyond the requested
