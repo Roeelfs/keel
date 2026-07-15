@@ -38,7 +38,7 @@ Research Auditor's **ELEVATE** and **CAUTION** tags are NOT in this scale — th
 A spec written in a long session accumulates blind spots. This skill breaks that with:
 1. **Session decision-mining** — recovers the design decisions, rejected alternatives, and user corrections from the session so reviewers judge against intent, not just the prose. Runs as a direct agent dispatch — **no compaction, no hooks, no resume dance.**
 2. **11 parallel reviewers** — each with a focused prompt and one job
-3. **Multi-model** — Claude (Opus/Sonnet) + 3x Codex GPT-5.5 (standard + adversarial + industry research)
+3. **Multi-model** — Claude (Opus/Sonnet) + 3x Codex GPT-5.6-sol (standard + adversarial + industry research)
 4. **Web-enabled research** — all Codex agents run with network access so findings are grounded in real public implementations, CVEs, post-mortems, and RFCs — not just training-data recall
 5. **Semantic boundary mining** — the edge-case miner enumerates entity/state/value boundaries the spec is silent on (cardinality, lifecycle, tenancy, encoding, time, concurrency, permission, resource, schema-evolution, forbidden-but-syntactically-valid)
 6. **Project-policy security mining** — the security miner reads `docs/security-policy.md` (filled by the user from `templates/security-policy.example.md`) plus the project root `CLAUDE.md`/`AGENTS.md`, and audits the spec against your project's stated rules plus portable security categories (authN/authZ, secret/credential storage, tenant/org isolation, input validation & injection, data-boundary separation, privilege escalation, allowlist/denylist gaps, output sanitization). Cites the project's own policy in every finding — no inventing rules
@@ -119,6 +119,7 @@ Read the spec with fresh eyes. Then dispatch ALL 11 primary reviewers simultaneo
 - **Type:** `general-purpose` | **Model:** `opus`
 - **Input:** spec path, project root
 - **Job:** Architectural fit, abstraction level, peer consistency, simplicity, workaround detection, maintenance burden, **platform invariants compliance** (if the project has a `docs/PLATFORM-INVARIANTS.md` file, spec claims are cross-checked against every invariant — violations are CRITICAL/MAJOR by default), and **deep-module fit** — it invokes the `improve-codebase-architecture` + `codebase-design` rubric (reading their `SKILL.md`s directly, since `improve-codebase-architecture` is `disable-model-invocation`, rather than paraphrasing from memory — so future updates to them propagate) and audits the spec's proposed design against the deletion test, shallow-vs-deep modules, and testability-through-the-interface, naming the deeper shape where the spec bolts on a shallow layer — **plus a delete-legacy / one-architecture gate**: does the spec delete the code path it replaces in the same change, and how many architectures exist for the touched capability afterward? A shim / dual old-new path / "keep it just in case" flag is a CRITICAL FAIL.
+- **ADR-conformance lane:** in the same wave, dispatch the dedicated `adr-auditor` agent (Agent tool, `subagent_type: adr-auditor`) — it classifies every spec decision **CONFORMS | STRAYS | NEEDS-APPROVAL** against the Accepted ADRs and platform invariants, and hard-stops any spec that changes an Accepted ADR/invariant without an explicit founder-approval marker.
 
 **Agent 3b — Provider-Fit Auditor** (`prompts/provider-fit-auditor.md`) — first-wave primary (co-dispatched with 1–9; the letter suffix groups it with the Architecture Auditor #3, its sibling — unlike the second-wave 6b):
 - **Type:** `general-purpose` | **Model:** `opus`
@@ -147,19 +148,19 @@ Read the spec with fresh eyes. Then dispatch ALL 11 primary reviewers simultaneo
 
 **Agent 7 — Codex Adversarial Review:**
 - **Execution:** `codex exec` via Bash with `run_in_background: true`
-- **Model:** GPT-5.5, high reasoning effort
+- **Model:** GPT-5.6-sol, high reasoning effort
 - **Input:** The SPEC FILE content (NOT git diff — the companion's `adversarial-review` reviews git changes, which is wrong for spec review)
 - **Job:** Attack surface analysis. Auth/permissions, data loss, rollback safety, race conditions, version skew, observability gaps, architectural fit, simplicity.
 
 **Agent 8 — Codex Standard Review:**
 - **Execution:** `codex exec` via Bash with `run_in_background: true`
-- **Model:** GPT-5.5, high reasoning effort
+- **Model:** GPT-5.6-sol, high reasoning effort
 - **Input:** The SPEC FILE content (NOT git diff)
 - **Job:** Completeness, correctness, feasibility, type safety, implementation gaps, stale code detection. **Web access enabled** — Codex cross-references API/library/standard claims against authoritative sources.
 
 **Agent 9 — Codex Industry Research Auditor:**
 - **Execution:** `codex exec` via Bash with `run_in_background: true`
-- **Model:** GPT-5.5, high reasoning effort
+- **Model:** GPT-5.6-sol, high reasoning effort
 - **Input:** The SPEC FILE content (NOT git diff)
 - **Job:** **Elevation, not defect-hunting.** Pick 3-6 core themes from the spec. For each, research the web + GitHub for (a) maintained OSS libraries that already solve it, (b) public engineering writeups from big companies (Stripe/Netflix/Google/Meta/Airbnb/etc.) showing how they shipped it at scale, (c) production gotchas those companies hit. Output grounded, URL-cited refactor suggestions. Two soft severities: **ELEVATE** (proven public pattern worth adopting) and **CAUTION** (spec contradicts established best practice).
 
@@ -262,7 +263,7 @@ For any MAJOR+ finding where Claude and Codex disagree, run an iterative debate 
 ```markdown
 ### Disagreement #N: <topic>
 
-**Codex (GPT-5.5) says:** <summary of Codex position + severity + confidence>
+**Codex (GPT-5.6-sol) says:** <summary of Codex position + severity + confidence>
 **Claude says:** <summary of Claude position + which agents>
 
 **Key question:** <the specific architectural/design question at the heart of the disagreement>
@@ -314,7 +315,7 @@ After cross-examination resolves (or goes to user), compile the full report:
 ## Spec Review — Final Report
 
 ### Spec: <filename>
-### Reviewers: Completeness (Opus) + Codebase (Sonnet) + Architecture (Opus) + Provider-Fit (Opus) + Edge-Case Miner (Opus) + Security Miner (Opus) + Observability Auditor (Opus) + Spec Drift Scout (Sonnet) + Codex Standard (GPT-5.5) + Codex Adversarial (GPT-5.5) + Codex Industry Research (GPT-5.5, web-enabled) + Investigation Workflow (code-grounded, verified)
+### Reviewers: Completeness (Opus) + Codebase (Sonnet) + Architecture (Opus) + Provider-Fit (Opus) + Edge-Case Miner (Opus) + Security Miner (Opus) + Observability Auditor (Opus) + Spec Drift Scout (Sonnet) + Codex Standard (GPT-5.6-sol) + Codex Adversarial (GPT-5.6-sol) + Codex Industry Research (GPT-5.6-sol, web-enabled) + Investigation Workflow (code-grounded, verified)
 ### Codex Standard Verdict: <approve|needs-attention|timed-out>
 ### Codex Adversarial Verdict: <approve|needs-attention|timed-out>
 ### Codex Research Verdict: <N elevate suggestions / M cautions / timed-out>
@@ -613,11 +614,11 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 | 5b | **Observability & Traceability Auditor** | `prompts/observability-auditor.md` | general-purpose | opus | **First-wave. Ships-its-own-telemetry audit: named structured events + a request-threading correlation id, W3C `traceparent` trace context, release/version stamping (onset-vs-deploy), an authoritative terminal status for async work (not a dispatch/`202` ack), alarm-visible metric granularity, cardinality + PII/PHI discipline, a stable PII-free error fingerprint, observable fail-open branches, and a nameable log/telemetry destination. Own report section (like Edge-Case/Security), not cross-examined.** |
 | 6 | **Spec Drift Scout** | `prompts/spec-drift-scout.md` | general-purpose | sonnet | **Cross-worktree/project-scope drift: recent pushed refs, dirty worktrees, sibling specs, architecture changes, feature overlap, missing spec updates** |
 | 6b | **Spec Drift Investigator** | `prompts/spec-drift-investigator.md` | general-purpose | opus | **Second-wave deep dive on one drift candidate: update current/other spec, combine, move, split, create missing spec, or mark intentional** |
-| 7 | **Codex Adversarial** | `prompts/codex-adversarial-reviewer.md` | **codex exec (web)** | **GPT-5.5** | **Attack surface, risks — cross-referenced against public CVEs/post-mortems** |
-| 8 | **Codex Standard** | `prompts/codex-standard-reviewer.md` | **codex exec (web)** | **GPT-5.5** | **Completeness, feasibility — API/library claims verified against primary sources** |
-| 9 | **Codex Industry Research** | `prompts/codex-research-auditor.md` | **codex exec (web)** | **GPT-5.5** | **Elevation: OSS libraries, big-company patterns, production gotchas with URL citations** |
+| 7 | **Codex Adversarial** | `prompts/codex-adversarial-reviewer.md` | **codex exec (web)** | **GPT-5.6-sol** | **Attack surface, risks — cross-referenced against public CVEs/post-mortems** |
+| 8 | **Codex Standard** | `prompts/codex-standard-reviewer.md` | **codex exec (web)** | **GPT-5.6-sol** | **Completeness, feasibility — API/library claims verified against primary sources** |
+| 9 | **Codex Industry Research** | `prompts/codex-research-auditor.md` | **codex exec (web)** | **GPT-5.6-sol** | **Elevation: OSS libraries, big-company patterns, production gotchas with URL citations** |
 | 11 | **Investigation Workflow** | `investigation` skill (`DEEP-WORKFLOW.md`) | **dynamic Workflow** | **multi-agent** | **Elevation grounding: spec themes framed against THIS codebase, fanned out across sources, adversarially verified in code → industry-standard + best-in-class elevation evidence (Claude Code-only)** |
-| 12 | **Alignment Investigator** | (coordinator-composed prompt) | **codex exec** | **GPT-5.5** | **Decision-reality drift** |
+| 12 | **Alignment Investigator** | (coordinator-composed prompt) | **codex exec** | **GPT-5.6-sol** | **Decision-reality drift** |
 
 ## When NOT to Use
 

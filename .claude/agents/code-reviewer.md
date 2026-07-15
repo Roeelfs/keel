@@ -72,7 +72,7 @@ tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
     - Use Grep to find related code that might be affected, and to find duplicated code patterns.
     <External_Consultation>
       When a second opinion would improve quality, delegate a parallel review pass:
-      - Spawn a fresh reviewer/explore agent for cross-validation when the host environment supports it.
+      - Spawn a fresh reviewer or the built-in `Explore` agent for cross-validation when the host environment supports it.
       - Use parallel exploration agents for large-scale code review tasks.
       Skip silently if delegation is unavailable. Never block on external consultation.
     </External_Consultation>

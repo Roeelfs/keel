@@ -273,7 +273,7 @@ If the managed dispatcher crashes or exit code ≠ 0 before Codex starts, fall b
 ```bash
 TASK_TAG="rescue-fallback-<TEST_ID>-$$"
 cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
-  -m gpt-5.5 \
+  -m gpt-5.6-sol \
   --config model_reasoning_effort="high" \
   --config service_tier="fast" \
   --sandbox danger-full-access \
@@ -486,7 +486,7 @@ Report to user with final counts, fixes applied, gaps found, blockers remaining.
 | 2 | Prerequisite gate | HALT if blocked | — |
 | 3 | Execute tiers (unit→int→deploy→E2E) | HALT tier on FAIL | — |
 | 4 | Diagnose failures | — | **Parallel diagnosticians** (sonnet) |
-| 4+ | Escalate stuck tests | After 2 failures | **Codex rescue** (GPT-5.5, write) |
+| 4+ | Escalate stuck tests | After 2 failures | **Codex rescue** (GPT-5.6-sol, write) |
 | 5 | Loop check (max 5 cycles) | Auto-BLOCK at 3x same error | — |
 | 5.5 | Flow registry sync | — | — |
 | 6 | Write execution summary | — | — |
@@ -497,7 +497,7 @@ Report to user with final counts, fixes applied, gaps found, blockers remaining.
 | Agent | Prompt | When | Model | Capability |
 |-------|--------|------|-------|------------|
 | Failure Diagnostician | `prompts/failure-diagnostician.md` | Test FAIL | sonnet | Read-only diagnosis |
-| Codex Rescue | `prompts/codex-rescue-stuck.md` | 2+ failures same test | GPT-5.5 | **Write** — fixes code |
+| Codex Rescue | `prompts/codex-rescue-stuck.md` | 2+ failures same test | GPT-5.6-sol | **Write** — fixes code |
 
 ## Resuming
 

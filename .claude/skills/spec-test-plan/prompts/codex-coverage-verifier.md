@@ -15,7 +15,7 @@ Use Bash with `run_in_background: true` (no trailing `&`):
 
 ```bash
 cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
-  -m gpt-5.5 \
+  -m gpt-5.6-sol \
   --config model_reasoning_effort="high" \
   --config service_tier="fast" \
   --sandbox read-only \
@@ -42,7 +42,7 @@ Separate Bash call, also `run_in_background: true`:
 
 ```bash
 cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
-  -m gpt-5.5 \
+  -m gpt-5.6-sol \
   --config model_reasoning_effort="high" \
   --config service_tier="fast" \
   --sandbox read-only \

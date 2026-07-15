@@ -94,7 +94,7 @@ For auth / money / data-migration / deletion specs, dispatch one Codex pass (Bas
 
 ```bash
 cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
-  -m gpt-5.5 --config model_reasoning_effort="high" --config service_tier="fast" \
+  -m gpt-5.6-sol --config model_reasoning_effort="high" --config service_tier="fast" \
   --sandbox read-only --full-auto \
   "Read the test plan at <RELATIVE_TEST_PLAN_PATH> and spec at <RELATIVE_SPEC_PATH>. Focus on the E2E-on-staging section. What customer-facing failure modes would these scenarios miss in real staging — env/infra divergence, multi-step chain breaks, format/encoding at boundaries, deploy-time drift, observability gaps where a failure would look like a success? List each: failure scenario, the staging E2E test to add, how to observe it failing. Max 12. Skip unit-test nitpicks." \
   2>&1 | tee /tmp/codex-cov-$$.txt

@@ -164,6 +164,7 @@ The skill's `survey` ran through several iterations of bug fixes (trailer-block 
 Lifecycle, RUN/SKIP rubric, spec-test-execute mandate, and merge readiness gate all live in `prompts/loop-directive.md` — single source of truth. **One binding decision** at the test-spec gate: gate RAN → both spec-test-plan AND spec-test-execute run as a unit; gate SKIPPED → neither runs. No "if applicable" twice.
 
 Audit role on PR review:
+- **Scope audit:** run the `scope-auditor` agent (Agent tool, `subagent_type: scope-auditor`) on every returned dispatched branch before merge — it diffs the branch against fresh `origin/main`, classifies each surplus file as acceptable collateral vs contamination, and on contamination prescribes re-integrating by cherry-picking the one clean commit (never rebase a stale branch, never salvage in place).
 - "Test-spec: [run / skipped because X]" — sanity-check against the rubric. "Skipped because trivial" on a feature PR is a red flag.
 - If "run" → check the test plan file in the PR diff has explicit `PASS / FAIL / SKIP / BLOCKED` markers on every tier row, not an unmarked plan. Unmarked plan + "run" claim = TDD-during-impl pretending to be spec-test-execute. Surface it. (A past data-path PR shipped this way before the directive was tightened.)
 - Tiers needing prod data (Deploy, E2E) must either run on staging or be explicitly deferred in the plan file with rationale. Silently skipped = red flag.

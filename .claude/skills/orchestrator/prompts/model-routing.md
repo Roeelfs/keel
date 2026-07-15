@@ -4,8 +4,8 @@ Per-lane recommendations to minimize token cost. State-miner emits `recommended_
 
 ## Models
 
-**Claude:** Opus 4.7 (1.0×) → Sonnet 4.6 (~0.2×) → Haiku 4.5 (~0.04×)
-**Codex:** gpt-5.5 (1.0×) → gpt-5.4 (~0.3×) → gpt-5.4-mini (~0.05×)
+**Claude:** Fable 5 (`claude-fable-5`, alias `fable` — top reasoning tier) → Opus 4.8 (1.0×) → Sonnet 5 (~0.2×) → Haiku 4.5 (~0.04×)
+**Codex:** gpt-5.6-sol (1.0×) → gpt-5.4 (~0.3×) → gpt-5.4-mini (~0.05×)
 
 ## Effort
 
@@ -18,28 +18,28 @@ Per-lane recommendations to minimize token cost. State-miner emits `recommended_
 | Lane purpose | Claude | Codex | Effort |
 |---|---|---|---|
 | Spec authoring (step 2) | Opus | gpt-5.4 | think hard / High |
-| /spec-review (steps 3, 6) | Opus + Codex | gpt-5.5 | think harder / Extra high |
+| /spec-review (steps 3, 6) | Opus + Codex | gpt-5.6-sol | think harder / Extra high |
 | /spec-test-plan (step 4) | Sonnet | gpt-5.4 | think / Medium |
 | Step 4b spec patches | Sonnet | gpt-5.4 | think / Medium |
 | Implementation plan (step 5) | Opus | gpt-5.4 | think hard / High |
-| Plan review (step 6) | Opus + Codex | gpt-5.5 | think harder / Extra high |
+| Plan review (step 6) | Opus + Codex | gpt-5.6-sol | think harder / Extra high |
 | Implementation (step 7) | Sonnet | gpt-5.4 | standard / Low |
 | spec-test-execute (step 8) | Sonnet | gpt-5.4 | standard / Low |
 | Bug fix < 200 LOC | Sonnet | gpt-5.4 | standard / Low |
 | Trivial < 50 LOC, docs | Haiku | gpt-5.4-mini | standard / Low |
 | Mining / surveys / parsing | Haiku | gpt-5.4-mini | standard / Low |
 | Soak observation | Haiku | gpt-5.4-mini | standard / Low |
-| Soak ESCALATE investigation | Opus | gpt-5.5 | think hard / High |
+| Soak ESCALATE investigation | Opus | gpt-5.6-sol | think hard / High |
 | PR comment review | Sonnet | gpt-5.4 | think / Medium |
 | Refactor (no API change) | Sonnet | gpt-5.4 | think / Medium |
 | Refactor (API change) | Opus | gpt-5.4 | think hard / High |
-| Critical-path debugging | Opus | gpt-5.5 | think harder / Extra high |
-| Security review | Opus | gpt-5.5 | think harder / Extra high |
+| Critical-path debugging | Opus | gpt-5.6-sol | think harder / Extra high |
+| Security review | Fable 5 + Opus 4.8 | gpt-5.6-sol | think harder / Extra high |
 | Migration writing | Sonnet | gpt-5.4 | think / Medium |
-| Migration risk review | Opus | gpt-5.5 | think hard / High |
+| Migration risk review | Opus | gpt-5.6-sol | think hard / High |
 | Self-managed interactive | Sonnet | gpt-5.4 | (user drives) |
 | Mailbox-mode soak watcher | Haiku | gpt-5.4-mini | standard / Low |
-| Orchestrator | Opus | gpt-5.5 | think / Medium |
+| Orchestrator | Opus | gpt-5.6-sol | think / Medium |
 
 ## Subagent dispatch
 
@@ -47,10 +47,10 @@ Per-lane recommendations to minimize token cost. State-miner emits `recommended_
 |---|---|---|
 | State miner | Haiku | gpt-5.4-mini |
 | Topical reviewers | Sonnet | gpt-5.4 |
-| Boundary / security / adversarial | Opus | gpt-5.5 |
+| Boundary / security / adversarial | Fable 5 + Opus 4.8 | gpt-5.6-sol |
 | Coverage verifier | n/a | gpt-5.4-mini |
 | Failure diagnostician | Sonnet | gpt-5.4 |
-| Codex rescue | n/a | gpt-5.5 |
+| Codex rescue | n/a | gpt-5.6-sol |
 | Doc writer / file search | Haiku | gpt-5.4-mini |
 
 ## Rules
@@ -60,3 +60,4 @@ Per-lane recommendations to minimize token cost. State-miner emits `recommended_
 3. Respect `model_override` in `last-state.json[<sid>]`.
 4. Mailbox-idle is free; don't retire to "save tokens."
 5. Cross-runtime second-opinion (flagship Claude + flagship Codex paired) is the one rational flagship double-up — different bug classes.
+6. Deep-review bucket (security review, adversarial review, final-gate critique) is split **Fable 5 + Opus 4.8** — model diversity beats a single-model monoculture; never route all deep-review lanes to one model.

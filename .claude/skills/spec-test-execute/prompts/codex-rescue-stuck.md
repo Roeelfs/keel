@@ -74,7 +74,7 @@ If the managed dispatcher crashes before Codex starts, dispatch directly via `co
 ```bash
 TASK_TAG="rescue-fallback-{{TEST_ID}}-$$"
 cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
-  -m gpt-5.5 \
+  -m gpt-5.6-sol \
   --config model_reasoning_effort="high" \
   --config service_tier="fast" \
   --sandbox danger-full-access \
