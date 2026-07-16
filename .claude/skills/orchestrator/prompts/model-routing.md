@@ -61,3 +61,4 @@ Per-lane recommendations to minimize token cost. State-miner emits `recommended_
 4. Mailbox-idle is free; don't retire to "save tokens."
 5. Cross-runtime second-opinion (flagship Claude + flagship Codex paired) is the one rational flagship double-up — different bug classes.
 6. Deep-review bucket (security review, adversarial review, final-gate critique) is split **Fable 5 + Opus 4.8** — model diversity beats a single-model monoculture; never route all deep-review lanes to one model.
+7. **Ad-hoc delegation caps at Opus (token saving):** research / investigation / mining / exploration / execution dispatches route to opus/sonnet/haiku — never pass `fable` as an inline model for a generic dispatch. Fable reaches delegation ONLY through the deliberately Fable-pinned NAMED agents (critic, security-reviewer — by design).
