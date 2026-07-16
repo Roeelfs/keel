@@ -1,7 +1,7 @@
 ---
 name: security-reviewer
 description: Security vulnerability detection specialist (OWASP Top 10, secrets, unsafe patterns) + the project's own security gates (Supabase exposure, MCP allowlists, tenant isolation, credential-store boundary, PHI)
-model: claude-opus-4-8
+model: claude-fable-5
 tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
 ---
 

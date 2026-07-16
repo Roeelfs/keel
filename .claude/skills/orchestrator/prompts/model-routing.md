@@ -4,7 +4,7 @@ Per-lane recommendations to minimize token cost. State-miner emits `recommended_
 
 ## Models
 
-**Claude:** Fable 5 (`claude-fable-5`, alias `fable` — top reasoning tier, MAIN sessions only, never delegated) → Opus 4.8 (1.0×) → Sonnet 5 (~0.2×) → Haiku 4.5 (~0.04×)
+**Claude:** Fable 5 (`claude-fable-5`, alias `fable` — top reasoning tier) → Opus 4.8 (1.0×) → Sonnet 5 (~0.2×) → Haiku 4.5 (~0.04×)
 **Codex:** gpt-5.6-sol (1.0×) → gpt-5.4 (~0.3×) → gpt-5.4-mini (~0.05×)
 
 ## Effort
@@ -34,7 +34,7 @@ Per-lane recommendations to minimize token cost. State-miner emits `recommended_
 | Refactor (no API change) | Sonnet | gpt-5.4 | think / Medium |
 | Refactor (API change) | Opus | gpt-5.4 | think hard / High |
 | Critical-path debugging | Opus | gpt-5.6-sol | think harder / Extra high |
-| Security review | Opus 4.8 | gpt-5.6-sol | think harder / Extra high |
+| Security review | Fable 5 + Opus 4.8 | gpt-5.6-sol | think harder / Extra high |
 | Migration writing | Sonnet | gpt-5.4 | think / Medium |
 | Migration risk review | Opus | gpt-5.6-sol | think hard / High |
 | Self-managed interactive | Sonnet | gpt-5.4 | (user drives) |
@@ -47,7 +47,7 @@ Per-lane recommendations to minimize token cost. State-miner emits `recommended_
 |---|---|---|
 | State miner | Haiku | gpt-5.4-mini |
 | Topical reviewers | Sonnet | gpt-5.4 |
-| Boundary / security / adversarial | Opus 4.8 | gpt-5.6-sol |
+| Boundary / security / adversarial | Fable 5 + Opus 4.8 | gpt-5.6-sol |
 | Coverage verifier | n/a | gpt-5.4-mini |
 | Failure diagnostician | Sonnet | gpt-5.4 |
 | Codex rescue | n/a | gpt-5.6-sol |
@@ -60,4 +60,4 @@ Per-lane recommendations to minimize token cost. State-miner emits `recommended_
 3. Respect `model_override` in `last-state.json[<sid>]`.
 4. Mailbox-idle is free; don't retire to "save tokens."
 5. Cross-runtime second-opinion (flagship Claude + flagship Codex paired) is the one rational flagship double-up — different bug classes.
-6. **Delegated subagents are NEVER Fable (token saving)** — dispatch/frontmatter/Workflow lanes cap at Opus 4.8; model diversity for deep review comes from Opus 4.8 + Codex gpt-5.6-sol cross-checking (plus the main session's own judgment when the user runs Fable as the driver).
+6. Deep-review bucket (security review, adversarial review, final-gate critique) is split **Fable 5 + Opus 4.8** — model diversity beats a single-model monoculture; never route all deep-review lanes to one model.
