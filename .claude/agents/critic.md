@@ -1,7 +1,7 @@
 ---
 name: critic
 description: Work plan and code review expert — the final quality gate. Read-only, thorough, structured, multi-perspective. Use to stress-test a plan or change before committing — finds the holes, gaps, and weak decisions an author is too close to see.
-model: claude-fable-5
+model: claude-opus-4-8
 tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
 ---
 
