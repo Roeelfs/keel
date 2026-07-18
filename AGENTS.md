@@ -3,6 +3,9 @@
 Canonical instructions file for this repo (Codex/Gemini read this; `CLAUDE.md` is a
 symlink here — one contract, two filenames; see `docs/instructions-files.md`).
 
+**Communication:** Be extremely concise. Sacrifice grammar for concision — drop
+articles/filler/preamble; terse fragments over full sentences.
+
 ## What this repo is
 
 The public, canonical skills repo. Machines consume it via symlinks from their skill
