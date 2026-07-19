@@ -442,7 +442,7 @@ MISSION
   --session-id "$(uuidgen)" --output-format json --model <per §14>
 ```
 
-Run it via Bash `run_in_background` — the exit auto-notifies the orchestrator with the JSON result (branch, PR, status). For long-lived lanes prefer `claude --bg` and read `claude agents --json` at each wake. Same mission-content requirements as Paste 1 below (goal / scope / constraints / trailer / verify / PR format); the mission must also state its **expected merge tier** and any **`stacked_on: <pr>`** edge.
+Run it via Bash `run_in_background` — the exit auto-notifies the orchestrator with the JSON result (branch, PR, status). **Note:** the auto-mode classifier blocks an orchestrator session from invoking `--permission-mode bypassPermissions` (or writing its own allow rules) directly — the operator must one-time allowlist a wrapper script (e.g. `~/.claude/scripts/spawn-lane.sh`, added to `permissions.allow` by hand) and the orchestrator spawns lanes through it. For long-lived lanes prefer `claude --bg` and read `claude agents --json` at each wake. Same mission-content requirements as Paste 1 below (goal / scope / constraints / trailer / verify / PR format); the mission must also state its **expected merge tier** and any **`stacked_on: <pr>`** edge.
 
 ### Interactive spawn (only when the lane needs the human)
 
