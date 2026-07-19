@@ -1,11 +1,11 @@
 ---
 name: orchestrator
-description: Cross-session orchestrator pattern — manage parallel Claude Code sessions implementing different lanes of the same project. Surfaces state, coordinates conflicts, queues prompts, never implements directly. Use when running 3+ parallel sessions on a single repo.
+description: Cross-session orchestrator pattern — manage parallel Claude Code sessions implementing different lanes of the same project, including fully autonomous stretches (headless no-prompt lanes, un-gated-frontier planning). Surfaces state, coordinates conflicts, queues prompts, never implements directly. Use when running 3+ parallel sessions on a single repo or driving a big project autonomously.
 ---
 
 # Orchestrator
 
-You are the **orchestrator** in a multi-session parallel workflow. Your job is to track state across all live sessions, identify conflicts before they hit main, generate paste-able prompts for new sessions, and surface decisions to the user. You **do not implement code yourself** — implementation lives in spawned worktree-isolated sessions.
+You are the **orchestrator** in a multi-session parallel workflow. Your job is to track state across all live sessions, identify conflicts before they hit main, spawn lanes (headless or interactive), and surface decisions to the user. You **do not implement code yourself** — implementation lives in spawned worktree-isolated sessions or headless lane processes.
 
 ## Bootstrap on invocation
 
@@ -120,17 +120,41 @@ If `/spec-test-plan` produces ZERO ADV/EC-MISSING findings worth a spec patch, t
 
 Steps 7+ (execute, test-execute, PR open, merge gate) are governed by `prompts/loop-directive.md` and §11 (retire gate).
 
-### 3. Lane modes — three comms patterns
+### 3. Lane runtimes — pick per lane, by human-involvement need
 
-| Mode | Comms | Orchestrator role |
-|---|---|---|
-| Mailbox-driven | orch → lane | Drive via `mailbox-send.sh`. Hold lifecycle state. See `prompts/mailbox-mode.md`. |
-| Self-managed interactive | user ↔ lane | Hold purpose + progress in `last-state.json`. **Never mailbox-write.** Surface in surveys. (e.g. an interactive customer-facing audit lane) |
-| Loop-driven | cron-paced | `/loop 5m`. Hold lifecycle step. See `prompts/loop-directive.md`. |
+Four runtimes exist. The selection rule: **a lane goes interactive only when it needs the human**; everything else runs prompt-free. (This section exists because a real overnight run stalled when every channel turned out to be human-gated — see §3a.)
 
-Classification: watcher running → mailbox; `/loop` directive → loop; neither → self-managed. Mode is declared in prompt, recorded in cache, never auto-corrected — surface contradiction as risk.
+| Runtime | Spawn | Prompts? | Completion signal | Use for |
+|---|---|---|---|---|
+| **Headless lane** | orchestrator runs `claude -p "<mission>" --permission-mode bypassPermissions --worktree <name> --session-id $(uuidgen) --output-format json` via Bash `run_in_background` (or `claude --bg`, tracked via `claude agents --json`) | none | process exit auto-notifies orchestrator; JSON result + branch/PR state | spec authoring, review application, build, test, PR-open — the whole non-human lifecycle |
+| **Background Agent / Workflow** (in-harness) | `Agent` tool / `Workflow` | none (inherits session perms) | auto-re-invokes orchestrator, 0 tokens while waiting | bounded subtasks: research fan-out, spec-review lanes, scope audits, state mining |
+| **Interactive chip session** | `spawn_task` chip — **requires a human click** | desktop defaults | none (fire-and-forget) | ONLY lanes that need the human: grillings, founder/decision gates, watch-and-steer work. The click is the human opting in — a feature here, a stall everywhere else |
+| **Interactive paste session** | user pastes Paste 1 + 2 | desktop defaults | surveys + mailbox | legacy manual mode; same constraint as chips |
 
-Spawn paste = initial prompt (declares mode) + mode-specific continuation (mailbox setup / `/loop 5m` / nothing for self-managed).
+**Hard transport rules:**
+- **`send_message` (desktop cross-session messaging) is BANNED as an automated transport.** Its confirmation prompt is hardcoded in the app — an unattended sender hangs on the dialog and the turn wedges. Use it only as a courtesy surfacing when the user is actively present, never inside an autonomous loop.
+- **Orchestrator → live lane messages go through the file mailbox** (`mailbox-send.sh`, a plain promptless file write; lane arms `wakeup-wait.sh` via `run_in_background` and is auto-re-invoked on delivery — zero tokens while waiting). Headless lanes don't need it: their mission is complete at spawn time; respawn (`claude -p --resume <id>`) to redirect.
+- **Scheduled tasks pause on every permission prompt** (detached fresh context, no approver) — durability for app-closed one-shots only, never a mutation lane.
+
+**Headless-lane safety rails (bypassPermissions is real power):**
+- Global hooks still fire in the child (heavy-op lock, merge guards) — do not strip them (`--bare`) unless the lane is read-only.
+- The machine-global heavy lock serializes verify/build across ALL lanes — cap concurrent heavy lanes at ~2; more lanes queue, not parallelize.
+- Lane missions MUST forbid: merging to a protected branch, deploys, prod-data mutation, and any repo's prod verb. The orchestrator holds every terminal gate.
+- Fresh `--session-id`, and scrub `CLAUDE_SESSION_ID`/`CLAUDE_CODE_ENTRYPOINT` from the child env so it doesn't masquerade as the parent.
+- On the 2nd identical tool denial (safety classifier / model outage), the lane STOPS retrying and exits with a `BLOCKED_ON_CLASSIFIER` result — the orchestrator backs off ≥30 min before respawn. Outage windows must not burn wakes.
+
+**Comms patterns for interactive lanes** (unchanged): mailbox-driven (orch → lane via `mailbox-send.sh`, see `prompts/mailbox-mode.md`), self-managed (user ↔ lane; never mailbox-write), loop-driven (`/loop 5m`, see `prompts/loop-directive.md`). Mode is declared in prompt, recorded in cache, never auto-corrected — surface contradiction as risk.
+
+### 3a. Autonomous stretch planning — the un-gated frontier (anti-stall)
+
+Before any unattended stretch (overnight, user-away), the orchestrator MUST compute the **un-gated frontier**: the set of work items reachable without a human approval. The canonical failure mode: every lane drives to "PR green + READY," the whole DAG roots on one human-merge-gated PR, and the night produces 18 polling wakes and zero development. Plan the frontier so that never happens:
+
+1. **Stack, don't park.** A lane whose work depends on an unmerged PR does NOT halt — it branches its worktree off the dependency PR's branch (stacked branch), builds there, and rebases onto main after the dependency merges. Record the stack edge in `last-state.json` (`stacked_on: <pr>`); the post-merge cascade re-baselines it. Parking on "waiting for merge" when the code is sitting right there in a branch is the #1 wasted night.
+2. **Pre-authorization ask — BEFORE the human leaves.** Present the projected merge stack for the stretch ("these N PRs will be green by morning") and ask for standing approval per class (the §11a Tier-B `auto-merge-ok` label, or an explicit in-session mandate). A decline is fine — then the plan routes around the gate via stacking. What's not fine is discovering the gate at 2am.
+3. **Deliberate park.** If the frontier is genuinely empty (everything behind declined human gates), park properly: ONE wake at the human's expected return with a morning-summary + ready-to-merge stack. Never poll every 30 min against a gate only a human can open — wakes that can't produce work are noise.
+4. **Frontier refresh on every event.** A merge, a lane completion, or a mailbox message re-opens frontier computation — newly un-gated work dispatches immediately (cascade-unblock), stacked lanes re-baseline.
+
+The orchestrator's own continuation during an autonomous stretch: event-driven first (background lane exits auto-re-invoke it), with a sparse `ScheduleWakeup` heartbeat (≥30 min) as the fallback — never the primary drive.
 
 ### 4. Conflict-map before spawning a new lane
 
@@ -399,7 +423,28 @@ In a single busy session the user identified several distinct strands of work �
 - Don't edit feature code — surface the change as a prompt for a session
 - Don't run `/spec-review` or `superpowers:executing-plans` from orchestrator — fresh session
 
-## Generating session prompts
+## Spawning lanes
+
+### Headless spawn (default for non-human lanes)
+
+No paste, no click. The orchestrator spawns directly:
+
+```bash
+env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT \
+  claude -p "$(cat <<'MISSION'
+<goal one-liner> — issue <ref>.
+Scope: <owned paths>. DO-NOT-TOUCH: <sibling-owned paths>.
+Lifecycle: <steps from §2a that apply>. Verify: <repo verify gate>.
+Open the PR when green; NEVER merge, deploy, or touch prod. On a 2nd identical
+tool denial, stop and print BLOCKED_ON_CLASSIFIER. Print a final JSON status line.
+MISSION
+)" --permission-mode bypassPermissions --worktree <lane-slug> \
+  --session-id "$(uuidgen)" --output-format json --model <per §14>
+```
+
+Run it via Bash `run_in_background` — the exit auto-notifies the orchestrator with the JSON result (branch, PR, status). For long-lived lanes prefer `claude --bg` and read `claude agents --json` at each wake. Same mission-content requirements as Paste 1 below (goal / scope / constraints / trailer / verify / PR format); the mission must also state its **expected merge tier** and any **`stacked_on: <pr>`** edge.
+
+### Interactive spawn (only when the lane needs the human)
 
 Use `prompts/session-template.md` as the base. The spawn is **two paste actions**:
 
@@ -469,3 +514,9 @@ Also read the private overlay if present: `~/.claude/skills-overlay/orchestrator
 - ❌ Stating "PR #N merged" inside a generated prompt because a worker said so or a commit looks recent — `gh pr view <N> --json mergedAt,state` is the only authority. In a past incident a Codex orchestrator emitted "Pricing already merged" into a rebase prompt while the PR had never even been created (gh API was down at the time of the worker's claim).
 - ❌ Treating subagent reports as canonical without re-running the final command in the lane's worktree — a worker's "done" with `/tmp/` paths or sandbox-blocked writes is not a deliverable. Re-validate per directive #10.7.
 - ❌ State-miner re-emitting an unchanged session list — if survey == cache, return one line. Paying full agent cost on identical data is waste.
+- ❌ Using desktop cross-session `send_message` inside an autonomous loop — its confirmation prompt is app-hardcoded; an unattended sender hangs. Mailbox files or headless respawn are the transports.
+- ❌ Spawning a chip and calling the lane "autonomous" — a chip needs a human click to start. Autonomous lanes are headless (`claude -p` / `--bg`).
+- ❌ A lane parking on "waiting for PR #N to merge" when it could stack its branch on #N and build now (§3a.1).
+- ❌ Entering an unattended stretch without the pre-authorization ask (§3a.2) — discovering at 2am that the whole DAG roots on a human merge gate is a planning failure, not a gate failure.
+- ❌ Polling wakes against a human-only gate — if only the human can open it, park with ONE wake at their expected return (§3a.3).
+- ❌ A lane blind-retrying through a safety-classifier or model-outage window — 2nd identical denial → exit BLOCKED_ON_CLASSIFIER; orchestrator backs off ≥30 min.
