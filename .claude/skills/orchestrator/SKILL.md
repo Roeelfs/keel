@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Cross-session orchestrator pattern — manage parallel Claude Code sessions implementing different lanes of the same project, including fully autonomous stretches (headless no-prompt lanes, un-gated-frontier planning). Surfaces state, coordinates conflicts, queues prompts, never implements directly. Use when running 3+ parallel sessions on a single repo or driving a big project autonomously.
+description: Cross-session orchestrator pattern — orchestrate ONE program (a goal/target) across its own lanes, including fully autonomous stretches (headless no-prompt lanes, un-gated-frontier planning). Program-scoped, never machine-scoped — multiple orchestrators coexist on one machine via program manifests + an ownership/collision protocol. Surfaces state, coordinates conflicts, queues prompts, never implements directly. Use when running 3+ parallel sessions toward one target or driving a big project autonomously.
 ---
 
 # Orchestrator
