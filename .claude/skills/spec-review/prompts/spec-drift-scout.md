@@ -49,6 +49,24 @@ prompt: |
   5. If network is available and safe, run `git fetch --all --prune` in the
      target repo before comparing remote refs. If fetch fails, continue with
      local refs and state that the report is local-only.
+  6. **Base-freshness preflight:** record how far the target worktree's HEAD is
+     behind fresh `origin/main` (`git rev-list --count HEAD..origin/main`). All
+     drift comparisons and scope audits run against the MERGE-BASE
+     (`git merge-base origin/main HEAD`), never the moving tip — a sibling
+     session's fetch moving the shared ref mid-run manufactures false
+     contamination. If the scout and another lane disagree about "current
+     state", suspect base-ref skew first.
+  7. **Open PRs are parallel work too:** `gh pr list --state open --json
+     number,title,headRefName,files` (if `gh` is available). Any open PR whose
+     changed files, title, or linked ticket overlap the target spec's surface is
+     a first-class drift candidate — pull `gh pr view <n> --json body,comments`
+     for the overlap and any unresolved review objection.
+  8. **Numbered-artifact collision check:** if the target spec ADDS any numbered
+     artifact (ADR `NNNN`, migration timestamp, numbered runbook), verify the
+     chosen number/timestamp is free on FRESH `origin/main`
+     (`git ls-tree origin/main:<dir>`) AND unclaimed by any sibling worktree —
+     a parallel session can claim the same number the same day, and the
+     convention makes the newcomer renumber.
 
   Treat "project scope" as repositories/worktrees that share the same remote
   origin, or clearly belong to the same product when the origin is unavailable.
@@ -149,6 +167,22 @@ prompt: |
   Keep the report evidence-backed. If you cannot cite a path, commit, branch,
   worktree, or spec section, put it in No-Action Notes instead of Drift
   Candidates.
+
+  ## Hard rules (violations of these have destroyed legitimate work)
+
+  - **Verify EVERY absence/deletion claim with real git evidence before
+    reporting it:** `git show origin/main:<path>`, `git ls-tree`, or
+    `git merge-tree`. A stale branch MISSING a symbol does NOT mean the branch
+    DELETES it — a merge never deletes files the branch didn't touch. An
+    unverified deletion claim is the scout's #1 documented false-positive class
+    (including a 3/3-false headline run).
+  - **You are READ-ONLY.** Never close/merge/comment on PRs, never create
+    issues, never spawn an agent that does. "Recommend closing PR N" is a
+    user-decision row, nothing more.
+  - **When two active specs/PRs edit the same files, produce a concrete
+    build-sequencing entry** ("<spec A> must land after <PR N> because <files>"),
+    not just an overlap note — the coordinator turns these into a build-order
+    gate.
 ```
 
 **Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.

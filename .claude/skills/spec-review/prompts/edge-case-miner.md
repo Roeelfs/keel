@@ -25,8 +25,11 @@ prompt: |
 
   ## Your job
 
+  Work self-contained: read ONLY the spec + repo, produce the table NOW — do
+  not wait on, reference, or spawn any other agent.
+
   For every entity, parameter, state, or operation the spec defines, ask the
-  10 boundary questions below. Skip categories that genuinely don't apply —
+  15 boundary questions below. Skip categories that genuinely don't apply —
   but say so explicitly with one line ("spec has no time-dependent inputs →
   time boundaries N/A"), do not silently omit.
 
@@ -76,6 +79,40 @@ prompt: |
   rule (e.g. UUID format is correct but the UUID belongs to another org;
   filename is valid POSIX but escapes the sandbox root via `..`).
 
+  ### 11. Claim/lease & retry boundaries (mandatory for any claim, queue, or write path)
+  - A "claimed" status column with no lease/heartbeat: what happens to rows
+    claimed by a run that crashes? (claim-is-a-flag-not-a-lease strands them.)
+  - Two overlapping runs of the same job: is the claim read-back scoped to the
+    rows THIS call flipped, or can both claim the same stranded rows?
+  - A retried/chunked operation over a non-idempotent INSERT/append: does the
+    retry double-write, or clobber newer data with older?
+
+  ### 12. Multi-cycle accumulation (mandatory for anything scoped to "latest"/"current")
+  For any operation scoped to the latest period/batch/window while state
+  accumulates across cycles: what happens to items NOT fully processed within
+  one cycle when the next cycle opens? ("Mutations resolve against
+  max(period_start)" = every unfinished older week becomes permanently
+  unreachable — a LIFO starvation.) Enumerate the reachability of old, unfinished
+  work under every mutating verb.
+
+  ### 13. Cap arithmetic (mandatory for any bulk read/write over an existing channel)
+  Do the math, don't trust the framing API: max row/payload size × default page/
+  batch size vs the channel's hard cap (IPC reassembly ceiling, message-size
+  limit, schema max-length of the downstream store). Producer-schema max vs
+  consumer-cap mismatches silently drop data. Cite the actual cap constant and
+  the actual size profile.
+
+  ### 14. Duplicate-identity survivor determinism
+  When one external id can map to >1 internal row (merged/duplicate entities —
+  check whether the spec itself acknowledges merges elsewhere): does EVERY new
+  write/heal/join pick the survivor deterministically (explicit ORDER BY on the
+  survivor property), or an arbitrary row?
+
+  ### 15. Enum-can-express-the-prose
+  For each enum/status/state the spec defines: can it express every prose
+  sentence that references it, and can the row shape hold every legacy datum
+  the spec absorbs (e.g. a NOT NULL user FK vs recipients who have no user row)?
+
   ## Output format (markdown table)
 
   | EC-ID | Entity / Operation | Boundary | Spec Coverage | Recommended Resolution | Severity |
@@ -97,6 +134,9 @@ prompt: |
   - ≥ 3 lifecycle rows
   - ≥ 2 identity/tenancy rows
   - ≥ 1 row from each of categories 4–10
+  - ≥ 1 row from each of categories 11–15 when the spec has a write path,
+    a "latest"-scoped operation, a bulk read, or defines an enum (N/A line
+    otherwise)
   - **Total ≥ 18 rows for any non-trivial spec**
   - For trivial specs (< 50 lines, single feature), ≥ 8 rows is acceptable
 

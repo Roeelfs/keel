@@ -14,7 +14,7 @@ cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
   --sandbox workspace-write \
   --config sandbox_workspace_write.network_access=true \
   --full-auto \
-  "Review the spec file at <RELATIVE_SPEC_PATH> for completeness, correctness, and feasibility. Check types, defaults, flows, edge cases, failure modes, migrations, rollback paths, integration points, stale code, and scope realism. If docs/PLATFORM-INVARIANTS.md exists, check compliance. You have web access — if the spec cites an API, library, or standard, verify it against the authoritative source and cite the URL. For each issue found, state: severity, which spec section, the problem, and a fix. Material issues only." \
+  "Review the spec file at <RELATIVE_SPEC_PATH> for completeness, correctness, and feasibility. Check types, defaults, flows, edge cases, failure modes, migrations, rollback paths, integration points, stale code, and scope realism. If docs/PLATFORM-INVARIANTS.md exists, check compliance. You have web access — if the spec cites an API, library, or standard, verify it against the authoritative source and cite the URL. Also verify the vendor/framework semantics beneath any behavior the spec assumes it inherits for free (framework default matchers and exclusions, env allowlist scrubbing across process forks, API response fields the server generates versus accepts, name-reservation windows on delete). For each issue found, state: severity, which spec section, the problem, and a fix. Material issues only." \
   2>&1 | tee /tmp/codex-spec-std-$$.txt
 ```
 

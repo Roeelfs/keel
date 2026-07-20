@@ -1,15 +1,15 @@
 ---
 name: spec-review
-description: Multi-model spec verification pipeline. Linear flow (no compaction) — mines session design decisions, dispatches 11 parallel reviewers (8 Claude including provider-fit, edge-case, security, observability, and cross-worktree drift scout + 3 Codex including industry research) plus the investigation skill's dynamic Workflow grounding the elevation lane (verified, code-anchored industry evidence), then reports findings and fixes only real design defects in the spec prose. Never injects review scaffolding (matrices/EC/Sec/Obs/Drift tables) into the spec.
+description: Multi-model spec verification pipeline. Linear flow (no compaction) — mines session design decisions PLUS the spec's full context lineage (ticket, cited ADRs, prior sessions, memory, known-error ledger) into generated review questions, dispatches 12 parallel reviewers (9 Claude including provider-fit, edge-case, security, observability, live-evidence premise auditor, and cross-worktree drift scout + 3 Codex including industry research) plus the investigation skill's dynamic Workflow grounding the elevation lane, then runs a per-finding falsifier wave (a disprove-step on every CRITICAL/MAJOR before it reaches the report) and fixes only real design defects in the spec prose. Never injects review scaffolding (matrices/EC/Sec/Obs/Drift tables) into the spec.
 ---
 
 # Spec Review — Multi-Agent Verification Pipeline
 
-11 focused reviewers run in parallel — 8 Claude agents (completeness, codebase, architecture, provider-fit, edge-case miner, security miner, observability auditor, spec drift scout) + 3 Codex (standard + adversarial + industry research) — each with a tight prompt and one job, **plus the investigation skill's dynamic Workflow grounding the elevation lane** (it frames the spec's core themes against THIS codebase, fans out across sources, adversarially cross-verifies, and returns code-anchored industry-standard + best-in-class elevation evidence). The drift lane scans sibling worktrees/specs across the project scope so parallel work does not silently diverge. All Codex agents have web access enabled. The coordinator synthesizes and applies fixes.
+12 focused reviewers run in parallel — 9 Claude agents (completeness, codebase, architecture, provider-fit, edge-case miner, security miner, observability auditor, **live-evidence premise auditor**, spec drift scout) + 3 Codex (standard + adversarial + industry research) — each with a tight prompt and one job, **plus the investigation skill's dynamic Workflow grounding the elevation lane** (it frames the spec's core themes against THIS codebase, fans out across sources, adversarially cross-verifies, and returns code-anchored industry-standard + best-in-class elevation evidence). Before the wave, a **Context Dossier Miner** walks the spec's full lineage (ticket, cited-ADR bodies, prior program sessions, project memory, known-error ledger, flow registry, open PRs) and GENERATES spec-specific review questions injected into every lane. After the wave, a **per-finding falsifier pass** attempts to refute every CRITICAL/MAJOR before it reaches the report. The drift lane scans sibling worktrees/specs/open PRs across the project scope so parallel work does not silently diverge. All Codex agents have web access enabled. The coordinator synthesizes and applies fixes.
 
 **Trigger:** "review this spec", "verify the spec", "run spec review", "gap analysis"
 
-**Prompt templates:** `prompts/design-decisions-extractor.md`, `prompts/completeness-reviewer.md`, `prompts/codebase-verifier.md`, `prompts/architecture-auditor.md`, `prompts/provider-fit-auditor.md`, `prompts/edge-case-miner.md`, `prompts/security-miner.md`, `prompts/observability-auditor.md`, `prompts/spec-drift-scout.md`, `prompts/spec-drift-investigator.md`, `prompts/codex-standard-reviewer.md`, `prompts/codex-adversarial-reviewer.md`, `prompts/codex-research-auditor.md`
+**Prompt templates:** `prompts/design-decisions-extractor.md`, `prompts/context-dossier-miner.md`, `prompts/completeness-reviewer.md`, `prompts/codebase-verifier.md`, `prompts/architecture-auditor.md`, `prompts/provider-fit-auditor.md`, `prompts/edge-case-miner.md`, `prompts/security-miner.md`, `prompts/observability-auditor.md`, `prompts/live-evidence-auditor.md`, `prompts/spec-drift-scout.md`, `prompts/spec-drift-investigator.md`, `prompts/finding-falsifier.md`, `prompts/codex-standard-reviewer.md`, `prompts/codex-adversarial-reviewer.md`, `prompts/codex-research-auditor.md`
 
 ## Skill Memory (LEARNINGS.md)
 
@@ -91,7 +91,21 @@ Skip implementation details, design debates, and rejected alternatives. Keep thi
   ```
   (The rollout id is the newest `~/.codex/sessions/**/rollout-*.jsonl`'s `session_id`, or `codex-sessions/scripts/sessions.py list`. Use `~/.claude/skills/...` paths if installed globally.)
 
-If decision-mining fails or there's no session to mine (e.g. the spec arrived from elsewhere), skip it — proceed with just the spec + the 2a context block. The reviewers still run; they simply lose the decisions cross-check. Not a blocker.
+If decision-mining fails or there's no session to mine (e.g. the spec arrived from elsewhere), skip it — proceed with just the spec + the 2a context block. The reviewers still run; they simply lose the decisions cross-check. Not a blocker. **On a RESUMED session with an empty transcript, mine the PRIOR session's transcript (where the decisions were actually made) — resolve it via Session-Id trailers on commits touching the spec — rather than falling straight back to a spec-derived proxy dossier.**
+
+**2c. Dispatch the Context Dossier Miner** (`prompts/context-dossier-miner.md`) — **mandatory, in parallel with Step 3**:
+- **Agent type:** `general-purpose` | **Model:** `opus`
+- It mines the planes no reviewer reads on its own: the tracker ticket body + comments + blocker graph, every cited ADR/doc BODY (citation-inversion check + zero-call-site primitives + numbered-artifact collisions), prior program sessions (cross-session decision mining), project memory + the known-error/RCA ledger + fix-cluster history, the flow registry, sibling specs and open PRs.
+- It returns a **ground-truth dossier** + **8–15 generated, spec-specific review questions**, each tagged with the lane that should own it.
+- **Inject its output into every reviewer prompt** in Step 4 (append the dossier + that lane's questions to each prompt). The generated questions also seed the Codex adversarial `<FOCUS_TEXT_FROM_COORDINATOR>` block — this mechanizes the pre-injection practice (coordinator-scanned concerns confirm at ~85–100% across runs) instead of leaving it to coordinator diligence.
+
+**2d. Mechanical pre-filter (coordinator, inline, cheap).** Before spending reviewer tokens, resolve every deterministically-checkable claim yourself: `git fetch origin` + pin the merge-base; grep symbols the spec names; check the live-schema snapshot for named tables/columns; run any existing parity/allowlist test the spec touches; `gh pr list --state open` for surface overlap. Facts resolved here go into the dossier as ground truth — a claim answerable by a query never goes to an LLM lane.
+
+**2e. Pick the review profile — sanctioned, logged, never silent.** Right-sizing is allowed ONLY as a named profile, and the report must state which profile ran and which lanes were dropped:
+- **full** (default for any spec doc): all 12 reviewers + investigation.
+- **focused** (surgical single-seam change): codebase-verifier + edge-case miner + live-evidence (if a live surface) + ONE Codex adversarial + the falsifier wave. Dossier miner still runs.
+- **hotfix** (prod-down, minutes matter): codebase-verifier + one Fable `critic` seeded with the dossier's generated questions.
+Rules: (a) **domain-triggered lanes are non-droppable** — a spec adding a credential/table/authz surface always gets the security miner, a spec touching a live runtime always gets live-evidence, whatever the profile; (b) **line-count is not the risk axis, blast-radius is** — a 47-line spec touching a core reducer gets `full`; (c) **lane-manifest assertion**: before reporting, verify every announced lane actually produced output (list the output files/agent returns) — announced-but-never-dispatched lanes have happened twice; (d) the report's reviewer line lists dropped lanes as `SKIPPED (<profile>)`, never silently.
 
 ### Step 3: Synthesize the Decisions Dossier
 
@@ -101,9 +115,9 @@ Dispatch the **Design Decisions Extractor** agent using `prompts/design-decision
 
 The agent reads the structured JSON (user-turn windows, files-edited, commits, tool distribution) and returns a dossier: key decisions, rejected alternatives, user corrections, scope, concerns, requirement quotes, gaps & ambiguities. **You do NOT read the JSON yourself.** (Skip this step if 2b was skipped.)
 
-### Step 4: Dispatch 11 Reviewers in Parallel
+### Step 4: Dispatch 12 Reviewers in Parallel
 
-Read the spec with fresh eyes. Then dispatch ALL 11 primary reviewers simultaneously — they are independent.
+Read the spec with fresh eyes. Then dispatch ALL 12 primary reviewers simultaneously — they are independent. Append the Context Dossier (Step 2c) + that lane's generated questions to every prompt. **Keep lanes independent — no shared scratchpad, no lane sees another lane's output** (shared-context debate amplifies correlated bias; independence keeps errors uncorrelated for the falsifier + synthesis).
 
 **Agent 1 — Completeness & Alignment** (`prompts/completeness-reviewer.md`):
 - **Type:** `general-purpose` | **Model:** `opus`
@@ -141,6 +155,11 @@ Read the spec with fresh eyes. Then dispatch ALL 11 primary reviewers simultaneo
 - **Input:** spec path, project root, dossier content
 - **Job:** Audit the spec's production observability, tracing, and debuggability plan — does it ship its instrumentation in the same change (observability-driven development); name its structured events + fields + a request-threading **correlation id**; propagate standard **trace context** (W3C `traceparent`) across service/async boundaries; stamp telemetry with the **release/version** (onset-vs-deploy); record an **authoritative terminal status** for async/queued work rather than inferring success from a dispatch/`202` ack; emit **metrics at a granularity its alarms can see**; keep high-cardinality/PII out of metric labels and secrets/PII/PHI out of all fields; fingerprint failures on a **stable PII-free action+ref key**; make **fail-open branches observable**; and name the **log/telemetry destination** that serves the surface. Distinct lane from the Security Miner (policy violations) and Edge-Case Miner (semantic boundaries). Minimum 6 Obs-N rows for a runtime-touching spec, severity per the prompt's taxonomy. Its findings get their own report section (like Edge-Case/Security) — not cross-examined.
 
+**Agent 5c — Live-Evidence Premise Auditor** (`prompts/live-evidence-auditor.md`) — first-wave primary; **gated: dispatch only when the spec touches a LIVE surface** (existing runtime path, deployed config/flag, prod data, wired provider); greenfield-only specs record `SKIPPED (no live surface)`:
+- **Type:** `general-purpose` | **Model:** `opus` | **Strictly read-only**
+- **Input:** spec path, project root, dossier content, the project's documented evidence surfaces (observability CLI/profiles, DB read tools, schema snapshots — from CLAUDE.md/AGENTS.md and the operator overlay)
+- **Job:** Extract the spec's **load-bearing premises** and FALSIFY each against live evidence, not prose: the DEPLOYED value of every flag/config the design assumes; live schema/signatures/rows (provenance `SELECT DISTINCT`s, duplicate keys under a proposed unique constraint, dedup-key dry-runs against the real fleet, row-size × page-size × channel-cap arithmetic); **upstream trigger liveness** for any flow the spec extends or bakes against (0-invocations = the bake plan is theatre); DNS/infra reads for provisioning claims; and **budget traceability** — every timeout/budget/cap number must trace to a measurement or a named repo constant. Includes the **bake-feasibility check**: prove the spec's own §bake can actually run (trigger alive, auth reachable, metric emitted). Output is the LE-N table; its CRITICAL/MAJOR rows feed the Step 5 defect pipeline. This is the lane for the single biggest documented miss class — the unverified live-state premise.
+
 **Agent 6 — Spec Drift Scout** (`prompts/spec-drift-scout.md`):
 - **Type:** `general-purpose` | **Model:** `sonnet`
 - **Input:** spec path, project root, dossier content
@@ -168,7 +187,7 @@ Read the spec with fresh eyes. Then dispatch ALL 11 primary reviewers simultaneo
 
 **Composing the Codex prompts:** Use the exact dispatch patterns from `prompts/codex-standard-reviewer.md`, `prompts/codex-adversarial-reviewer.md`, and `prompts/codex-research-auditor.md`. Before dispatching, scan the spec for 3-6 specific risk concerns to inject into the adversarial prompt's `<FOCUS_TEXT_FROM_COORDINATOR_IF_ANY>`.
 
-**All 11 primary reviewers dispatch at the same time.** The 8 Claude agents via the Agent tool, all 3 Codex reviews via separate Bash calls.
+**All 12 primary reviewers dispatch at the same time.** The 9 Claude agents via the Agent tool, all 3 Codex reviews via separate Bash calls.
 
 **Dispatch invariants** (all mandatory):
 - `run_in_background: true` on the Bash tool — **no trailing `&`** in the command. Three separate Bash calls = parallel execution with completion notifications.
@@ -180,7 +199,7 @@ Read the spec with fresh eyes. Then dispatch ALL 11 primary reviewers simultaneo
 - **No JSON templates, no markers, no output format examples in the prompt** — Codex echoes them back as fake output
 - **Never use `companion review` or `companion adversarial-review`** — those review git diffs, not spec files
 
-**Agent 11 (same parallel wave) — Investigation Workflow (elevation grounding).** In the same wave as the 10 reviewers, launch the **investigation skill** on the spec's core themes — this is the deepened elevation lane (see Step 5c). It runs as a background dynamic Workflow, so launch it now and collect it in Step 4c alongside Codex.
+**Agent 11 (same parallel wave) — Investigation Workflow (elevation grounding).** In the same wave as the 12 reviewers, launch the **investigation skill** on the spec's core themes — this is the deepened elevation lane (see Step 5c). It runs as a background dynamic Workflow, so launch it now and collect it in Step 4c alongside Codex.
 
 1. Scan the spec for its **3–6 core themes** — reuse the same scan that seeds the Codex Research Auditor (Agent 9).
 2. Invoke the investigation skill (it **always** runs as a dynamic Workflow — frame → research → adversarial-verify → synthesize) with a premise like:
@@ -217,7 +236,7 @@ When the **Spec Drift Scout** returns, read its report immediately. Do not wait 
 
 ### Step 4c: Wait for Codex reviews, the Investigation Workflow, and drift investigators
 
-The 8 Claude agents return first (2-6 min; Drift Scout may take longer on projects with many worktrees). Codex reviews run in background and take longer. The Research Auditor may take the longest — web research has latency — budget 20-40 min. The **Investigation Workflow** (Agent 11) also runs in the background and notifies on completion — budget 10-30 min depending on theme count and width; read its saved brief (`docs/investigations/…`) when it lands. Drift investigators, if dispatched, should run in parallel with remaining Codex reviews.
+The 9 Claude agents return first (2-6 min; Drift Scout may take longer on projects with many worktrees). Codex reviews run in background and take longer. The Research Auditor may take the longest — web research has latency — budget 20-40 min. The **Investigation Workflow** (Agent 11) also runs in the background and notifies on completion — budget 10-30 min depending on theme count and width; read its saved brief (`docs/investigations/…`) when it lands. Drift investigators, if dispatched, should run in parallel with remaining Codex reviews.
 
 **How to wait:** Use `run_in_background: true` on the Bash dispatch calls. You get notified when each completes. Then **read the output file with the Read tool** and extract findings yourself. No grep, no sed, no checkpoint scripts — you're an LLM, just read the file.
 
@@ -227,11 +246,17 @@ pgrep -f "codex exec" && echo "still running" || echo "exited"
 ```
 If exited, read the file. If still running, let it finish — Codex legitimately runs 20-40 min on complex specs, and research can run longer.
 
-Wait for all 11 primary reviewers, the Investigation Workflow (Agent 11), and any second-wave drift investigators to complete before starting Step 5.
+**Codex-down fallback (standing policy — never improvise it per-run).** A tee file ending in a usage-limit/auth error ("You've hit your usage limit", 401) means the lane is DEAD for this run. Do NOT blind-retry (2-strike rule). Instead:
+1. **Adversarial substitute:** dispatch ONE Fable-pinned `critic` agent (Agent tool, `subagent_type: critic`, model `fable`) with the spec + the same FOCUS concerns/generated questions the Codex adversarial got. Across 6+ documented Codex-down runs this substitute found the run's deepest criticals.
+2. **Elevation substitute:** the Investigation Workflow (Agent 11) carries the elevation lane alone; if a <24h investigation brief on the same themes already exists, reuse it instead of re-launching. Optionally add one web-enabled Claude research lane (general-purpose + WebSearch) as the external cross-check.
+3. **Report honestly:** the Final Report's verdict lines say `timed-out/usage-limit — backfilled by <substitute>`; cross-examination (Step 5b) is recorded as unavailable for those lanes.
+The same degraded-mode principle applies to a Claude-model/classifier outage: run the lanes on an available model tier rather than zeroing the pipeline, and log the substitution.
+
+Wait for all 12 primary reviewers, the Investigation Workflow (Agent 11), and any second-wave drift investigators to complete before starting Step 5.
 
 ### Step 5: Merge & Classify
 
-Collect all 11 primary reports (8 Claude markdown + 3 Codex text/JSON) plus any second-wave drift investigator reports and the Investigation Workflow brief. The Research Auditor findings **and the Investigation Workflow brief** are handled separately — they go into the Industry Insights section (see Step 5c) and do NOT feed the defect-classification pipeline below. The Edge-Case Miner, Security Miner, Observability Auditor, and Spec Drift Scout/Investigators are also handled in their own sections (see Step 5c) — CRITICAL/MAJOR Edge-Case rows with `Spec Coverage: MISSING`, CRITICAL/MAJOR Security rows, CRITICAL/MAJOR Observability rows, and CRITICAL/MAJOR drift findings with `update-current-spec` action are auto-applied like other consensus issues when scoped to the target spec, but they don't get cross-examined since they do not have a direct Codex peer in this skill. Classify each **defect** finding from the other 6 reviewers (completeness, codebase, architecture, provider-fit, codex-standard, codex-adversarial):
+Collect all 12 primary reports (9 Claude markdown + 3 Codex text/JSON) plus any second-wave drift investigator reports and the Investigation Workflow brief. The Live-Evidence Premise Auditor's LE-N table gets its own report section (like Edge-Case/Security/Obs); its CRITICAL/MAJOR REFUTED-premise rows are auto-applied as prose fixes when in scope. The Research Auditor findings **and the Investigation Workflow brief** are handled separately — they go into the Industry Insights section (see Step 5c) and do NOT feed the defect-classification pipeline below. The Edge-Case Miner, Security Miner, Observability Auditor, and Spec Drift Scout/Investigators are also handled in their own sections (see Step 5c) — CRITICAL/MAJOR Edge-Case rows with `Spec Coverage: MISSING`, CRITICAL/MAJOR Security rows, CRITICAL/MAJOR Observability rows, and CRITICAL/MAJOR drift findings with `update-current-spec` action are auto-applied like other consensus issues when scoped to the target spec, but they don't get cross-examined since they do not have a direct Codex peer in this skill. Classify each **defect** finding from the other 6 reviewers (completeness, codebase, architecture, provider-fit, codex-standard, codex-adversarial):
 
 | Codex severity | Claude severity | Unified |
 |---|---|---|
@@ -241,10 +266,19 @@ Collect all 11 primary reports (8 Claude markdown + 3 Codex text/JSON) plus any 
 | low | MINOR | **MINOR** |
 
 **Consensus detection:**
-- **2+ reviewers agree** → high confidence, fix immediately
+- **2+ reviewers agree** → high confidence — cross-lane agreement is a severity/confidence BOOST, not just a dedup key
 - **Codex-only finding** → likely Claude blind spot, investigate
 - **Claude-only finding (all 3 agree, Codex approves)** → could be over-flagging, but 3-agent consensus is strong
-- **Claude and Codex disagree** → **goes to cross-examination (Step 5b)**
+- **Claude and Codex disagree** → if the split is a REPO FACT (store boundary, symbol existence, schema shape), it goes to a falsifier (below) that resolves it by reading the seam — only genuine judgment splits go to cross-examination (Step 5b)
+
+### Step 5a: Per-Finding Falsifier Wave (mandatory before the report)
+
+For EVERY CRITICAL/MAJOR finding that survived classification, dispatch a **Finding Falsifier** (`prompts/finding-falsifier.md`) — one per finding, batched when trivially related, all in parallel:
+- **Type:** `general-purpose` | **Model:** `sonnet` (escalate an individual falsifier to `opus` only for deep multi-file refutations)
+- Each falsifier's ONLY job is to REFUTE its finding: spec already covers it / an existing mechanism neutralizes it / the cited evidence doesn't say that / the failure scenario is unreachable. Verdicts: `REFUTED` / `SURVIVES` / `SURVIVES-BUT-FIX-REJECTED` / `NEEDS-LIVE-EVIDENCE`.
+- This wave also owns: **citation verification** (every symbol/file/component a reviewer OR a proposed fix introduces into the spec is grep-confirmed — phantom symbols in applied fixes are a recurring external-reviewer catch), **factual-split resolution** (Claude↔Codex repo-fact disagreements resolved by reading the code, not debate), and the **downgrade guard** — the coordinator may NOT downgrade or fold a CRITICAL as "docs-only" unless a falsifier REFUTED it with evidence; an unrefuted CRITICAL keeps its severity (a past instinct-downgrade cost 2 PRs + 3 deploy storms).
+- `REFUTED` findings move to the report's **Resolved** section with the refuting evidence. `NEEDS-LIVE-EVIDENCE` items route to the live-evidence lane's method (or land as explicit open risks). Only surviving findings reach Step 5b/5c and the fix step — this is the false-positive filter that keeps applied fixes trustworthy (the production pattern behind it drives reviewer false-finding rates under ~1%).
+- Rough budget: this wave is cheap relative to the reviewer wave (sonnet, one narrow question each). Do not skip it in `focused`/`hotfix` profiles — it is precisely what makes reduced profiles safe.
 
 ### Step 5b: Cross-Examination — Claude vs Codex Debate
 
@@ -315,7 +349,9 @@ After cross-examination resolves (or goes to user), compile the full report:
 ## Spec Review — Final Report
 
 ### Spec: <filename>
-### Reviewers: Completeness (Opus) + Codebase (Sonnet) + Architecture (Opus) + Provider-Fit (Opus) + Edge-Case Miner (Opus) + Security Miner (Opus) + Observability Auditor (Opus) + Spec Drift Scout (Sonnet) + Codex Standard (GPT-5.6-sol) + Codex Adversarial (GPT-5.6-sol) + Codex Industry Research (GPT-5.6-sol, web-enabled) + Investigation Workflow (code-grounded, verified)
+### Profile: <full | focused | hotfix> — dropped lanes: <none | list, each `SKIPPED (<reason>)`>
+### Reviewers: Completeness (Opus) + Codebase (Sonnet) + Architecture (Opus) + Provider-Fit (Opus) + Edge-Case Miner (Opus) + Security Miner (Opus) + Observability Auditor (Opus) + Live-Evidence (Opus | SKIPPED no-live-surface) + Spec Drift Scout (Sonnet) + Codex Standard (GPT-5.6-sol) + Codex Adversarial (GPT-5.6-sol) + Codex Industry Research (GPT-5.6-sol, web-enabled) + Investigation Workflow (code-grounded, verified)
+### Falsifier wave: <N findings falsified: K survived / M refuted / J needs-live-evidence>
 ### Codex Standard Verdict: <approve|needs-attention|timed-out>
 ### Codex Adversarial Verdict: <approve|needs-attention|timed-out>
 ### Codex Research Verdict: <N elevate suggestions / M cautions / timed-out>
@@ -385,6 +421,21 @@ inferred from the dispatch ack"), NEVER as a pasted Obs-N table. MINOR rows are
 reported, not auto-applied. A CRITICAL row that touches a surface outside the
 spec's scope (e.g. the project has no correlation-id primitive at all) → file a
 separate issue rather than expanding scope.
+
+### Live-Evidence Premise Audit (from the Live-Evidence Auditor)
+Kept in its own section — falsified live-state premises are structurally
+different from prose defect-hunting. Output is the LE-N table from
+`prompts/live-evidence-auditor.md`, plus the budget-traceability table and the
+bake-feasibility verdict.
+
+| LE-ID | Premise (spec §) | Check run | Result | Verdict | Severity |
+|---|---|---|---|---|---|
+| LE-1 | … | <exact command/query> | <observed> | HOLDS / REFUTED / UNVERIFIABLE | CRITICAL / MAJOR / MINOR |
+
+CRITICAL/MAJOR REFUTED rows are auto-applied to the spec in Step 9 as prose
+fixes (correct the premise and whatever design rested on it). UNVERIFIABLE
+rows are listed as explicit open risks — never silently dropped. A
+`bake-feasibility: THEATRE` verdict is always at least MAJOR.
 
 ### Spec Drift Findings (from Spec Drift Scout + optional investigators)
 Kept in its own section — this lane checks whether the target spec is drifting
@@ -547,7 +598,7 @@ When the investigation completes, read the output file and extract findings your
 
 ```bash
 git add <spec-file>
-git commit -m "docs(<scope>): spec review fixes — <N> issues from 11-lane pipeline + alignment investigation"
+git commit -m "docs(<scope>): spec review fixes — <N> issues from the multi-lane pipeline + alignment investigation"
 ```
 
 ### Step 10: Visualize (optional)
@@ -585,12 +636,16 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 | 1 | Coordinator | Read spec, confirm target | — |
 | 2a | Coordinator | Write "why" context block (inline, no compaction) | — |
 | 2b | Coordinator | Generate session-decisions JSON (skippable) | — |
+| 2c | **Agent (opus)** | **Context Dossier Miner — ticket/ADR-bodies/prior-sessions/memory/ledger/flows/open-PRs → ground-truth dossier + generated review questions** | Parallel with 3 |
+| 2d | Coordinator | Mechanical pre-filter (merge-base pin, symbol greps, schema lookups, parity tests, open-PR list) | — |
+| 2e | Coordinator | Pick + log the review profile (full / focused / hotfix); non-droppable domain lanes | — |
 | 3 | Agent (haiku) | Decisions JSON → design decisions dossier | — |
-| 4 | **11 Reviewers + Investigation Workflow** | Completeness + Codebase + Architecture + **Provider-Fit** + Edge-Case Miner + Security Miner + **Observability Auditor** + Spec Drift Scout + Codex Standard + Codex Adversarial + Codex Industry Research + **Investigation Workflow (elevation grounding)** | **ALL PARALLEL** |
+| 4 | **12 Reviewers + Investigation Workflow** | Completeness + Codebase + Architecture + **Provider-Fit** + Edge-Case Miner + Security Miner + **Observability Auditor** + **Live-Evidence Premise Auditor (gated)** + Spec Drift Scout + Codex Standard + Codex Adversarial + Codex Industry Research + **Investigation Workflow (elevation grounding)** | **ALL PARALLEL** |
 | 4b | Coordinator + optional agents | Progressive drift investigation from Scout candidates | Parallel when needed |
-| 4c | Coordinator | Wait for Codex reviews, the Investigation Workflow, and drift investigators | — |
-| 5 | Coordinator | Merge 11 primary reports plus drift investigations, classify findings | — |
-| 5b | Coordinator + Codex | Cross-examine MAJOR+ disagreements (Claude vs Codex debate) | Sequential |
+| 4c | Coordinator | Wait for Codex reviews (Codex-down → Fable-critic substitute), the Investigation Workflow, and drift investigators | — |
+| 5 | Coordinator | Merge 12 primary reports plus drift investigations, classify findings | — |
+| 5a | **Agents (sonnet)** | **Per-Finding Falsifier wave — refute every CRITICAL/MAJOR; citation verification; factual-split resolution; downgrade guard** | **ALL PARALLEL** |
+| 5b | Coordinator + Codex | Cross-examine MAJOR+ judgment disagreements (Claude vs Codex debate) | Sequential |
 | 5c | Coordinator + User | Final report, user decides on contested issues | — |
 | 6 | Coordinator | Alignment investigation — OPTIONAL, off by default, only if user asks | — |
 | 7 | Coordinator + User | Present alignment findings (single-pass) — only if 6 ran | — |
@@ -600,11 +655,12 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 
 ## Agent Summary
 
-> Numbering: the **11 primary reviewers** are agents 1–9 **+ Provider-Fit (3b) + Observability Auditor (5b)** (the `Nb` suffix groups a reviewer with its sibling — 3b with Architecture #3, 5b with Security Miner #5, 6b with Drift Scout #6). Agents **11–12** are the non-reviewer lanes (Investigation Workflow, Alignment Investigator), so **no agent bears the number 10 by design** — it is not a gap.
+> Numbering: the **12 primary reviewers** are agents 1–9 **+ Provider-Fit (3b) + Observability Auditor (5b) + Live-Evidence (5c)** (the `Nx` suffix groups a reviewer with its sibling — 3b with Architecture #3, 5b/5c with Security Miner #5, 6b with Drift Scout #6). Agents **11–12** are the non-reviewer lanes (Investigation Workflow, Alignment Investigator), so **no agent bears the number 10 by design** — it is not a gap. Agent 0b (Context Dossier Miner) and agent 13 (Finding Falsifiers) are the pre- and post-wave stages.
 
 | # | Agent | Prompt File | Type | Model | Focus |
 |---|-------|------------|------|-------|-------|
 | 0 | Design Decisions Extractor | `prompts/design-decisions-extractor.md` | general-purpose | haiku | JSONL → dossier |
+| 0b | **Context Dossier Miner** | `prompts/context-dossier-miner.md` | general-purpose | opus | **Pre-wave. Ticket body+comments+blockers, cited-ADR/doc BODIES (citation-inversion, zero-call-site primitives, numbered-artifact collisions), prior-session decisions via Session-Id trailers, project memory + known-error/RCA ledger + fix-cluster attribution, flow registry, sibling specs + open PRs → ground-truth dossier + 8-15 generated lane-tagged review questions injected into every reviewer** |
 | 1 | Completeness Reviewer | `prompts/completeness-reviewer.md` | general-purpose | opus | Dossier × spec cross-check |
 | 2 | Codebase Verifier | `prompts/codebase-verifier.md` | Explore | sonnet | File refs, duplicates, stale code |
 | 3 | Architecture Auditor | `prompts/architecture-auditor.md` | general-purpose | opus | Fit, simplicity, maintenance, **deep-module fit** (invokes the `improve-codebase-architecture` + `codebase-design` rubric by reading their SKILL.md: deletion test, shallow-vs-deep, testability-through-the-interface) **+ delete-legacy/one-architecture gate (CRITICAL if the spec keeps the replaced path alongside the new one)** |
@@ -612,6 +668,7 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 | 4 | **Edge-Case Miner** | `prompts/edge-case-miner.md` | general-purpose | opus | **Semantic boundary enumeration: cardinality / lifecycle / tenancy / encoding / time / concurrency / permission / resource / schema-evolution / forbidden-but-valid** |
 | 5 | **Security Miner** | `prompts/security-miner.md` | general-purpose | opus | **Project-policy security mining: reads `docs/security-policy.md` + `CLAUDE.md`/`AGENTS.md` and audits against your project's stated rules + portable categories (authN/authZ, secret storage, tenant isolation, injection, data boundaries, privilege escalation, allowlist gaps, output sanitization)** |
 | 5b | **Observability & Traceability Auditor** | `prompts/observability-auditor.md` | general-purpose | opus | **First-wave. Ships-its-own-telemetry audit: named structured events + a request-threading correlation id, W3C `traceparent` trace context, release/version stamping (onset-vs-deploy), an authoritative terminal status for async work (not a dispatch/`202` ack), alarm-visible metric granularity, cardinality + PII/PHI discipline, a stable PII-free error fingerprint, observable fail-open branches, and a nameable log/telemetry destination. Own report section (like Edge-Case/Security), not cross-examined.** |
+| 5c | **Live-Evidence Premise Auditor** | `prompts/live-evidence-auditor.md` | general-purpose | opus | **First-wave, gated to specs touching a live surface. Extracts load-bearing premises and falsifies each against LIVE evidence: deployed flag/config values, live schema/signatures/rows (provenance, duplicate keys, dedup dry-runs, row-size × page-size × channel-cap arithmetic), upstream-trigger liveness (a dead pipeline = bake theatre), DNS/infra reads, budget traceability (every number → a measurement or a named constant). Read-only, every verdict cites the exact command + observed value.** |
 | 6 | **Spec Drift Scout** | `prompts/spec-drift-scout.md` | general-purpose | sonnet | **Cross-worktree/project-scope drift: recent pushed refs, dirty worktrees, sibling specs, architecture changes, feature overlap, missing spec updates** |
 | 6b | **Spec Drift Investigator** | `prompts/spec-drift-investigator.md` | general-purpose | opus | **Second-wave deep dive on one drift candidate: update current/other spec, combine, move, split, create missing spec, or mark intentional** |
 | 7 | **Codex Adversarial** | `prompts/codex-adversarial-reviewer.md` | **codex exec (web)** | **GPT-5.6-sol** | **Attack surface, risks — cross-referenced against public CVEs/post-mortems** |
@@ -619,11 +676,19 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 | 9 | **Codex Industry Research** | `prompts/codex-research-auditor.md` | **codex exec (web)** | **GPT-5.6-sol** | **Elevation: OSS libraries, big-company patterns, production gotchas with URL citations** |
 | 11 | **Investigation Workflow** | `investigation` skill (`DEEP-WORKFLOW.md`) | **dynamic Workflow** | **multi-agent** | **Elevation grounding: spec themes framed against THIS codebase, fanned out across sources, adversarially verified in code → industry-standard + best-in-class elevation evidence (Claude Code-only)** |
 | 12 | **Alignment Investigator** | (coordinator-composed prompt) | **codex exec** | **GPT-5.6-sol** | **Decision-reality drift** |
+| 13 | **Finding Falsifiers** (one per CRITICAL/MAJOR) | `prompts/finding-falsifier.md` | general-purpose | sonnet | **Post-wave disprove-step: refute each finding against code/spec/evidence; verify every citation a reviewer or fix introduces; resolve Claude↔Codex repo-fact splits by reading the seam; guard severity downgrades (an unrefuted CRITICAL keeps its severity)** |
+
+## Process Gates (bind the coordinator, not just the reviewers)
+
+- **Review before build.** A net-new tracked spec passes /spec-review BEFORE its build workflow dispatches. Post-build adversarial validate lanes are NOT a substitute for design-stage review — the documented cost of skipping was a concurrency defect that lived in the spec prose and surfaced only at build.
+- **No build dispatch past an unresolved sequencing drift finding.** If the drift lane produced a CRITICAL/MAJOR finding with a `sequence-after <PR/spec>` action, the coordinator REFUSES any build dispatch until it is resolved or explicitly overridden by the user — a review that reports the collision and then dispatches against the doomed base has already happened.
+- **Grill precedes review.** If the spec's core premise was never interrogated (`grilling`/`grill-with-docs` or equivalent), run that FIRST — a full pipeline spent polishing a premise the grill then reverses is the most expensive possible ordering. spec-review verifies a written spec; it cannot fix a spec authored from a misread ask.
+- **Right-sizing is a named profile (Step 2e), never a silent judgment call** — and the report always states the profile + dropped lanes.
 
 ## When NOT to Use
 
-- Trivial specs (<50 lines, single feature) — overkill
-- Specs not discussed in a session — no session decisions to mine (the review still works, it just skips the dossier cross-check)
+- Trivial specs (<50 lines AND low blast-radius, single feature) — overkill. But **line-count is not the risk axis, blast-radius is**: a small spec touching a core reducer/shared seam still gets the full pipeline. Even a skipped spec gets one cheap grounding-verification of its core scope claim.
+- Specs not discussed in a session — no session decisions to mine (the review still works, it just skips the dossier cross-check; the Context Dossier Miner still runs)
 - Pure documentation changes — use Codex review directly via Bash
 
 **Flags:**
