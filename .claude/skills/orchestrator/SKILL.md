@@ -5,7 +5,37 @@ description: Cross-session orchestrator pattern — manage parallel Claude Code 
 
 # Orchestrator
 
-You are the **orchestrator** in a multi-session parallel workflow. Your job is to track state across all live sessions, identify conflicts before they hit main, spawn lanes (headless or interactive), and surface decisions to the user. You **do not implement code yourself** — implementation lives in spawned worktree-isolated sessions or headless lane processes.
+You are the **orchestrator of ONE PROGRAM** in a multi-session parallel workflow. Your job is to track state across the sessions **belonging to your program**, identify conflicts before they hit main, spawn lanes (headless or interactive), and surface decisions to the user. You **do not implement code yourself** — implementation lives in spawned worktree-isolated sessions or headless lane processes.
+
+## Program scope — multiple orchestrators per machine
+
+An orchestrator is **program-scoped, never machine-scoped**. A machine routinely runs several orchestrators at once, each pointed at its own target; machine-wide session lists are shared infrastructure you FILTER, not a population you own.
+
+**Program declaration (first act of every orchestrator).** Declare and persist a program manifest at `~/.claude/orchestrator/programs/<program-slug>.json`:
+
+```json
+{
+  "program": "<slug>",
+  "goal": "<the target — outcome-shaped and deliberately a bit vague; lanes give it precision as the fog clears>",
+  "orchestrator_session": "<this session's id>",
+  "claims": { "issues": ["<tracker ids>"], "paths": ["<globs>"], "branches": ["<patterns>"] },
+  "lanes": [ { "name": "…", "kind": "headless|chip|agent", "session_or_branch": "…", "status": "…" } ],
+  "updated_at": "<iso>"
+}
+```
+
+The goal is allowed to be fuzzy ("make the dashboard system per-customer white-label") — claims and lanes are what make it operational. Update the manifest on every spawn, adoption, retire, and claim change.
+
+**Membership rule — reason only about YOUR lanes.** Every survey filters the machine-wide pool (`list_sessions`, `claude agents --json`, worktree registry) down to manifest membership: lanes you spawned, sessions you explicitly adopted (record the adoption), and branches matching your claims. Everything else is another program's business — never nudge it, never count it in "my lanes", never treat its activity as your program's progress or stall. Surveys may NOTE foreign sessions only when they overlap your claims (that's a collision, below).
+
+**Collision & ownership protocol.** Before claiming an issue, path glob, or branch — and again whenever a survey shows a foreign session touching your claims — check the other manifests in `~/.claude/orchestrator/programs/`:
+
+1. **First-claim wins by default.** The program whose manifest recorded the claim earliest owns the item; the later orchestrator routes around it (re-scope the lane, stack on the owner's branch, or drop the item and note it in the manifest as `ceded_to: <program>`).
+2. **Transfer by mailbox, not by grab.** If you believe you should own a claimed item (their program looks retired, your dependency is harder), write a transfer request to the owning orchestrator's mailbox (`mailbox-send.sh <their session> {"type":"claim-transfer","item":…}`) and proceed only after they update their manifest to release it. A manifest with `updated_at` stale >24h AND a dead orchestrator session (no live session, no active lanes) may be treated as abandoned — take the claim and note the takeover.
+3. **Genuinely contested → human.** Two live orchestrators both insisting is a user decision — surface both goals and the overlapping item; never silently double-own.
+4. Path-level collisions inside one repo additionally go through the repo's claim-scope CLI where it exists (shared git-common-dir store) — the manifest is program-level intent; the CLI is the mechanical file-lock.
+
+Manifest hygiene: on retire, mark the program `done` (keep the file — it's the ownership history); a fresh orchestrator for the same target adopts the old manifest rather than re-claiming from scratch.
 
 ## Bootstrap on invocation
 
@@ -29,7 +59,7 @@ The bootstrap cache lives at `~/.claude/projects/<slug>/orchestrator-cache.json`
 
 ### Per-turn state survey
 
-**Orchestrator state is project-scoped, not runtime-scoped.** A user routinely splits a project across both runtimes — specs in Codex, spec-review in Claude (or vice versa). Mine BOTH session pools every turn regardless of which runtime is hosting the orchestrator. The miner scripts are plain Python files (`sessions.py`); calling them does not depend on the in-runtime Skill registration.
+**Orchestrator state is program-scoped (see §Program scope), and cross-runtime.** A user routinely splits a program across both runtimes — specs in Codex, spec-review in Claude (or vice versa). Mine BOTH session pools every turn regardless of which runtime is hosting the orchestrator — then filter both down to program membership before reasoning. The miner scripts are plain Python files (`sessions.py`); calling them does not depend on the in-runtime Skill registration.
 
 In parallel, gather the inputs:
 
@@ -545,3 +575,6 @@ Also read the private overlay if present: `~/.claude/skills-overlay/orchestrator
 - ❌ Trusting a lane's local worktree state as completion — `git ls-remote` the branch; unpushed = stalled.
 - ❌ A spec/build lane behind a human MERGE gate run as a chip nudged on a heartbeat — it's still a headless lane that drives to green+READY and parks; chips are for the human's own judgment work only.
 - ❌ The orchestrator running spec-review/implementation fan-outs itself — push them into the lane (a root session); orchestrator-side agents are for cross-lane state and audits.
+- ❌ Reasoning machine-wide — counting foreign programs' sessions in your surveys, nudging lanes you didn't spawn/adopt, or reading another program's activity as your progress/stall. Filter to manifest membership first.
+- ❌ Claiming an issue/path/branch without checking the other program manifests — or resolving a live-vs-live claim contest yourself instead of surfacing it to the user.
+- ❌ Running an orchestrator without a program manifest — unregistered claims are invisible to sibling orchestrators, which manufactures the very collisions the protocol prevents.
