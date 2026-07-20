@@ -427,22 +427,39 @@ In a single busy session the user identified several distinct strands of work �
 
 ### Headless spawn (default for non-human lanes)
 
-No paste, no click. The orchestrator spawns directly:
+No paste, no click. The orchestrator spawns through the operator-allowlisted wrapper (the auto-mode classifier blocks a session from invoking `--permission-mode bypassPermissions` or writing its own allow rules directly — the operator one-time allowlists e.g. `~/.claude/scripts/spawn-lane.sh` by hand):
 
 ```bash
-env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT \
-  claude -p "$(cat <<'MISSION'
-<goal one-liner> — issue <ref>.
-Scope: <owned paths>. DO-NOT-TOUCH: <sibling-owned paths>.
-Lifecycle: <steps from §2a that apply>. Verify: <repo verify gate>.
-Open the PR when green; NEVER merge, deploy, or touch prod. On a 2nd identical
-tool denial, stop and print BLOCKED_ON_CLASSIFIER. Print a final JSON status line.
-MISSION
-)" --permission-mode bypassPermissions --worktree <lane-slug> \
-  --session-id "$(uuidgen)" --output-format json --model <per §14>
+~/.claude/scripts/spawn-lane.sh --mission <mission-file> --cwd <lane-worktree> --model <per §14>
 ```
 
-Run it via Bash `run_in_background` — the exit auto-notifies the orchestrator with the JSON result (branch, PR, status). **Note:** the auto-mode classifier blocks an orchestrator session from invoking `--permission-mode bypassPermissions` (or writing its own allow rules) directly — the operator must one-time allowlist a wrapper script (e.g. `~/.claude/scripts/spawn-lane.sh`, added to `permissions.allow` by hand) and the orchestrator spawns lanes through it.
+Battle-tested invocation rules (each earned by a real failure):
+
+- **Never pipe the spawn, always detach stdin.** `spawn-lane.sh … | tail` under a background call can exit 0 with 0 bytes and ZERO work done — a silent no-op that leaves a locked empty worktree. Run it via Bash `run_in_background` with output redirected to files; the wrapper hard-detaches stdin itself. `claude -p --output-format json` ALWAYS emits a final JSON blob — **empty output + exit 0 is proof the lane never ran**, not a success.
+- **Chunk by lifecycle step — this is the default lane shape.** Background-Bash has a runtime cap; a full spec→implement lane gets killed mid-lifecycle. One bounded lane per lifecycle step (spec / review / test-plan / implement), each committing its artifact to the branch; the next lane resumes FROM THE BRANCH. No `--resume` needed, no cap kill.
+- **Stall detection is remote-first.** A lane that ends its turn with work committed locally but unpushed looks successful. After every lane exit run `git ls-remote --heads origin <branch>` — no remote branch (or no PR where one was promised) = stall; respawn a continuation lane from the committed artifact.
+- **Lanes never run the machine's full local verify gate.** Two lanes in a row backgrounded the heavy verify and died waiting for a completion notification a `-p` lane can never receive — warnings did not fix it; removing the step did. Lanes run targeted/quick checks only, then commit + push; **CI is the authoritative gate**, and the orchestrator watches it.
+- **`--worktree` only on first spawn; `--cwd <existing-worktree>` on every continuation** — a second `--worktree` spawn collides with the locked worktree.
+- **`--bg` is unusable headlessly** (the agent starts idle and there is no promptless way to send it its prompt; `claude agents` needs a TTY). Chunked `-p` lanes replace it.
+- **Teardown/refactor missions: every deletability claim is a HYPOTHESIS.** Grep-verify call sites before scoping, and instruct the lane: "if verification reveals the code isn't dead, STOP and report — never weaken a test to make deletion pass." (One unverified "always no-ops" claim would have dropped a money-path capacity release; the lane's refusal caught it.)
+- Mission content: goal one-liner, issue ref + embedded issue body/acceptance criteria, owned paths + DO-NOT-TOUCH, lifecycle step, expected merge tier, `stacked_on:` edge if any, "NEVER merge/deploy/touch prod", "on a 2nd identical tool denial print BLOCKED_ON_CLASSIFIER and stop", "final reply = one JSON status object".
+
+### Execution substrates — composing Workflows, subagents, and lanes
+
+Four substrates run work; pick by **deliverable shape**, not habit:
+
+| Substrate | Deliverable | Reach for it when |
+|---|---|---|
+| Background `Agent` (in-session) | information: a report, verdict, map | state mining, research, scope audit — the orchestrator consumes the answer |
+| Dynamic `Workflow` (in-session) | verified synthesis from many agents | multi-perspective review/verify, discovery sweeps, judge panels, migrations over a work-list |
+| **Headless lane** | a branch/PR (code or docs) | anything shippable; unattended stretches; work needing its own context window |
+| Chip session | human judgment | founder gates, grillings, watch-and-steer — nothing else |
+
+**A headless lane is a ROOT session — push whole lifecycle phases down into it.** The no-nested-dispatch rule binds Agent-tool subagents, NOT lanes: a lane may (and should) run subagent-driven implementation, `/spec-review`-style multi-agent fan-outs, and dynamic Workflows internally (proven in real use: a lane ran a 10-agent spec-review including an adversarial reviewer). The orchestrator plans and integrates; it does not run spec-review itself. Because Workflow requires explicit opt-in, the mission text carries the grant: "you may run Workflows for the review/verify phases."
+
+Substrate mapping over the §2a lifecycle: steps 1–2 (brainstorm/spec) → headless lane (or chip when the human is deciding); step 3/6 (spec/plan review) → Workflow or subagent fan-out INSIDE the lane; step 7 (execute) → subagent-driven implementation inside the lane; cross-lane verification and audits → orchestrator-side Agent/Workflow. Concurrency: heavy (verify/build) serializes on the machine-global lock — cap ~2 heavy lanes; read-heavy Workflows parallelize freely.
+
+**MCP tiers differ by substrate** — a Task subagent inherits the full desktop MCP set (interactive OAuth included); a headless lane gets only the static-credential MCPs the wrapper attaches (e.g. tracker CRUD via API key). Missions target the lane tier; the orchestrator does anything requiring desktop-only MCPs itself.
 
 **Headless MCP: interactive OAuth doesn't load in `-p` mode — attach static-credential MCPs explicitly.** Desktop-plugin and claude.ai-connector MCPs authenticate via interactive OAuth; their tokens do NOT load in a headless lane (verified: a lane sees zero tracker tools even when the desktop shows Connected). Lanes that need the tracker (or any MCP) get it via `--mcp-config` with static-credential auth — e.g. an issue-tracker MCP with an API-key bearer header, provisioned once by the operator into a gitignored secrets file and auto-attached by the spawn wrapper. Static-credential CLIs (`gh`, `git`, cloud CLIs with on-disk profiles) work headless as-is. Mission briefs still embed the core context inline (issue body, acceptance criteria, file anchors) — the MCP is for depth (comments, linked issues, live updates), not a substitute for a self-contained brief. For long-lived lanes prefer `claude --bg` and read `claude agents --json` at each wake. Same mission-content requirements as Paste 1 below (goal / scope / constraints / trailer / verify / PR format); the mission must also state its **expected merge tier** and any **`stacked_on: <pr>`** edge.
 
@@ -522,3 +539,9 @@ Also read the private overlay if present: `~/.claude/skills-overlay/orchestrator
 - ❌ Entering an unattended stretch without the pre-authorization ask (§3a.2) — discovering at 2am that the whole DAG roots on a human merge gate is a planning failure, not a gate failure.
 - ❌ Polling wakes against a human-only gate — if only the human can open it, park with ONE wake at their expected return (§3a.3).
 - ❌ A lane blind-retrying through a safety-classifier or model-outage window — 2nd identical denial → exit BLOCKED_ON_CLASSIFIER; orchestrator backs off ≥30 min.
+- ❌ Piping a lane spawn (`spawn-lane … | tail`) or trusting exit 0 without the final JSON blob — the silent no-op signature.
+- ❌ Putting the full local verify gate in a lane mission — lanes background it and die waiting; targeted checks + push + CI instead.
+- ❌ One monolithic spec→implement lane — the runtime cap kills it; chunk by lifecycle step, resume from the branch.
+- ❌ Trusting a lane's local worktree state as completion — `git ls-remote` the branch; unpushed = stalled.
+- ❌ A spec/build lane behind a human MERGE gate run as a chip nudged on a heartbeat — it's still a headless lane that drives to green+READY and parks; chips are for the human's own judgment work only.
+- ❌ The orchestrator running spec-review/implementation fan-outs itself — push them into the lane (a root session); orchestrator-side agents are for cross-lane state and audits.
