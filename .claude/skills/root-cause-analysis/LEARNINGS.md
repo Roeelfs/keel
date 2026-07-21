@@ -94,6 +94,21 @@ The entries below are portable starting wisdom, not project-specific.
   its necessity. The tripwire is mechanical — **count prior fixes in the same subsystem at
   Phase 1's ledger check; at ≥3, Phase 5 runs at the subsystem level before fix N lands.**
 
+### Fix clustering has two exits — delete the machinery, *or* fix the chokepoint below the surfaces
+- The count-the-fixes tripwire forks, and the mistake is landing a 3rd surface patch without
+  picking a fork. **Exit A:** the machinery shouldn't exist (adopt/delete — the premise
+  re-audit above). **Exit B, which the premise re-audit alone misses:** the machinery is
+  legitimate, but every prior fix patched a **surface above a shared chokepoint** (a resolver,
+  a gate, a dispatch point). Observed in one adopter stack: a credential/identity mis-routing
+  bug patched at **three separate send call-sites** in turn — each patch correct for its
+  surface, each leaving the resolver free to mis-route at the next un-covered call-site. The
+  kill was to make the **resolver itself fail closed on the ambiguity** (return a typed
+  "ambiguous" result / throw, instead of silently picking a default) — one fix, every surface
+  covered, compiler-enforced across all callers. The tell that you're at exit B: *a 3rd patch
+  of one failure class at a 3rd call site.* Fix N belongs **below** the surfaces, not at
+  surface N — and it should fail closed, because the thing the surface patches kept papering
+  over was an ambiguity the chokepoint was silently resolving wrong.
+
 ### An unmeasured premise is unfalsifiable by construction
 - In the same case, the founding "~4 min create" was a **dispatcher timeout constant
   remembered as a measurement** (measured provider create: sub-3 s — 1–3% of the pipeline;
@@ -116,6 +131,19 @@ The entries below are portable starting wisdom, not project-specific.
   test: *does this data have a runtime/customer consumer?* No → git, not a DB. Add a derived
   index over the git records only when a consumer appears (Backstage outgrow path). Never
   co-locate RCA state with the plane it debugs; `resolved` is bake-gated (merged ≠ resolved).
+
+### Silent-wrong-success is invisible to failure-filtered telemetry
+- A failure-keyed occurrence rollup (GROUP BY over the log store, filtered to error class /
+  non-`success` status) is **structurally blind to a defect that terminates `status=success`
+  with a wrong value** — wrong recipient, wrong sending identity, wrong amount, or a row
+  silently made unreachable. There is no error to group on, so the recurrence rollup reads
+  **zero** while the class recurs — which is precisely how a mis-routing bug gets patched
+  three times without any telemetry ever surfacing it. Two consequences: (1) do **not** read a
+  defect's absence from a failure rollup as absence of the defect; (2) this class is caught
+  only by a **count/parity probe** (compare rows in a terminal state to the count that *should*
+  exist — the gap is the defect volume) and prevented only by a **loud fail-closed guard at
+  the chokepoint**, never by the ledger. Pairs with fail-open-is-permanent-disable: silent
+  wrong-success is the *success-status* sibling of the silent-degraded-branch trap.
 
 ## Industry grounding / References
 
