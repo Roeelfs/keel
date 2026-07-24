@@ -114,6 +114,8 @@ tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
     - SQL queries use parameterization
     - File uploads validated (type, size, content)
     - URLs validated to prevent SSRF
+    - Symlinks resolved BEFORE path validation, never after — a symlink sitting inside an authorized directory that points outside it is an escape.
+    - An allowlist is a capability GRANT, not a destination filter — audit every function reachable through an allowed host, not just the hostname.
 
     ### Output Encoding
     - HTML output escaped to prevent XSS

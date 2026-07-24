@@ -34,3 +34,8 @@ install step.
 - **Dispatched lane prompts must declare leaf-agent scope** — any prompt a skill
   hands to a subagent/Workflow lane includes: "You are a leaf agent: do NOT spawn
   sub-agents or Workflows; do the work inline and return."
+- **Dispatched agents return a condensed summary, not a transcript** — target
+  1,000–2,000 tokens of conclusions; never raw tool output or file bodies (the
+  caller re-reads them on every subsequent turn). Carve-out: ground-truth
+  identifiers — exact error text, `file:line` anchors, commit SHAs, ticket IDs,
+  command strings — are quoted VERBATIM, never compressed away to hit the target.
