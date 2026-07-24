@@ -23,7 +23,8 @@ export const meta = {
 //   ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl         (Codex rollouts)
 //   ~/.claude/history.jsonl
 // Mix both runtimes into the buckets; the miner prompt below handles either schema.
-const BUCKETS = args.transcriptBuckets // [[path,...], ...]  passed in by the skill
+const ARGS = typeof args === 'string' ? JSON.parse(args) : args  // REQUIRED: see the args-is-a-string trap in Launching
+const BUCKETS = ARGS.transcriptBuckets // [[path,...], ...]  passed in by the skill
 const LESSON_SCHEMA = { type:'object', additionalProperties:false, required:['report_markdown','lessons'], properties:{
   report_markdown:{type:'string'},
   lessons:{type:'array',items:{type:'object',additionalProperties:false,
@@ -87,7 +88,8 @@ const COMP_SCHEMA = { type:'object', additionalProperties:false, required:['repo
       risk:{enum:['low','medium','high']}, notes:{type:'string'} }}} }}
 
 // INV: read ~/.claude/plugins/{installed_plugins,known_marketplaces}.json for the live inventory and pass it in.
-const INV = args.inventory
+const ARGS = typeof args === 'string' ? JSON.parse(args) : args
+const INV = ARGS.inventory
 phase('Research')
 const [official, third, skills, models, cli] = await parallel([
   ()=>agent(`Find the latest version of each plugin from the official marketplace and the non-interactive update command (claude plugin marketplace update / claude plugin update). INV: ${INV}. Return report_markdown + components[].`, {label:'research:official', phase:'Research', schema:COMP_SCHEMA, agentType:'general-purpose'}),
@@ -115,7 +117,8 @@ export const meta = {
   description: 'Survey GitHub agent stacks, gap-analyze vs our owned agents, recommend stay/cherry-pick/adopt',
   phases: [{ title: 'Discover' }, { title: 'Recommend' }],
 }
-const OURS = args.ourStack // read ~/.claude/agents/*.md (names, models) + our rules; pass in
+const ARGS = typeof args === 'string' ? JSON.parse(args) : args
+const OURS = ARGS.ourStack // read ~/.claude/agents/*.md (names, models) + our rules; pass in
 const CAND = { type:'object', additionalProperties:false, required:['report_markdown','candidates'], properties:{
   report_markdown:{type:'string'},
   candidates:{type:'array',items:{type:'object',additionalProperties:false,
@@ -154,7 +157,8 @@ export const meta = {
   description: 'RCA a batch of regressions → failure classes + hot-zones → adversarially-verified guardrails → a prod-stability program (docs/CI/harness/cross-session/research)',
   phases: [{ title: 'RCA' }, { title: 'Synthesize' }, { title: 'Mitigate+Verify' }, { title: 'Program' }],
 }
-const INCIDENTS = args.incidents // [{id,title,introduced_by,fixed_by,summary,commits}] — discovered inline first
+const ARGS = typeof args === 'string' ? JSON.parse(args) : args
+const INCIDENTS = ARGS.incidents // [{id,title,introduced_by,fixed_by,summary,commits}] — discovered inline first
 const PIN = 'RCA only — read-only; ground every claim in the actual `git show` of the introducing+fixing commit; no mutation, no nested dispatch, no log confabulation.'
 
 const RCA = { type:'object', additionalProperties:false,
@@ -294,5 +298,7 @@ return await agent(`Write the dated context-economy report + ONE TRENDS.md row. 
 ---
 
 ## Launching
+
+**The `args` trap — always unwrap it.** `args` can arrive at the script as a JSON **string**, not the object you passed; `args.foo` is then `undefined` and the script dies on the first `.map` (observed 2026-07-24: Workflow A crashed instantly on `BUCKETS.map`). Every template above therefore opens with `const ARGS = typeof args === 'string' ? JSON.parse(args) : args`. Never read `args.foo` directly.
 
 Read the live inventory inline first (`~/.claude/plugins/*.json`, `ls -t ~/.claude/projects/*/*.jsonl` **and** `ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl` — bucket BOTH runtimes for Workflow A, and for C `~/.claude/agents/*.md`), pass it as `args`, launch the Workflows, then **stop and wait** for the completion notifications. Do not poll.
