@@ -1,7 +1,7 @@
 ---
 name: adr-auditor
 description: Architecture-conformance GATE for specs/changes — verifies a spec stays within the Accepted-ADR / platform-invariant / roadmap / product foundation and does NOT stray. Classifies every decision CONFORMS | STRAYS | NEEDS-APPROVAL; hard-stops any spec that changes an Accepted ADR/invariant without an explicit founder-approval marker. Use as a spec-review lane and as a standalone pre-finalization gate.
-model: claude-opus-4-8
+model: opus
 tools: Read, Grep, Glob, Bash
 ---
 
