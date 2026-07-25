@@ -45,6 +45,14 @@ Hard-won traps, by phase. Read the relevant block before running that phase of s
 - **Prefer a hook over a prose rule for a *mechanically-detectable* wrong move; prefer a rule when the judgment is contextual.** "Resolve PR comments before merge" is mechanical → hook. "Don't over-abstract" is contextual → rule. A hook is fail-closed (it blocks), so a false-positive matcher costs more than a missed rule — calibrate width accordingly.
 - **A friction loop that recurred ≥3× is the bar for a hook.** A one-off stumble is a memory note, not a hook — don't ossify a single bad session into a standing block.
 
+## Research lanes (Workflow B / C)
+
+- **A plausible-but-nonexistent config key is the worst output this ritual can produce** — worse than a documented gap, because it reads as progress and gets applied. Confirm every env var, settings key, hook event, CLI flag and tool name against the **installed binary** (`strings -a <cli> | grep -F <KEY>`, `--help`) or a real docs page before it enters the plan.
+- **Run the falsifier wave; it is not ceremony.** On one measured run it dissolved 4 of the top-ranked findings — each turned out to have zero call sites or zero matching rules in the actual harness. The probe that catches most of them is simply *"read the local files before claiming it is missing."*
+- **Record the negatives with reasons.** Refuted / already-adopted / app-runtime-class items belong in `skip_or_watch`, or the next run pays to re-research the same dead ends.
+- **A documented pin is a claim, not a mechanism — trace its enforcement.** Measured: a flagship model was documented as the standing second-opinion pin while the runtime config selected a mid-tier model and no call site passed an explicit model flag, so a run of "independently cross-checked" claims were made against a different model than the one documented. For every pin, name the thing that actually selects it at runtime; if you cannot, it is unenforced.
+- **Don't re-fire identical research.** These lanes are expensive and their answer is stable over hours, not minutes. Re-running an unchanged question the same day is the blind-retry anti-pattern — read the previous run's plan first and only research the delta.
+
 ## Merge (step 5)
 
 - **Three surfaces, three mechanisms:** product-repo `AGENTS.md` → **PR** (if merge = prod deploy in your project, explicit go-ahead only); skills repo → push (then `npx skills update -g`); `~/.claude` → commit + push.
