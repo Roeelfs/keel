@@ -1,6 +1,6 @@
 ---
 name: codex-sessions
-description: Mine local Codex sessions, summarize active and recent sessions, and produce an orchestration state artifact.
+description: Mine local Codex sessions and summarize active and recent sessions. Reports Codex-side session state only; it does NOT own program state — the orchestrator skill owns the program manifest and `<slug>.state.md`.
 ---
 
 # codex-sessions

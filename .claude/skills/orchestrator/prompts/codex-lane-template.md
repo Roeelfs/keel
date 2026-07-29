@@ -1,6 +1,6 @@
 # Codex lane prompt — template
 
-Single-paste prompt for spawning a Codex CLI lane session. Applies the discipline from SKILL §12 (Codex variance) and §15 (Lane discipline) — branch protection + orchestrator-owned merge + no `/tmp/` source-of-truth.
+Single-paste prompt for spawning a Codex CLI lane session. Applies the discipline from `references/codex-runtime.md` (Codex variance) and `references/merge-and-retire.md` (merge gate) — branch protection + orchestrator-owned merge + no `/tmp/` source-of-truth.
 
 Replace the `<...>` placeholders before pasting.
 
@@ -69,7 +69,7 @@ STOP and surface to operator only on:
 |---|---|---|
 | Worktree placement | sibling `~/code/<lane>/` is fine | MUST be nested `<repo>/<lane>-impl/` |
 | Continuation cadence | `/loop 10m` (harness) | self-paced, embedded stop conditions |
-| Subagent dispatch | `Agent` tool → Haiku/Sonnet | `spawn_agent` (gpt-5.4-mini), prose-instruct workers |
+| Subagent dispatch | `Agent` tool → Haiku/Sonnet | `spawn_agent` on a cheap Codex tier (verify one exists; flagship is `gpt-5.6-sol`), prose-instruct workers |
 | Skill invocation | `Skill` tool fires `spec-test-execute`, etc. | paste canonical guidance into worker prompt — no skill dispatch |
 | Session-Id trailer | UNQUOTED heredoc with `$CLAUDE_SESSION_ID` | `prepare-commit-msg` hook recovers SID from `~/.codex/sessions/` |
 | Merge action | session can self-merge after CI CLEAN | orchestrator merges (lane has unreliable CI visibility under sandbox) |
