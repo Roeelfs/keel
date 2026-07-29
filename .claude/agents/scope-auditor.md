@@ -1,7 +1,7 @@
 ---
 name: scope-auditor
 description: Post-dispatch scope/contamination GATE. Given a dispatched branch + its declared expected_files, diffs it against fresh origin/main, classifies every surplus file as acceptable collateral vs contamination, and prescribes the mandatory remediation (re-integrate by cherry-picking the one clean commit — never rebase, never salvage-in-place). Use on every dispatched-branch return before merge.
-model: claude-sonnet-5
+model: sonnet
 tools: Read, Grep, Glob, Bash
 ---
 

@@ -13,6 +13,8 @@ The deciding test: **do you need a third-party vendor's DOCS, or your own LOGS?*
 
 **Ground** when you need a library/API/SDK/framework's real shape, limits, idioms, or current version (even if the name is familiar but its current API isn't); on version-currency or deprecation ("is X still the way"); on approach-selection where an industry standard shapes the design; on an unfamiliar third-party error. Over-grounding is cheap — on the fence, ground.
 
+**A NEGATIVE claim about a named third-party product is itself a grounding case.** "X has no MCP server", "X doesn't support Y", "there's no API for Z" — asserting absence requires the same evidence as asserting presence, and it is the shape most often wrong from recollection. Fire before asserting it, not after being corrected.
+
 **Currency self-check** (the gap topic-class can't see): familiarity is not currency. If your memory of a third-party API/SDK/version predates your knowledge cutoff and the work depends on its *current* shape, ground — you won't feel uncertain about a confidently-remembered-but-changed API, so make currency, not familiarity, the trigger. A borderline tie-breaker; it does not override the hard-skips.
 
 **Hard-skip** (overrides the fire, even when a vendor is named): debugging or baking *your own* runtime — the services, jobs, handlers, sandbox, sign-in, deploys, backups, alarms you operate — where the truth is your own logs + this codebase, not the web; a one-sentence mechanical diff (typo, rename, log line); and pure internal authoring (spec, issue/tracker, memory, PR body, git mechanics).

@@ -3,9 +3,6 @@
 Canonical instructions file for this repo (Codex/Gemini read this; `CLAUDE.md` is a
 symlink here — one contract, two filenames; see `docs/instructions-files.md`).
 
-**Communication:** Be extremely concise. Sacrifice grammar for concision — drop
-articles/filler/preamble; terse fragments over full sentences.
-
 ## What this repo is
 
 The public, canonical skills repo. Machines consume it via symlinks from their skill
@@ -14,6 +11,15 @@ install step.
 
 ## Contracts
 
+- **A dispatched lane is graded by its ARTIFACT, not its envelope** (global CLAUDE.md
+  §Workflow). A skill that dispatches lanes states, in the lane prompt, the objective
+  artifact the caller will check — a completion envelope reading `success` over an
+  empty artifact is a dead lane. Applies to Codex lanes too: `codex exec` can exit 0
+  having answered a different question.
+- **This repo has no CI and no PR gate** — 1 PR in its lifetime, 0 GitHub Actions runs,
+  `.github/workflows/` absent; commits land direct to `master`. Do not propose
+  CI-shaped guards here; a `gh pr merge` hook would have no call sites. Merge/CI
+  friction observed in *product* repos belongs in those repos' own layer.
 - **Public and marker-free.** No secrets, customer names, project-private facts, or
   machine-specific paths in skills or seeds. Operator-private craft goes to the
   machine's `~/.claude/skills-overlay/<skill>/LEARNINGS.md`; machine/project facts go

@@ -13,9 +13,9 @@ On every state-survey turn:
 1. Run **both** session miners in parallel (state is project-scoped; specs may be split across runtimes):
    - `python3 ~/.claude/skills/claude-sessions/sessions.py survey --filter <project> --json` → `/tmp/survey-claude-<ts>.json`
    - `python3 ~/.claude/skills/codex-sessions/scripts/sessions.py survey --filter <project> --days 2 --json` → `/tmp/survey-codex-<ts>.json`
-2. Read the previous cache from `~/.claude/projects/<slug>/orchestrator-runs/last-state.json` (may not exist on first run).
+2. Read the previous state file from `~/.claude/orchestrator/programs/<slug>.state.md` (may not exist on first run).
 3. Pull `gh pr list --state open --json number,title,headRefName,updatedAt` and `gh issue list --state open --label priority/p1 --json number,title` (cheap, narrow).
-4. Dispatch the miner subagent (Haiku in Claude via `Agent`, gpt-5.4-mini in Codex via `spawn_agent`) with the prompt below — pass BOTH surveys, tagged by runtime.
+4. Dispatch the miner subagent (cheap tier — Haiku in Claude via `Agent`, `spawn_agent` in Codex) with the prompt below — pass BOTH surveys, tagged by runtime.
 5. The miner unions the two pools (one entry per logical lane, even if the same lane has work in both), classifies each, and emits a single project-scoped summary.
 6. Write the new cache file with the agent's classifications and present the summary to the user.
 
@@ -43,7 +43,7 @@ You are a session-state miner for the orchestrator. Your job: read the structure
 You MUST process both pools. State is project-scoped; the user routinely splits a feature across runtimes (e.g. spec-write in Codex + spec-review in Claude).
 
 ### 2. Previous run cache (may be empty on first run)
-[PASTE THE CONTENTS OF ~/.claude/projects/<slug>/orchestrator-runs/last-state.json HERE, or "(none — first run)"]
+[PASTE THE CONTENTS OF ~/.claude/orchestrator/programs/<slug>.state.md HERE, or "(none — first run)"]
 
 ### 3. Open PRs
 [PASTE THE OUTPUT OF `gh pr list --state open --json ...` HERE]
@@ -60,7 +60,7 @@ The full feature lifecycle is: spec → spec-review → fixes → spec-test-plan
 
 For each session in the survey, one block:
 
-**`<NAME>`** — runtime: <claude|codex|both>, status: <ACTIVE/WARM/IDLE>, age: <Xs/Xm/Xh>, children: N, mode: <mailbox|self-managed|loop>, recommended: <opus|sonnet|haiku>+<effort>
+**`<NAME>`** — runtime: <claude|codex|both>, status: <ACTIVE/WARM/IDLE>, age: <Xs/Xm/Xh>, children: N, mode: <loop|self-managed|wake-driven>, recommended: <opus|sonnet|haiku>+<effort>
 - Lifecycle: step <N> of 10 — <one-line description of which step they're at, inferred from artifacts>
 
   If a logical lane has work in BOTH pools (e.g. spec was authored in Codex, spec-review then ran in Claude), tag as `runtime: both` and call out the handoff: "spec authored in Codex (rollout 019dd…); spec-review currently in Claude session `<NAME>`". Do not duplicate the lane block per pool.
@@ -83,29 +83,22 @@ For each session in the survey, one block:
 - "`hose` (Stage 5) is ACTIVE with 7 children, JSONL stale 25s — running a verify; check back in 5min"
 - "`(unnamed) <sid>` is a new lane — confirm scope before adding to WIP count"
 
-### Cache update (JSON, will be written back)
+### State-file update (the orchestrator writes this to `~/.claude/orchestrator/programs/<slug>.state.md`)
 
-```json
-{
-  "run_ts": "<ISO timestamp>",
-  "sessions": {
-    "<full-sid>": {
-      "name": "<name>",
-      "purpose_hint": "<from survey>",
-      "last_jsonl_mtime_iso": "<derived from age + run_ts>",
-      "last_status": "ACTIVE|WARM|IDLE",
-      "lifecycle_step": <int 1-10 or null if unclear>,
-      "lifecycle_label": "<short label e.g. 'implementation T3 in flight'>",
-      "last_seen_commit": "<sha or null>",
-      "open_pr": <PR number or null>,
-      "mode": "mailbox|self-managed|loop",
-      "recommended_model": "opus|sonnet|haiku",
-      "recommended_effort": "standard|think|think hard|think harder",
-      "model_override": <user-set override or null — DO NOT overwrite if present>
-    }
-  }
-}
-```
+Markdown, not JSON — this is the compact-survivable layer the orchestrator re-reads at every wake. One row per LOGICAL lane, even when that lane has work in both runtimes. Emit exactly:
+
+    # <program> — state (run <ISO timestamp>)
+
+    | lane | step | status | last commit | open PR | model/effort | artifact | last verified fact |
+    |---|---|---|---|---|---|---|---|
+    | `<NAME>` | 5 | ACTIVE | <sha> | #123 | sonnet / think | branch+PR | CI green at <ts> |
+
+    ## AT-WAKE
+    1. <the single next action, naming the lane first>
+    2. <the second action, only if independent of the first>
+    Blocked on: <the gate or dependency, or "nothing">
+
+`last verified fact` carries evidence, never inference — a quoted `mergedAt`, a check conclusion, a sha. Where a lane has a `model_override`, keep it verbatim and suffix `(USER OVERRIDE)`; never reclassify it silently.
 
 ## Model + effort inference
 
@@ -113,7 +106,7 @@ Map lifecycle step → matrix row in `prompts/model-routing.md`. If `model_overr
 
 ## Inference rules (apply silently, do not explain in output)
 
-Lifecycle inference from artifacts (per the canonical paradigm in `SKILL.md` §2a):
+Lifecycle inference from artifacts (per the canonical lane in `references/lifecycle.md`):
 - Spec file at `docs/specs/active/<date>-<slug>.md` (or `-design.md`), no v0.2 yet → step 1 (spec writing)
 - Commit subject contains `spec — ` → step 2 (spec v0 committed)
 - Commit subject contains `spec revision post /spec-review` OR `spec-review v0.X` → step 3 (spec-review applied)
@@ -137,15 +130,15 @@ DRIFT risks (surface in the per-lane "Risks" line when detected):
 
 ## Incremental mining
 
-**Skip-by-default for unchanged sessions.** For each session in the survey, compare its `last_assistant_ts` (or `jsonl_age_seconds`) against the per-session timestamp recorded in the previous cache (`previous_cache.lanes[<name>].last_seen_ts`). If the session's JSONL has not advanced since the previous mine, emit a single line for it: `<NAME> — no delta vs <previous_cache.run_ts>` and skip the per-lane summary block entirely. Only re-summarize sessions whose JSONL advanced.
+**Skip-by-default for unchanged sessions.** For each session in the survey, compare its `last_assistant_ts` (or `jsonl_age_seconds`) against that lane's row in the previous state file. If the session's JSONL has not advanced since the previous mine, emit a single line for it: `<NAME> — no delta vs <previous run ts>` and skip the per-lane summary block entirely. Only re-summarize sessions whose JSONL advanced.
 
 Reason: full per-session summarization costs ~3-5K tokens per lane. With 6 lanes and 3 mines/hour, that's 60-90K of subagent dispatch even when nothing changed. Skipping unchanged lanes drops cost to O(changed lanes).
 
-In the synthesis section at the end, count and report the skip rate explicitly: `Mined N of M sessions (skipped K with no JSONL delta vs <previous_cache.run_ts>)`. This makes the cache hit visible to the orchestrator, which can then decide whether the result is fresh enough to act on.
+In the synthesis section at the end, count and report the skip rate explicitly: `Mined N of M sessions (skipped K with no JSONL delta vs <previous run ts>)`. This makes the cache hit visible to the orchestrator, which can then decide whether the result is fresh enough to act on.
 
 **When to FORCE a full re-mine even if cache says no delta:**
-- A new PR opened that the cache doesn't reflect (compare PR list to `previous_cache.lanes[*].open_pr`)
-- A new commit on main not in `previous_cache.merged_prs_today`
+- A new PR opened that the cache doesn't reflect (compare the PR list to the state file's open-PR column)
+- A new commit on main that the state file does not account for
 - The orchestrator explicitly passes `force_full=true` in its dispatch
 - The previous cache is more than 30 minutes old (sessions may have done work the JSONL-mtime check missed if Claude Code buffered writes)
 
@@ -156,9 +149,9 @@ Output strictly markdown. No emoji. No "Here's the summary:" preamble. Start wit
 
 ---
 
-## Cache file shape
+## State file shape
 
-`~/.claude/projects/<slug>/orchestrator-runs/last-state.json` is overwritten each run. The file is small (~5-10 KB even with 6 sessions). Older runs are not retained — the diff is between *most recent two* runs only.
+`~/.claude/orchestrator/programs/<slug>.state.md` is overwritten each run and stays small (a table plus an AT-WAKE list). Older runs are not retained — the diff is between the *most recent two* runs only. Dated narration belongs in the sibling `<slug>.events.jsonl`, never here.
 
 ## When to skip the agent
 
