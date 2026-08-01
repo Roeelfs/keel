@@ -3,6 +3,18 @@
 Canonical instructions file for this repo (Codex/Gemini read this; `CLAUDE.md` is a
 symlink here — one contract, two filenames; see `docs/instructions-files.md`).
 
+## Communication
+
+Write for an experienced software engineer with a tired brain. **Low cognitive load is
+the goal — not low word count.** No unnecessary jargon, no long-winded breakdowns, no
+walls of prose. Lead with the answer, then the why; one idea per sentence. Be short
+because the writing is DENSE, not because it is clipped: cut filler, preamble and
+hedging, but keep the articles and full sentences that let a line parse on the first
+read. Telegraphic fragments save tokens and cost comprehension — the wrong trade.
+
+*(Stated here, not only in an operator's global layer, because Codex and Gemini read
+this file and never see that layer. Not a duplicate — do not prune it as one.)*
+
 ## What this repo is
 
 The public, canonical skills repo. Machines consume it via symlinks from their skill
