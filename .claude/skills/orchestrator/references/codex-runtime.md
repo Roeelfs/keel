@@ -12,6 +12,13 @@ When hosted by Codex, the following replace the CORE's verbs. Everything else in
   `python3 ~/.claude/skills/codex-sessions/scripts/sessions.py survey --filter <project> --days 2 --json`
   A program routinely splits across runtimes (spec authored in Codex, reviewed in Claude). Skipping the Claude pool because "I'm in Codex" was a real audit miss.
 - **Subagent dispatch** — no `Agent`/`Skill` tools. Use `spawn_agent` for the miner role and prose-instruct workers; you cannot dispatch `/spec-review`, `/spec-test-execute` etc. as skills — paste their canonical guidance into the worker prompt. Verify a cheap Codex tier exists before pinning one; the flagship id is `gpt-5.6-sol`.
+- **`wait_agent` polling — poll at the work's latency, not below it.** The minimum accepted is
+  `timeout_ms: 10000` (a smaller value is rejected outright: `"timeout_ms must be at least 10000"`),
+  but the minimum is not the right value. For web-research-backed or falsifier fan-outs, poll at
+  **`timeout_ms: 60000` or higher**. Measured 2026-08-02 across the local rollouts: **24 of 37
+  `wait_agent` calls timed out (65% dead round-trips)** at 20,000–30,000 ms, worst case **14
+  identical polls in one session**. Each dead poll is a full turn that reads the whole context
+  again, so under-polling costs far more than waiting.
 - **Continuation** — no `ScheduleWakeup`, no `/loop`. Use the single-paste self-paced directive in `prompts/loop-directive.md` §Codex variant, with explicit stop conditions embedded in the initial prompt. A silent worker is re-triggered by a new `codex exec`, never by a loop.
 - **Human surfacing** — no `AskUserQuestion`/`PushNotification`. Contested claims and pre-authorization asks go in the reply text as an explicit numbered decision, and the turn ends there.
 - **Sandbox writes** — Codex defaults to `sandbox_mode = "workspace-write"`, which silently blocks writes to sibling worktrees and `~/.codex`. Run with `--add-dir <lane-worktree>` per lane, or set `danger-full-access` in `~/.codex/config.toml`. Otherwise workers fall back to `/tmp` and the work vanishes.
