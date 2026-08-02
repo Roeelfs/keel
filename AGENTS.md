@@ -32,6 +32,18 @@ install step.
   `.github/workflows/` absent; commits land direct to `master`. Do not propose
   CI-shaped guards here; a `gh pr merge` hook would have no call sites. Merge/CI
   friction observed in *product* repos belongs in those repos' own layer.
+- **Never drive the human's focused browser tab.** Chrome automation is cross-project,
+  so it lives here: `tooling/chrome.sh` is canonical, consumed by symlink from
+  `~/.claude/scripts/chrome.sh` (machine-level — `install.sh` copies only
+  `tooling/workflow` and `tooling/sandbox`, so it is never duplicated per repo). Each
+  session owns ONE tab, keyed by `$CLAUDE_SESSION_ID` and targeted by id, so `open` /
+  `js` / `content` / `url` never move focus and parallel sessions never collide;
+  `tab show` is the only command that focuses. Driving "the active tab" instead makes
+  the agent and the human fight over one tab — the agent navigates away from what the
+  human is reading, and the human switching tabs silently re-points the agent at the
+  wrong page. Both directions corrupt work, so a stale owned tab re-opens a fresh one
+  and NEVER falls back to the active tab. Run `chrome.sh check` before diagnosing
+  "Chrome not working" by hand.
 - **Public and marker-free.** No secrets, customer names, project-private facts, or
   machine-specific paths in skills or seeds. Operator-private craft goes to the
   machine's `~/.claude/skills-overlay/<skill>/LEARNINGS.md`; machine/project facts go
