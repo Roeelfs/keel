@@ -10,11 +10,23 @@ Shared rules baked into every agent prompt: *"Investigation only — design the 
 
 Mines the past week of work and surveys every harness surface, then consolidates one sequenced plan.
 
+**A falsifier wave is not optional here either.** B and D both run one; A did not, and it cost a
+measured run. On 2026-08-03 a survey lane read a tracker ticket titled *"main CI is RED as of
+2026-08-01, blocks every PR"*, took it as current, and A sequenced its **entire plan** behind that
+blocker. One `gh run list --branch main` showed zero failing runs since 08-01 and the named check
+reading SKIPPED, not FAILURE — the ticket recorded a *mutable status* that had been fixed and never
+closed. Three of six miners' top findings were likewise already shipped.
+
+The general shape: **a miner reports what a source SAYS; only a verifier checks what is TRUE now.**
+Tracker status, "this rule doesn't exist", "that hook is missing", "this PR is blocked" are all
+claims about live state that decay, and none survive contact with a direct query. Verify every
+finding that asserts current state before it reaches the plan.
+
 ```js
 export const meta = {
   name: 'harness-mine-consolidate',
-  description: 'Mine recent sessions + survey harness surfaces, consolidate one improvement plan',
-  phases: [{ title: 'Mine' }, { title: 'Survey' }, { title: 'Consolidate' }],
+  description: 'Mine recent sessions + survey harness surfaces, adversarially verify, consolidate one improvement plan',
+  phases: [{ title: 'Mine' }, { title: 'Survey' }, { title: 'Verify' }, { title: 'Consolidate' }],
 }
 
 // Bucket the past-week transcripts so each miner gets a slice (find them first, inline).
@@ -53,6 +65,37 @@ const surveys = await parallel([
   ()=>agent(`Audit the INSTRUCTIONS FILES (read-only): the global ~/.claude/CLAUDE.md + each active repo's AGENTS.md/CLAUDE.md pair (see the skills repo's docs/instructions-files.md for the convention). Find: (1) STALE rules — a rule referencing a file/flow/flag/command that no longer exists; VERIFY each with ls/grep before flagging; (2) DUPLICATION/CONTRADICTION — between the two filenames in one repo (they must be one canonical file + a pointer/symlink, never two divergent contracts — diff them) and between the repo layer and the global layer (the narrower layer wins; flag the shadow copy); (3) DEMOTION candidates — procedure-shaped rules that belong in a skill, fact-shaped entries that belong in memory (an instructions file is a contract, not a manual); (4) BLOAT — sections that grew past what an agent will actually honor. Return report_markdown + findings[] (each = the exact file + a locating quote + the proposed edit/prune/demotion).`, {label:'survey:instructions', phase:'Survey', schema:SURVEY_SCHEMA, agentType:'general-purpose'}),
 ])
 
+phase('Verify')
+// Only claims about CURRENT STATE need refuting — a mined quote is evidence of what was said,
+// but "X is broken / missing / blocked / already-documented" is a claim about live state.
+// Barrier JUSTIFIED: dedupe across miners+surveys before spending one verifier per claim.
+const VERDICT_SCHEMA = { type:'object', additionalProperties:false, required:['verdict','probe','corrected'], properties:{
+  verdict:{enum:['confirmed','stale','refuted','could-not-confirm']},
+  probe:{type:'string',description:'the EXACT command run and its output — naming no probe means could-not-confirm'},
+  corrected:{type:'string',description:'what is actually true now, if the claim was stale/wrong'} }}
+const claims = [
+  ...minings.flatMap(m => (m.lessons||[]).filter(l => l.status !== 'new').map(l => ({kind:'lesson', text:l.title, detail:l.proposed_change}))),
+  ...surveys.flatMap(s => (s.findings||[]).map(f => ({kind:'finding', text:f}))),
+].slice(0, 20)
+const verified = (await parallel(claims.map((c,i)=>()=>agent(
+`You are a LEAF AGENT: do NOT spawn sub-agents; work inline and return.
+ADVERSARIAL VERIFIER — REFUTE this claim. You are graded on kills, not agreement.
+
+CLAIM: ${JSON.stringify(c)}
+
+It asserts something about CURRENT state. Query the state directly — do not reason about it:
+- "CI/main is red", "PR blocked", "check failing"  -> \`gh run list --branch main\`, \`gh pr view <n> --json statusCheckRollup\`. A tracker ticket is NOT evidence of current CI state; tickets record a status at write time and are routinely fixed without being closed.
+- "rule/hook/file is missing"                      -> ls / grep the actual path FIRST.
+- "already documented" / "already shipped"         -> read the file and quote the line.
+- "recurring friction"                             -> count the real occurrences in the transcripts.
+A claim whose probe you cannot name is 'could-not-confirm', never 'confirmed'.
+Default to skepticism.`,
+  {label:`vfy:${(c.text||'claim').slice(0,24)}`, phase:'Verify', schema:VERDICT_SCHEMA, model:'sonnet', agentType:'general-purpose'})
+  .then(v=>({claim:c, verdict:v}))))).filter(Boolean)
+const survivors = verified.filter(v=>v.verdict && v.verdict.verdict==='confirmed')
+const killed = verified.filter(v=>!survivors.includes(v))
+log(`verify: ${survivors.length} confirmed, ${killed.length} stale/refuted/unconfirmed`)
+
 phase('Consolidate')
 const PLAN_SCHEMA = { type:'object', additionalProperties:false,
   required:['executive_summary','new_lessons_ranked','prune_list','doc_edits','hooks','memory_updates','sequenced_execution','open_questions'],
@@ -64,7 +107,7 @@ const PLAN_SCHEMA = { type:'object', additionalProperties:false,
     open_questions:{type:'array',items:{type:'object',additionalProperties:false,required:['question','recommendation'],
       properties:{question:{type:'string'},recommendation:{type:'string'}}}} }}
 return await agent(
-  `Consolidate into ONE sequenced harness-improvement plan. Dedup lessons against existing memory (only NET-NEW or doc'd-but-recurring earn a change). Cross-reference EVERY lesson against the instructions-audit survey for the lesson↔rule correlation feeding doc_edits (rule-should-have-prevented-it → strengthen/hook-promote; no-rule-home → add; subject-gone → prune). For EVERY recurring-friction lesson (from the miners) and merge/CI-friction pattern (from the friction survey), decide its routing and record it in 'hooks' when applicable: a settings.json HOOK is the default for a mechanically-detectable wrong move (block it at the tool boundary), a standing CLAUDE.md/AGENTS.md rule is the fallback, and "both" is allowed — a prose rule the model "should remember" is strictly weaker than a hook the harness enforces. Honor the user's rules (never-slice, delete-legacy, single-source-of-truth tracker, fewer-bigger-PRs). MININGS: ${JSON.stringify(minings.filter(Boolean))}\n\nSURVEYS: ${JSON.stringify(surveys.filter(Boolean))}\n\nProduce the structured plan.`,
+  `Consolidate into ONE sequenced harness-improvement plan. Build it from the CONFIRMED survivors; anything stale/refuted/unconfirmed goes in a "did not survive verification" list WITH its probe, never into the plan and never as a sequencing blocker. NEVER gate the plan on a blocker whose current state you did not query this run. Dedup lessons against existing memory (only NET-NEW or doc'd-but-recurring earn a change).\nVERIFIED SURVIVORS: ${JSON.stringify(survivors)}\nDID NOT SURVIVE: ${JSON.stringify(killed.map(k=>({claim:k.claim.text, verdict:k.verdict.verdict, probe:k.verdict.probe, corrected:k.verdict.corrected})))}. Cross-reference EVERY lesson against the instructions-audit survey for the lesson↔rule correlation feeding doc_edits (rule-should-have-prevented-it → strengthen/hook-promote; no-rule-home → add; subject-gone → prune). For EVERY recurring-friction lesson (from the miners) and merge/CI-friction pattern (from the friction survey), decide its routing and record it in 'hooks' when applicable: a settings.json HOOK is the default for a mechanically-detectable wrong move (block it at the tool boundary), a standing CLAUDE.md/AGENTS.md rule is the fallback, and "both" is allowed — a prose rule the model "should remember" is strictly weaker than a hook the harness enforces. Honor the user's rules (never-slice, delete-legacy, single-source-of-truth tracker, fewer-bigger-PRs). MININGS: ${JSON.stringify(minings.filter(Boolean))}\n\nSURVEYS: ${JSON.stringify(surveys.filter(Boolean))}\n\nProduce the structured plan.`,
   {label:'consolidate', phase:'Consolidate', schema:PLAN_SCHEMA, agentType:'general-purpose'})
 ```
 
