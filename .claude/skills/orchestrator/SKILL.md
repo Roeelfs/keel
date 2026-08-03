@@ -74,6 +74,7 @@ A lane goes interactive **only when it needs the human**; everything else runs p
 cd <repo> && echo '' | codex exec --skip-git-repo-check -m gpt-5.6-sol \
   -c model_reasoning_effort=high -s read-only -o <outfile> -- "<prompt>"
 ```
+> **Grade this lane by its ARTIFACT before counting it** — exit 0 is not evidence. Invocation flags, the `wc -l` / severity-grep check, and the DEAD vs **BLOCKED-ON-QUOTA** vs REAL classification live in [`docs/codex-lane-contract.md`](../../../docs/codex-lane-contract.md). Measured 2026-08-02/03: 18 of 52 rollouts hit a quota wall while exiting normally; 20 of 52 completed fine, so a dead lane is never proof the runtime is down.
 
 Then read a **slice** of `<outfile>`. Codex starts **cold** — a lane needing accumulated conversation, harness state, or MCP servers stays on Claude. Do not route through a Claude subagent that only shells out to Codex; that charges the window you are sparing.
 

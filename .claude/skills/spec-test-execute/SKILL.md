@@ -104,14 +104,17 @@ Report: N total tests, N previously executed, N remaining, cycle N/5.
 
 ### Step 1b: Infra Reality Audit (MUST run before the prerequisite gate)
 
-**Problem it solves:** Parallel worktrees drift. A session in `.worktrees/<feature>` misses tests, fixtures, or flow updates that sibling worktrees or `main` already have. Executing without this audit leads to duplicate test authoring and clobbering of in-flight work.
+**Problem it solves:** Parallel worktrees drift. A session in `.claude/worktrees/<feature>` misses tests, fixtures, or flow updates that sibling worktrees or `main` already have. Executing without this audit leads to duplicate test authoring and clobbering of in-flight work.
 
 **Dispatch one `Explore` agent (sonnet, ~5 min)** using `prompts/infra-reality-auditor.md`. Pass:
 - Plan path
 - Spec path
 - Project root
 - Surface-area keywords extracted from the plan's tier rows
-- `ls <project_root>/.worktrees/ 2>/dev/null` output
+- `git -C <project_root> worktree list --porcelain` output — **ask git, never glob a path.**
+  This gate globbed `.worktrees/` while the harness creates `.claude/worktrees/`, so it
+  matched nothing and passed silently for its whole life. A path convention is a
+  guess that rots; the worktree registry is the source of truth and cannot drift.
 
 **Gating rule:** If the audit reports CROSS-WORKTREE in-flight test work relevant to this plan, HALT and ask the user whether to wait / rebase / coordinate before executing. Never silently proceed past this finding — it's the #1 way parallel work collides.
 
@@ -124,7 +127,7 @@ Feed the audit into execution:
 
 ### Step 2: Prerequisite Gate (strict — halt if blocked)
 
-- Verify blocking dependencies (from plan's `## Blocking Dependencies`)
+- Verify blocking dependencies — the plan emits `## Blocking dependencies` (lower-case `d`). **Match section headings case-insensitively and by prefix**, never by exact string: this skill spent its life looking for `## Blocking Dependencies`, which `spec-test-plan` has never written.
 - Verify environment: services running, env vars set, migrations applied, tooling installed
 - Run setup commands from plan if needed
 - **HALT if any blocking dependency unresolved.** Tell user exactly what to fix.
@@ -135,7 +138,19 @@ Feed the audit into execution:
 
 Execute in order: **Unit → Integration → Chain → Deploy Validation → E2E**.
 
-**Tier 2.25 (Chain Tests):** If the plan has a `## Tier 2.25: Chain Tests` section,
+> **READ THE PLAN'S OWN VOCABULARY — do not branch on tier numbers it never emits.**
+> `spec-test-plan` deliberately writes a lean template with no tier taxonomy (its
+> Principle 4), so it emits sections like `## E2E on staging (the spine)` and row ids
+> like `E2E-1`. The `Tier 2.25` / `Tier 2.5` / `Tier 3a` names below are this skill's
+> *internal ordering vocabulary*, and a generated plan will not contain them. Map by
+> INTENT — a section describing multi-step plumbing without a browser is the Chain
+> stage whatever it is called; a section describing post-deploy probes is Deploy
+> Validation — and never skip a stage merely because its heading did not match.
+> Accept the plan's full marker set: `PASS / FAIL / FIXED / SKIP / BLOCKED / GAP /
+> PENDING` (`PENDING` = authored but not yet run; treat it as work to do, not as a skip).
+
+**Tier 2.25 (Chain Tests):** If the plan has a Chain-stage section (this skill's
+`## Tier 2.25: Chain Tests`, or the plan's own equivalent heading),
 run these after Integration and before Deploy Validation. Chain tests exercise
 multi-step sequences end-to-end (upload→serialize→render; checkout→execute→checkin)
 in the test environment but WITHOUT launching a browser. They catch plumbing drops
@@ -267,6 +282,8 @@ Checkpoint cadence: first at T+5 min, then every ~5 min via `ScheduleWakeup`. Ca
 **Never SIGTERM on wall-clock.** A 40-minute rescue that fixes the test is a success. Only kill on sustained idle or on explicit `blocked` status.
 
 **Fallback: raw `codex exec` with network-enabled sandbox**
+
+> **Grade this lane by its ARTIFACT before counting it** — exit 0 is not evidence. Invocation flags, the `wc -l` / severity-grep check, and the DEAD vs **BLOCKED-ON-QUOTA** vs REAL classification live in [`docs/codex-lane-contract.md`](../../../docs/codex-lane-contract.md). Measured 2026-08-02/03: 18 of 52 rollouts hit a quota wall while exiting normally; 20 of 52 completed fine, so a dead lane is never proof the runtime is down.
 
 If the managed dispatcher crashes or exit code ≠ 0 before Codex starts, fall back to raw `codex exec`, but with `danger-full-access` so Codex can modify files and fetch dependencies:
 

@@ -13,7 +13,7 @@ Pass the agent:
 - Spec path (absolute, from the plan's header)
 - Project root (absolute)
 - Surface-area keywords extracted from the plan's tier tables
-- Sibling worktrees: `ls <project_root>/.worktrees/ 2>/dev/null`
+- Sibling worktrees: `git -C <project_root> worktree list --porcelain` — ask git, never glob a path (a hardcoded `.worktrees/` glob silently matched nothing for this gate's whole life).
 
 ## What the agent does
 
@@ -22,7 +22,7 @@ Pass the agent:
 3. **Existing flow registry entries** matching the plan's surface. Extract relevant `gotchas`, `requires`, and step `notes`.
 4. **Existing staging probes / canary automations** in `testing/config.md` that the plan can reuse verbatim.
 5. **Existing CI coverage.** Which `.github/workflows/` jobs already run tests for this surface?
-6. **Cross-worktree in-flight test work.** For each dir in `.worktrees/`: list new/modified test files, new fixtures, new helpers (use `git -C <worktree> status --short` and `git -C <worktree> diff --name-only main`). Flag tests that are relevant to this plan and NOT visible in the current view.
+6. **Cross-worktree in-flight test work.** For each dir in `.claude/worktrees/`: list new/modified test files, new fixtures, new helpers (use `git -C <worktree> status --short` and `git -C <worktree> diff --name-only main`). Flag tests that are relevant to this plan and NOT visible in the current view.
 7. **Recent main-branch test changes** (last 30 days) that touch this surface: `git log --since="30 days ago" --name-only -- <glob>`. Catch tests added between plan generation and execution.
 
 ## Output (max 400 words)

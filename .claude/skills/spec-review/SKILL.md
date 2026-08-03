@@ -37,6 +37,15 @@ Research Auditor's **ELEVATE** and **CAUTION** tags are NOT in this scale — th
 
 A spec written in a long session accumulates blind spots. This skill breaks that with:
 1. **Session decision-mining** — recovers the design decisions, rejected alternatives, and user corrections from the session so reviewers judge against intent, not just the prose. Runs as a direct agent dispatch — **no compaction, no hooks, no resume dance.**
+
+> **"No compaction" describes this skill's MECHANISM, not the session it runs in.** The
+> pipeline does not orchestrate a compact-and-resume; it does not stop the harness from
+> AUTO-compacting underneath it, which is routine on a full run — one measured run
+> dropped ~448k tokens mid-wave, between the lanes returning and the report being
+> written. Consequence, and the reason the report file above is not optional: **a lane's
+> findings that exist only in conversation context are lost at the next compaction.**
+> Append each lane's findings to the report file as its notification arrives, and
+> assemble the Final Report by reading that file back — never from memory of the wave.
 2. **11 parallel reviewers** — each with a focused prompt and one job
 3. **Multi-model** — Claude (Opus/Sonnet) + 3x Codex GPT-5.6-sol (standard + adversarial + industry research)
 4. **Web-enabled research** — all Codex agents run with network access so findings are grounded in real public implementations, CVEs, post-mortems, and RFCs — not just training-data recall
@@ -48,6 +57,8 @@ A spec written in a long session accumulates blind spots. This skill breaks that
 10. **Observability & traceability auditing** — the **Observability & Traceability Auditor** audits whether the spec ships its own telemetry: named structured events with a request-threading correlation id + a release/version stamp, an **authoritative terminal status** for async work (never inferred from a dispatch/`202` ack), metrics emitted at a granularity their alarms can actually see, a stable PII-free error fingerprint, observable fail-open branches, and a nameable log/telemetry destination. Its premise: a change that ships without its instrumentation is a future RCA run blind — the false-positive, wrong-source, and "we can't tell what failed" incidents all trace back to a spec that never said how the thing would be seen. Distinct lane from the security miner (policy) and edge-case miner (semantic boundaries)
 
 > **Findings, not procedures.** This skill reports problems and fixes real design defects in the spec *prose*. It must NEVER inject its own scaffolding into the spec file — no traceability matrices, no EC-N / Sec-N / DRIFT-N tables, no "review lanes" or checklists. Those live in the **review report** (a sibling file or chat output), never in the spec. A spec describes the design; it does not carry the machinery of the review that touched it.
+>
+> **Where the report goes.** For `full` and `focused`, write `<spec-path-without-.md>.review.md` and `git add` it with the spec — the practice already exists (real `.review.md` files match this template verbatim) but is coordinator-dependent, so it is codified here. `hotfix` keeps the chat-output escape; a sibling file is pure overhead there. Downstream consumers must degrade gracefully when the file is absent — `spec-visualization` already does ("renders with those sections empty — that's fine"), and that is the pattern to copy. Never make it a hard dependency.
 
 ---
 
@@ -167,6 +178,8 @@ Read the spec with fresh eyes. Then dispatch ALL 12 primary reviewers simultaneo
 
 **Agent 7 — Codex Adversarial Review:**
 - **Execution:** `codex exec` via Bash with `run_in_background: true`
+
+> **Grade this lane by its ARTIFACT before counting it** — exit 0 is not evidence. Invocation flags, the `wc -l` / severity-grep check, and the DEAD vs **BLOCKED-ON-QUOTA** vs REAL classification live in [`docs/codex-lane-contract.md`](../../../docs/codex-lane-contract.md). Measured 2026-08-02/03: 18 of 52 rollouts hit a quota wall while exiting normally; 20 of 52 completed fine, so a dead lane is never proof the runtime is down.
 - **Model:** GPT-5.6-sol, high reasoning effort
 - **Input:** The SPEC FILE content (NOT git diff — the companion's `adversarial-review` reviews git changes, which is wrong for spec review)
 - **Job:** Attack surface analysis. Auth/permissions, data loss, rollback safety, race conditions, version skew, observability gaps, architectural fit, simplicity.
@@ -279,6 +292,29 @@ For EVERY CRITICAL/MAJOR finding that survived classification, dispatch a **Find
 - This wave also owns: **citation verification** (every symbol/file/component a reviewer OR a proposed fix introduces into the spec is grep-confirmed — phantom symbols in applied fixes are a recurring external-reviewer catch), **factual-split resolution** (Claude↔Codex repo-fact disagreements resolved by reading the code, not debate), and the **downgrade guard** — the coordinator may NOT downgrade or fold a CRITICAL as "docs-only" unless a falsifier REFUTED it with evidence; an unrefuted CRITICAL keeps its severity (a past instinct-downgrade cost 2 PRs + 3 deploy storms).
 - `REFUTED` findings move to the report's **Resolved** section with the refuting evidence. `NEEDS-LIVE-EVIDENCE` items route to the live-evidence lane's method (or land as explicit open risks). Only surviving findings reach Step 5b/5c and the fix step — this is the false-positive filter that keeps applied fixes trustworthy (the production pattern behind it drives reviewer false-finding rates under ~1%).
 - Rough budget: this wave is cheap relative to the reviewer wave (sonnet, one narrow question each). Do not skip it in `focused`/`hotfix` profiles — it is precisely what makes reduced profiles safe.
+
+**ASSERT BEFORE THE REPORT — this step is skipped almost half the time.** Measured over
+13 real runs: the wave ran in 6 and was *silently absent* in 7. Not a quota casualty —
+in the skip-runs the coordinator went straight from "all lanes in" to the report with no
+error and no mention of this step, and their rate-limit deaths (where any) came 10–13
+hours later on unrelated work. It is the pipeline's only false-positive filter and its
+cheapest lane: where it ran properly it REFUTED 5 of 9 findings and 4 of 5 edge-case
+CRITICALs, and in one run it falsified the coordinator's *own briefed* finding.
+
+Before writing the Final Report, state one line in the report header:
+
+> `Falsifier wave: <N> dispatched over <M> CRITICAL/MAJOR — <R> REFUTED, <S> SURVIVES.`
+
+If `N` is 0 while `M` > 0, **stop and run the wave** — do not write the report. Verify by
+**dispatch shape** (a post-classification lane whose prompt names specific finding IDs),
+never by grepping the transcript for the word "falsify": the Live-Evidence Premise
+Auditor's own prompt contains it and a keyword check scores a skipped run as compliant.
+
+Do **not** convert this into a mandatory lane *headcount*. On a heavy run
+`ceil((C+M)/3)` is ~12 extra parallel lanes, and the worst measured failure in this
+pipeline is 13 concurrent spec-review lanes dying together on an account-level 429.
+Cap concurrent falsifiers below that and stagger in waves — batch related findings
+rather than adding lanes.
 
 ### Step 5b: Cross-Examination — Claude vs Codex Debate
 

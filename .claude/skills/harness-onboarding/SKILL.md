@@ -85,7 +85,7 @@ Output: one table — surface × state × verdict (`ok` / `stale-copy` / `diverg
 |---|---|---|
 | Engineering-craft skills (the keel set) | **Machine-wide**: `<root>/<skill> → clone` symlink in *every* skill root (Claude Code + cross-runtime) | one edit/`git pull` propagates everywhere; skills load at invocation time so updates are instant |
 | Repo-specific skills (deploy runbooks, project scripts) | **Repo-local** `.claude/skills/` in that repo only | they version with the code they operate |
-| Engineering-craft agents (`.claude/agents/` — the keel crew: verifier, debugger, deployment-engineer…) | **Machine-wide**: symlinked into every agents root, same as the skill set | vendor-neutral roles load in every repo; a project *extends* them, never edits them |
+| Engineering-craft agents (`.claude/agents/` — the keel crew: architect, critic, verifier, security-reviewer…) | **Machine-wide**: symlinked into every agents root, same as the skill set | vendor-neutral roles load in every repo; a project *extends* them, never edits them |
 | Project-specific agents (a clinical eval-judge, a platform-branded deploy agent, an app's login gotchas/credentials) | **Repo-local** `.claude/agents/` in that project only | they name that project's stack/files/creds — in the clone they go machine-wide AND leak project-private facts into a public, marker-free repo |
 | Private learnings | `~/.claude/skills-overlay/<skill>/LEARNINGS.md` | the committed seed is read-only; private craft never enters the public repo |
 | Project facts/status | that repo's `.claude/memory/` (in-repo, optionally symlinked from the harness projects dir) — keep PHI/secrets machine-local | memory versions with the project; sensitive facts stay off any remote |

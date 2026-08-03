@@ -1,6 +1,6 @@
 # Infra Reality Auditor (spec-test-plan & spec-test-execute)
 
-Surveys the TRUE state of existing test infrastructure BEFORE any planning or execution. Addresses the parallel-worktree drift problem: a session in `.worktrees/<feature>` has a scoped view and will reinvent fixtures that already exist on main or in sibling worktrees.
+Surveys the TRUE state of existing test infrastructure BEFORE any planning or execution. Addresses the parallel-worktree drift problem: a session in `.claude/worktrees/<feature>` has a scoped view and will reinvent fixtures that already exist on main or in sibling worktrees.
 
 **Default stance: extend what exists. Only build new when the audit shows a real gap.**
 
@@ -12,7 +12,7 @@ Pass the agent:
 - Spec path (absolute)
 - Project root (absolute)
 - Spec's "surface area" — 3-6 module names, feature keywords, or file globs the spec touches
-- Any sibling worktrees: `ls <project_root>/.worktrees/` if the dir exists
+- Any sibling worktrees: `git -C <project_root> worktree list --porcelain` — ask git, never glob a path (a hardcoded `.worktrees/` glob silently matched nothing for this gate's whole life).
 
 ## What the agent does
 
@@ -23,7 +23,7 @@ Pass the agent:
 2. **Existing flow registry entries.** Read `testing/flows.json` if present. List flows whose `description`, `steps`, or `gotchas` mention the spec's keywords.
 3. **Existing CI slots.** Read `.github/workflows/`. Note which jobs already run tests covering this surface (e.g. `test:integration`, `test:e2e`, deploy-validation).
 4. **Existing deploy / staging probes.** Read `testing/config.md` if present. Note staging URL, probes, canary automations already defined.
-5. **Cross-worktree check.** If `.worktrees/` exists, for each worktree dir: `ls <worktree>/testing/`, `ls <worktree>/__tests__/`, `git -C <worktree> log --oneline -10` to catch in-flight test infra that `main` hasn't absorbed yet. Flag any tests/fixtures in a worktree that are relevant to this spec and NOT in the current view.
+5. **Cross-worktree check.** For each worktree from `git worktree list --porcelain` (never a directory glob): `ls <worktree>/testing/`, `ls <worktree>/__tests__/`, `git -C <worktree> log --oneline -10` to catch in-flight test infra that `main` hasn't absorbed yet. Flag any tests/fixtures in a worktree that are relevant to this spec and NOT in the current view.
 
 ## Output (max 300 words, prose only)
 
@@ -43,7 +43,7 @@ Produce 5 sections. Every claim cites a file path (with line number when relevan
 - Relevant probes + canary automations from `testing/config.md`.
 
 ### CROSS-WORKTREE in-flight (if any)
-- Test infra in `.worktrees/<name>/` that isn't in the current view. Include path + one-line summary.
+- Test infra in `.claude/worktrees/<name>/` that isn't in the current view. Include path + one-line summary.
 
 ### GAPS — what's genuinely missing
 - Short list. Only include items the audit confirmed do NOT already exist. **This is the short list the plan should extend onto existing infra.**

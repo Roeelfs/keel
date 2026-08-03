@@ -13,9 +13,9 @@ coding CLI (primarily Claude Code) behaves. Four layers, each doing one thing:
 │               root-cause-analysis · improve-harness · … (36 total) │
 │               → multi-step procedures the agent invokes on demand  │
 ├──────────────────────────────────────────────────────────────────┤
-│  AGENTS       architect · code-reviewer · critic · debugger        │
-│               executor · explore · refactorer · scientist          │
-│               security-reviewer · sql-specialist · tracer          │
+│  AGENTS       adr-auditor · architect · code-reviewer · critic     │
+│               executor · refactorer · scientist · scope-auditor    │
+│               security-reviewer · sql-specialist · tracer · verifier│
 │               → focused sub-agents the skills dispatch in parallel │
 ├──────────────────────────────────────────────────────────────────┤
 │  SUBSTRATE    hooks (session lifecycle, id capture, heavy-op lock) │
@@ -51,7 +51,7 @@ Each layer answers a different failure mode of naive agent use:
    dispatches the review **agents** in parallel.
 3. You invoke **`spec-test-plan`** then **`spec-test-execute`** (skills), which read
    `docs/testing-config.md` (**rules**) to run real tests and dispatch
-   **`debugger`/diagnostician agents** on failures.
+   the **`diagnosing-bugs`** skill (with the **`tracer`** agent) on failures.
 4. Throughout, the **substrate** keeps your session's file claims registered, shows
    the in-flight registry so parallel sessions don't duplicate work, and serializes
    heavy test/build commands.
