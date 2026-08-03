@@ -29,6 +29,22 @@ const judged = await parallel(ITEMS.map(it=>()=>agent(
   `${PIN}\nADVERSARIAL FALSIFIER — kill this plan item. You are graded on kills, not agreement.\nITEM: ${JSON.stringify(it)}\nRun all five probes and print each command with its output: (1) ALREADY COVERED — read the target file and quote the line that already says it; (2) STALE — it was fixed since the evidence was captured (git log the target, then read the live file); (3) FALSE PREMISE — the cited evidence does not say what the item claims (re-read the source verbatim, never a paraphrase); (4) WRONG LAYER — it belongs to a different surface, or it puts a machine/customer-specific fact in a public file; (5) UNENFORCEABLE — it is a sentence the agent must remember where a mechanical check exists. Default to killing. An item whose probe you cannot name is not confirmed. An ABSENCE verdict ("this session never did X", "no such call site") needs the command that enumerated what DOES exist printed beside it — a zero-hit grep on a guessed identifier is indistinguishable from a real absence.`,
   {label:`kill:${(it.title||'item').slice(0,24)}`, phase:'Falsify', schema:KILL, model:'sonnet', agentType:'general-purpose'})
   .then(v=>({item:it, verdict:v})).catch(e=>({item:it, verdict:null, error:String(e)}))))
+// Same guard as Workflow A's Verify wave: a REQUIRED schema field is not a VALIDATED one.
+// `probe` is required, so a falsifier satisfies the schema by writing "test". Enforce it in
+// code, where a model cannot talk its way past it — here the polarity is inverted, so the
+// unfalsifiable verdict is 'confirmed' (survives to ship) and that is what gets demoted.
+const PLACEHOLDER = /^(test|tbd|n\/?a|none|null|ok|yes|done|verified|confirmed|checked|\W*)$/i
+const realProbe = p => typeof p === 'string' && p.trim().length >= 24 && !PLACEHOLDER.test(p.trim())
+let demoted = 0
+for (const j of judged) {
+  if (j && j.verdict && j.verdict.verdict === 'confirmed' && !realProbe(j.verdict.probe)) {
+    j.verdict.verdict = 'unenforceable'
+    j.verdict.corrected = `[auto-demoted: probe is not a real command+output] ${j.verdict.corrected || ''}`
+    demoted++
+  }
+}
+if (demoted) log(`falsify: DEMOTED ${demoted} 'confirmed' item(s) whose clearing probe was a placeholder`)
+
 const dead = judged.filter(j=>!j || !j.verdict)
 const survivors = judged.filter(j=>j && j.verdict && j.verdict.verdict==='confirmed')
 const killed = judged.filter(j=>j && j.verdict && !survivors.includes(j))
