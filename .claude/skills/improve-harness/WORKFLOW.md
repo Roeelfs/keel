@@ -88,10 +88,29 @@ It asserts something about CURRENT state. Query the state directly — do not re
 - "rule/hook/file is missing"                      -> ls / grep the actual path FIRST.
 - "already documented" / "already shipped"         -> read the file and quote the line.
 - "recurring friction"                             -> count the real occurrences in the transcripts.
+- "broken/failing/fail-open IN PROD", "the fix took effect", "still happening" -> query the RUNTIME (log group, deployed artifact, the row itself), NEVER the source alone. Reading a file proves what is WRITTEN; only the runtime proves what is RUNNING. These diverge in both directions: a fix merged days ago may not be deployed, and a defect you can still read in a stale worktree may already be gone from the default branch. The strongest evidence is a signal that STOPS at a deploy timestamp.
 A claim whose probe you cannot name is 'could-not-confirm', never 'confirmed'.
 Default to skepticism.`,
   {label:`vfy:${(c.text||'claim').slice(0,24)}`, phase:'Verify', schema:VERDICT_SCHEMA, model:'sonnet', agentType:'general-purpose'})
   .then(v=>({claim:c, verdict:v}))))).filter(Boolean)
+// A REQUIRED schema field is not a VALIDATED one. `probe` is required, so a verifier
+// satisfies the schema by writing "test" — and a finding whose verifier fields were
+// literal placeholders reached a plan as a confirmed P0. Schema validation proves a
+// string arrived, never that anyone ran anything. So the check lives in code, where it
+// cannot be talked out of: a 'confirmed' verdict whose probe cannot possibly be a real
+// command plus its output is demoted, not trusted.
+const PLACEHOLDER = /^(test|tbd|n\/?a|none|null|ok|yes|done|verified|confirmed|checked|\W*)$/i
+const realProbe = p => typeof p === 'string' && p.trim().length >= 24 && !PLACEHOLDER.test(p.trim())
+let demoted = 0
+for (const v of verified) {
+  if (v.verdict && v.verdict.verdict === 'confirmed' && !realProbe(v.verdict.probe)) {
+    v.verdict.verdict = 'could-not-confirm'
+    v.verdict.corrected = `[auto-demoted: probe is not a real command+output] ${v.verdict.corrected || ''}`
+    demoted++
+  }
+}
+if (demoted) log(`verify: DEMOTED ${demoted} 'confirmed' verdict(s) with a placeholder probe`)
+
 const survivors = verified.filter(v=>v.verdict && v.verdict.verdict==='confirmed')
 const killed = verified.filter(v=>!survivors.includes(v))
 log(`verify: ${survivors.length} confirmed, ${killed.length} stale/refuted/unconfirmed`)
