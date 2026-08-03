@@ -17,7 +17,7 @@ line, a git fact), not by what the code looks like it does.**
   UNDERSTAND ──────────────► MAP ──────────────► CRITIQUE ──────► REMEMBER
   parallel recon            structure +          what the         durable,
   (Explore × N)             root cause           map missed       cross-session
-                            (tracer/debugger/    (critic)         (claude-sessions,
+                            (tracer/              (critic)         (claude-sessions,
                              architect)                            in-flight registry,
                                                                    flows.json)
 ```
@@ -66,7 +66,7 @@ Once you know *where* things are, the deep-analysis agents tell you *how* and
   disconfirmation round, and ends by naming the single cheapest probe that collapses
   the uncertainty. Its whole purpose is to stop you marrying a favorite theory in
   code you don't understand.
-- **[`debugger`](../.claude/agents/debugger.md)** — when there *is* a failing test
+- **[`tracer`](../.claude/agents/tracer.md)** (with the `diagnosing-bugs` skill) — when there *is* a failing test
   or red build: reproduce, read the evidence literally, form competing hypotheses,
   bisect by commit/layer/input, confirm the cause, then fix the cause not the
   symptom. On a new codebase a red build is often the fastest way to learn how a

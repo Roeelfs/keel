@@ -178,6 +178,8 @@ Read the spec with fresh eyes. Then dispatch ALL 12 primary reviewers simultaneo
 
 **Agent 7 — Codex Adversarial Review:**
 - **Execution:** `codex exec` via Bash with `run_in_background: true`
+
+> **Grade this lane by its ARTIFACT before counting it** — exit 0 is not evidence. Invocation flags, the `wc -l` / severity-grep check, and the DEAD vs **BLOCKED-ON-QUOTA** vs REAL classification live in [`docs/codex-lane-contract.md`](../../../docs/codex-lane-contract.md). Measured 2026-08-02/03: 18 of 52 rollouts hit a quota wall while exiting normally; 20 of 52 completed fine, so a dead lane is never proof the runtime is down.
 - **Model:** GPT-5.6-sol, high reasoning effort
 - **Input:** The SPEC FILE content (NOT git diff — the companion's `adversarial-review` reviews git changes, which is wrong for spec review)
 - **Job:** Attack surface analysis. Auth/permissions, data loss, rollback safety, race conditions, version skew, observability gaps, architectural fit, simplicity.

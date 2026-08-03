@@ -99,6 +99,7 @@ cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
   "Read the test plan at <RELATIVE_TEST_PLAN_PATH> and spec at <RELATIVE_SPEC_PATH>. Focus on the E2E-on-staging section. What customer-facing failure modes would these scenarios miss in real staging — env/infra divergence, multi-step chain breaks, format/encoding at boundaries, deploy-time drift, observability gaps where a failure would look like a success? List each: failure scenario, the staging E2E test to add, how to observe it failing. Max 12. Skip unit-test nitpicks." \
   2>&1 | tee /tmp/codex-cov-$$.txt
 ```
+> **Grade this lane by its ARTIFACT before counting it** — exit 0 is not evidence. Invocation flags, the `wc -l` / severity-grep check, and the DEAD vs **BLOCKED-ON-QUOTA** vs REAL classification live in [`docs/codex-lane-contract.md`](../../../docs/codex-lane-contract.md). Measured 2026-08-02/03: 18 of 52 rollouts hit a quota wall while exiting normally; 20 of 52 completed fine, so a dead lane is never proof the runtime is down.
 
 Read the output, add the real E2E gaps to the spine, re-commit. Skip this step entirely for low-risk specs.
 
