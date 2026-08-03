@@ -545,7 +545,6 @@ review synthesis.
      -m gpt-5.6-sol \
      --config model_reasoning_effort="high" \
      --sandbox read-only \
-     --full-auto \
      "Check if the following spec claims match reality in the codebase. <INLINE SPEC KEY CLAIMS>. Check these specific files: <LIST 5-10 FILES FROM CODEBASE VERIFIER>. For each claim that doesn't match, state: what the spec says, what the code does, which file:line, and severity. Do NOT read files beyond the ones listed." \
      2>&1 | tee /tmp/alignment-${TASK_TAG}.txt
    ```

@@ -78,7 +78,6 @@ cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
   --config model_reasoning_effort="high" \
   --config service_tier="fast" \
   --sandbox danger-full-access \
-  --full-auto \
   "$(cat <<'PROMPT'
 <task>
 Fix failing test {{TEST_ID}} in {{FILE}}.

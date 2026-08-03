@@ -19,7 +19,6 @@ cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
   --config model_reasoning_effort="high" \
   --config service_tier="fast" \
   --sandbox read-only \
-  --full-auto \
   "Read the test plan at <RELATIVE_TEST_PLAN_PATH> and the spec at <RELATIVE_SPEC_PATH>.
 
 For every spec requirement, verify:
@@ -46,7 +45,6 @@ cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
   --config model_reasoning_effort="high" \
   --config service_tier="fast" \
   --sandbox read-only \
-  --full-auto \
   "Read the test plan at <RELATIVE_TEST_PLAN_PATH> and the spec at <RELATIVE_SPEC_PATH>. Also read enough of the codebase to ground your analysis in real infrastructure (settings, deployment manifests, requirements pins, storage config).
 
 Probe each gap class below. For each gap, propose a specific test with tier and priority.

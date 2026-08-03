@@ -15,7 +15,6 @@ cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
   --config service_tier="fast" \
   --sandbox workspace-write \
   --config sandbox_workspace_write.network_access=true \
-  --full-auto \
   "Industry-research audit of the spec at <RELATIVE_SPEC_PATH>. Your job is to elevate this spec by grounding it in real-world implementations — NOT to find defects.
 
 Do this in order:
