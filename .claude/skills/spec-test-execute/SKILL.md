@@ -104,14 +104,17 @@ Report: N total tests, N previously executed, N remaining, cycle N/5.
 
 ### Step 1b: Infra Reality Audit (MUST run before the prerequisite gate)
 
-**Problem it solves:** Parallel worktrees drift. A session in `.worktrees/<feature>` misses tests, fixtures, or flow updates that sibling worktrees or `main` already have. Executing without this audit leads to duplicate test authoring and clobbering of in-flight work.
+**Problem it solves:** Parallel worktrees drift. A session in `.claude/worktrees/<feature>` misses tests, fixtures, or flow updates that sibling worktrees or `main` already have. Executing without this audit leads to duplicate test authoring and clobbering of in-flight work.
 
 **Dispatch one `Explore` agent (sonnet, ~5 min)** using `prompts/infra-reality-auditor.md`. Pass:
 - Plan path
 - Spec path
 - Project root
 - Surface-area keywords extracted from the plan's tier rows
-- `ls <project_root>/.worktrees/ 2>/dev/null` output
+- `git -C <project_root> worktree list --porcelain` output — **ask git, never glob a path.**
+  This gate globbed `.worktrees/` while the harness creates `.claude/worktrees/`, so it
+  matched nothing and passed silently for its whole life. A path convention is a
+  guess that rots; the worktree registry is the source of truth and cannot drift.
 
 **Gating rule:** If the audit reports CROSS-WORKTREE in-flight test work relevant to this plan, HALT and ask the user whether to wait / rebase / coordinate before executing. Never silently proceed past this finding — it's the #1 way parallel work collides.
 
