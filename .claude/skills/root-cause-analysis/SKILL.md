@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: root-cause-analysis
 description: Drive an issue to a COMPLETE root-cause analysis — from symptom to a grounded cause to the right remediation and a prevention that holds. Use for an incident, regression, outage, or recurring failure where you owe a real RCA (not just a quick fix). Triggers — "root cause this", "do an RCA", "postmortem", "why did X regress / break in production", "what caused the outage". Orchestrates the diagnosis loop and the architecture-placement pass rather than replacing them.
 ---

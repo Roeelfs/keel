@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: spec-visualization
 description: Produce a single-file interactive HTML dashboard visualizing a finalized spec — architectural planes, end-to-end pipeline (React Flow), wave timeline, review evolution, decisions, components, open gates. Self-contained, opens in browser, no build step. Trigger after spec-review fixes are applied, or on demand for any approved spec.
 ---

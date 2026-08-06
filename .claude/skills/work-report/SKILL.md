@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: work-report
 description: Use when generating development reports, calculating billable hours, reviewing work done in a period, or when the user asks for a project status summary. Triggers on keywords like report, billable, hours, invoice, timesheet, work summary.
 ---

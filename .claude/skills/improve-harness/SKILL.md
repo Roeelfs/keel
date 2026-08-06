@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: improve-harness
 description: Periodically mine recent work + harness state into one consolidated improvement plan, grill it, then execute prune → vendor → upgrade → docs → memory and merge across your harness surfaces.
 disable-model-invocation: true

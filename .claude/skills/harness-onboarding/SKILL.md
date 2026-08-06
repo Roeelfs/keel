@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: harness-onboarding
 description: Onboard a machine or new user onto keel — survey the current machine state (skill roots, runtimes, repos, instructions files, memory), decide machine-wide vs repo-local scope, PROPOSE the integration plan (symlinks, canonical-clone wiring, AGENTS.md↔CLAUDE.md links, overlay + memory setup), then apply it with a backup. Triggers — "onboard this machine", "set up keel", "integrate keel with my system", "re-onboard", "harness drift check", "why isn't my skill update showing up everywhere".
 ---

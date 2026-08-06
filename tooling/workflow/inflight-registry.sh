@@ -21,6 +21,28 @@
 #                  Default: '[A-Z]+-[0-9]+' (matches JIRA/Linear-style keys like
 #                  ACME-123). Set to '' to disable the Issue column entirely.
 #   DEFAULT_BRANCH The trunk to measure staleness against. Default: 'main'.
+#   REGISTRY_MAX_AGE_DAYS  Fold a worktree into the summary line when its branch
+#                  tip is older than this AND it has no open PR and no issue key.
+#                  Default: 14. Set 0 to disable age folding.
+#   REGISTRY_MAX_ROWS      Hard backstop on printed worktree rows. Default: 40.
+#
+# THE CAP IS NOT OPTIONAL, AND IT LIVES HERE ON PURPOSE. In --hook mode this
+# output is injected into the fixed preamble of EVERY session in the repo, so it
+# is re-read on every turn for the life of that session. Measured 2026-08-06 on
+# a real machine: 241 registered worktrees produced a 23,359-byte table (~5,840
+# tokens/turn) — the single largest preamble item, and larger than the repo's
+# whole instructions file. It had never been measured because it is not a file
+# anyone audits; it is generated at session start.
+#
+# The cap is enforced in the script rather than by "keeping the registry tidy",
+# because a registry left to human discipline regrows silently and the cost is
+# invisible until someone thinks to execute the hook and pipe it to `wc -c`.
+# Rows are never dropped silently — the summary line always states how many were
+# folded and how to see them (a silent cap reads exactly like a short registry).
+#
+# Anything with an open PR or an issue key is ALWAYS kept regardless of age: the
+# table exists to stop a second branch being opened for work already in flight,
+# and a long-running branch is precisely the one that costs the most to duplicate.
 #
 # Contract: fail-open. Never block a session. Never exit non-zero in --hook mode.
 
@@ -29,6 +51,8 @@ set +e
 MODE="${1:-print}"
 ISSUE_KEY_RE="${ISSUE_KEY_RE-[A-Z]+-[0-9]+}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
+REGISTRY_MAX_AGE_DAYS="${REGISTRY_MAX_AGE_DAYS:-14}"
+REGISTRY_MAX_ROWS="${REGISTRY_MAX_ROWS:-40}"
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
 # In a linked worktree, point at the main checkout so the view is repo-global.
@@ -71,7 +95,14 @@ behind() {
 }
 
 # ---- assemble worktree rows -------------------------------------------------
-WT_ROWS=""
+# Each candidate row is prefixed with its branch-tip epoch so the set can be
+# ordered newest-first before the cap is applied. The prefix is stripped on emit.
+NOW_EPOCH="$(date +%s 2>/dev/null || echo 0)"
+AGE_CUTOFF=0
+[ "$REGISTRY_MAX_AGE_DAYS" -gt 0 ] 2>/dev/null && AGE_CUTOFF=$(( NOW_EPOCH - REGISTRY_MAX_AGE_DAYS * 86400 ))
+
+CANDIDATES=""
+FOLDED_AGE=0
 while IFS= read -r line; do
   case "$line" in
     worktree\ *) WT_PATH="${line#worktree }" ;;
@@ -80,13 +111,37 @@ while IFS= read -r line; do
                  iid="$(issue_id "$WT_BR")"
                  pr="$(pr_for "$WT_BR")"; [ -z "$pr" ] && pr="—"
                  b="$(behind "$WT_BR")"
-                 WT_ROWS="${WT_ROWS}| ${iid} | \`${WT_BR}\` | ${pr} | ${b} | ${short} |
-" ;;
+                 tip="$(git log -1 --format=%ct "$WT_BR" 2>/dev/null)"
+                 [ -z "$tip" ] && tip=0
+                 # Keep unconditionally when the branch is joined to real in-flight
+                 # work — an open PR or an issue key. Age only folds the unjoined.
+                 if [ "$pr" = "—" ] && [ "$iid" = "—" ] && [ "$AGE_CUTOFF" -gt 0 ] && [ "$tip" -lt "$AGE_CUTOFF" ]; then
+                   FOLDED_AGE=$(( FOLDED_AGE + 1 ))
+                 else
+                   CANDIDATES="${CANDIDATES}${tip}	| ${iid} | \`${WT_BR}\` | ${pr} | ${b} | ${short} |
+"
+                 fi ;;
     detached)    short="${WT_PATH##*/}"
-                 WT_ROWS="${WT_ROWS}| — | _(detached)_ | — | — | ${short} |
+                 CANDIDATES="${CANDIDATES}0	| — | _(detached)_ | — | — | ${short} |
 " ;;
   esac
 done < <(git worktree list --porcelain 2>/dev/null)
+
+CANDIDATE_N="$(printf '%s' "$CANDIDATES" | grep -c . )"
+WT_ROWS="$(printf '%s' "$CANDIDATES" | sort -t'	' -k1,1nr | head -n "$REGISTRY_MAX_ROWS" | cut -f2-)"
+[ -n "$WT_ROWS" ] && WT_ROWS="${WT_ROWS}
+"
+FOLDED_CAP=$(( CANDIDATE_N > REGISTRY_MAX_ROWS ? CANDIDATE_N - REGISTRY_MAX_ROWS : 0 ))
+FOLDED_TOTAL=$(( FOLDED_AGE + FOLDED_CAP ))
+
+# NO SILENT CAPS. A truncated table and a genuinely short one look identical, so
+# say what was withheld and how to see it — otherwise a session reads "nothing
+# else is in flight" off a table that simply stopped printing.
+FOLD_NOTE=""
+if [ "$FOLDED_TOTAL" -gt 0 ]; then
+  FOLD_NOTE="_+ ${FOLDED_TOTAL} more worktree(s) not shown: ${FOLDED_AGE} idle >${REGISTRY_MAX_AGE_DAYS}d with no PR and no issue key, ${FOLDED_CAP} beyond the ${REGISTRY_MAX_ROWS}-row cap. Full list: \`tooling/workflow/inflight-registry.sh\` (no --hook), or raise \`REGISTRY_MAX_ROWS\`. A high count here means the registry needs reaping, not a bigger cap._
+"
+fi
 
 # ---- open PRs that are NOT checked out in any worktree ----------------------
 WT_BRANCHES="$(git worktree list --porcelain 2>/dev/null | awk '/^branch /{sub("refs/heads/","",$2); print $2}')"
@@ -116,7 +171,7 @@ Behind = commits on \`origin/${DEFAULT_BRANCH}\` missing from that branch (stale
 ### Worktrees → branch → issue → PR
 | Issue | Branch | PR | Behind | Worktree |
 |-------|--------|----|-------:|----------|
-${WT_ROWS}
+${WT_ROWS}${FOLD_NOTE}
 ### Open PRs not in a worktree
 | Issue | Branch | PR | Title |
 |-------|--------|----|-------|
