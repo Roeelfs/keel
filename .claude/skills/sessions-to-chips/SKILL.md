@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: sessions-to-chips
 description: Mine local Claude Code desktop sessions (including dead, parked, or other-account sessions) to extract each one's last state and remaining work, then create spawn_task completion chips. Use when the user wants to mine/continue local sessions, turn pinned or parked sessions into chips, resume parallel work left off across accounts, or "pick up where my sessions left off". Distinct from the live-only `claude-sessions` survey: this reads the DESKTOP-app session store (any account, dead sessions included) and produces actionable chips.
 ---

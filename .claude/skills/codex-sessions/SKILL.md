@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: codex-sessions
 description: Mine local Codex sessions and summarize active and recent sessions. Reports Codex-side session state only; it does NOT own program state — the orchestrator skill owns the program manifest and `<slug>.state.md`.
 ---

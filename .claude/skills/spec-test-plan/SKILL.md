@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: spec-test-plan
 description: Generate a lean, E2E-first test plan from a spec. The spine is real staging verification — deploy, run the actual feature/automation the way a customer would, read the logs, confirm customer-facing output. Unit/integration tests only where they're cheap and catch real regressions. No shortcuts, no smoke-test theatre.
 ---

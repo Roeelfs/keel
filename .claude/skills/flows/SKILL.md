@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: flows
 description: Browse, inspect, and maintain the flow registry (testing/flows.json). Flows are non-code-documented E2E behaviors that compound across spec-test cycles.
 ---

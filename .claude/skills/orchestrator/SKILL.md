@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: orchestrator
 description: Cross-session orchestrator pattern — orchestrate ONE program (a goal/target) across its own lanes, including fully autonomous stretches (headless no-prompt lanes, un-gated-frontier planning). Program-scoped, never machine-scoped — multiple orchestrators coexist on one machine via program manifests + an ownership/collision protocol. Surfaces state, coordinates conflicts, spawns lanes, never implements directly. Use when running 3+ parallel sessions toward one target or driving a big project autonomously.
 ---

@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: spec-test-execute
 description: Execute a test plan tier-by-tier. Marks PASS/FAIL/SKIP/BLOCKED in the plan file. Dispatches failure diagnostician agents in parallel for failing tests. Escalates stuck tests to Codex rescue. Loops until complete (max 5 cycles).
 ---

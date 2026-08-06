@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: free-resources
 description: Use when the Mac is overloaded on CPU / RAM / swap / load average (not disk) — the machine is packed and slow, "free resources", "kill idle sessions", too many parallel Claude Code sessions thrashing. Safely reaps orphans, stale dev-servers, and long-idle Claude sessions (resolved to their canonical desktop titles), never touching active work or the invoking session. For DISK-full instead, use macos-storage-reclaim.
 ---

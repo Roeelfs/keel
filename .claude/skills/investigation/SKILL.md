@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: investigation
 description: Ground an external-facing or unfamiliar task in real web facts before acting - ALWAYS as a dynamic multi-agent Workflow that frames the task in THIS codebase, fans out across angles x sources, adversarially cross-verifies, and bakes in evidence + the industry standard/elevation. Deciding test: do you need a vendor's DOCS or your own LOGS? Fire generously (over-grounding is cheap; a miss is the costly error) when you need a third-party library/API/framework's documented API, limits, or version - even if the name is familiar but its current API isn't; on version-currency or deprecation; on approach-selection where a standard applies; on an unfamiliar third-party error; on the fence, fire. Hard-skip (overrides the fire, even when a vendor is named): debugging or baking your project's OWN runtime (services/jobs/handlers/deploys/alarms you run) - truth is your logs + codebase; a mechanical one-line diff; pure internal authoring (spec/issue/memory/PR/git). Escalate to `deep-research` for a fully-cited report.
 ---

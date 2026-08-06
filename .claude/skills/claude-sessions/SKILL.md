@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: claude-sessions
 description: Survey live Claude Code sessions — list which are running and extract their recent state (last user msg, last assistant reply, open todos), and mine a session's design decisions for downstream review. Use when the user wants to "look at all active sessions", "see what each session is doing", "find context across parallel work", or when another skill needs a session's decision history.
 ---

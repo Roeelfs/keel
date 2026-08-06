@@ -1,4 +1,5 @@
 ---
+license: MIT
 name: spec-review
 description: Multi-model spec verification pipeline. Linear flow (no compaction) — mines session design decisions PLUS the spec's full context lineage (ticket, cited ADRs, prior sessions, memory, known-error ledger) into generated review questions, dispatches 12 parallel reviewers (9 Claude including provider-fit, edge-case, security, observability, live-evidence premise auditor, and cross-worktree drift scout + 3 Codex including industry research) plus the investigation skill's dynamic Workflow grounding the elevation lane, then runs a per-finding falsifier wave (a disprove-step on every CRITICAL/MAJOR before it reaches the report) and fixes only real design defects in the spec prose. Never injects review scaffolding (matrices/EC/Sec/Obs/Drift tables) into the spec.
 ---
