@@ -5,7 +5,7 @@ Hard-won traps, by phase. Read the relevant block before running that phase of s
 ## Investigation (step 1)
 
 - **Don't mutate the harness while the Workflows run.** Their agents read `~/.claude/{agents,skills,settings.json,plugins}`; pruning or editing mid-flight races them and splits the model pass. Let every launched Workflow finish, *then* execute.
-- **Fan out, don't serialize.** A, B and E are independent and all launch together; C and D join when they are due. One giant Workflow is slower and loses a lane's whole output when any phase throws.
+- **Fan out, don't serialize.** A, B, E and G are independent and all launch together; C and D join when they are due. One giant Workflow is slower and loses a lane's whole output when any phase throws.
 - **A lane that dies on the account session limit is not a lane that found nothing.** Three runs hit a mass rate-limit collapse mid-investigation (2026-07-16 lost 24 of 24 agents in one Workflow and 6 of 16 in another; 2026-08-03 twice). Recovery: relaunch by `resumeFromRunId` after the window resets, re-dispatch only the errored lanes, and never treat the partial result as the finding. On 2026-07-16 the human had to name the crashed run ids by hand because nothing recorded them — write the run id of every launched Workflow into the run's program file at launch, not at completion.
 
 ## Backup (step 4a)

@@ -1,8 +1,8 @@
 # Investigation Workflows
 
-Six asynchronous `Workflow` templates, one per file. **A**, **B** and **E** fire every run; **C** is
-~quarterly and **D** is conditional (see SKILL.md step 1); **F** is the step-3 plan falsifier and fires
-every run. They are **read-only**: research and design, never mutate. Adapt the inventory and paths to
+Seven asynchronous `Workflow` templates, one per file. **A**, **B**, **E** and **G** fire every run;
+**C** is ~quarterly and **D** is conditional (see SKILL.md step 1); **F** is the step-3 plan falsifier
+and fires every run. They are **read-only**: research and design, never mutate. Adapt the inventory and paths to
 the current machine before launching, launch them together, then stop — they notify on completion.
 `Workflow` is inherently asynchronous; do **not** pass an unsupported `run_in_background` parameter.
 
@@ -14,6 +14,7 @@ the current machine before launching, launch them together, then stop — they n
 | D — production-stability / regression RCA | [WORKFLOW-D.md](WORKFLOW-D.md) | when the period regressed prod |
 | E — context & compaction economics | [WORKFLOW-E.md](WORKFLOW-E.md) | every run |
 | F — plan falsifier (step 3) | [WORKFLOW-F.md](WORKFLOW-F.md) | every run, on the step-2 program |
+| G — vendor-surface adoption + interaction quality | [WORKFLOW-G.md](WORKFLOW-G.md) | every run |
 
 **Load only the lanes you are firing.** This index carries the whole shared contract; the lane files
 carry only their own template. The file this replaced was 397 lines / 55,114 bytes — 21,463 tokens
