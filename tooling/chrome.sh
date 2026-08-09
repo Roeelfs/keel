@@ -31,12 +31,25 @@
 #   switching tabs silently re-points the agent at the wrong page. Both directions are
 #   data corruption, not just annoyance.
 #
-#   So every navigating/reading command here targets a SESSION-OWNED tab BY ID, and
-#   never touches focus. The owned tab id is remembered per Claude session
-#   ($CLAUDE_SESSION_ID), so parallel sessions each get their own tab and never
-#   collide. The human's active tab is never read, never navigated, never focused.
+#   So every navigating/reading command here targets a SESSION-OWNED tab BY ID. The
+#   owned tab id is remembered per Claude session ($CLAUDE_SESSION_ID), so parallel
+#   sessions each get their own tab and never collide. The human's active tab is never
+#   NAVIGATED and never FOCUSED. (`check` is the one exception to "never read": its gate
+#   probes read the active tab's title and evaluate `1+1` in it. Both are non-mutating
+#   and neither activates Chrome — verified — so they cannot disturb the human.)
 #
 #   `tab show` is the ONLY command that moves focus, and only because you asked.
+#
+# FOCUS vs TABS — three DIFFERENT things, and only the third interrupts a human typing:
+#   · tab switch  — active tab within a window. Plain TabStripModel call. Harmless.
+#   · window raise — `set index of w to 1`. Reorders windows.
+#   · APP ACTIVATION — `activate`, `open location`, `open -a` without `-g`. THIS is what
+#     yanks keyboard focus out of the app the human is typing in.
+#   Measured per primitive on macOS (frontmost app read via lsappinfo):
+#       get title of tab      no activation
+#       execute t javascript  no activation
+#       set URL of t          ACTIVATES        <- why navigation goes through page JS
+#       make new tab          ACTIVATES        <- why _tab_create snapshots/restores
 #
 # USAGE
 #   chrome.sh check                 # diagnose both gates; exit 0 iff fully green
@@ -227,14 +240,52 @@ _front_app() {
 # command of a session; every later navigate/read/JS is silent because the tab already
 # exists. Never remove the snapshot: without it Chrome simply keeps the focus.
 _tab_create() { # $1=url
-  local before after id
-  before="$(_front_app)"
+  local before_app before_tab after_app id
+  before_app="$(_front_app)"
+  before_tab="$(_active_tab_id)"
   id="$(_tab_create_raw "$1")"
-  after="$(_front_app)"
-  if [ -n "$before" ] && [ "$before" != "$after" ] && [ "$after" = "Google Chrome" ]; then
-    open -a "$before" 2>/dev/null || true
+
+  # VERIFY the tab restore rather than trusting it. _tab_create_raw restores inside a
+  # bare `try`, so an AppleScript error mid-create would silently strand the human on
+  # our tab. Re-select by id if it did not take — intra-window only, which is a plain
+  # TabStripModel activate and never touches app focus.
+  if [ -n "$before_tab" ] && [ "$(_active_tab_id)" != "$before_tab" ]; then
+    _select_tab_intrawindow "$before_tab" >/dev/null 2>&1
+  fi
+
+  after_app="$(_front_app)"
+  if [ -n "$before_app" ] && [ "$before_app" != "$after_app" ] && [ "$after_app" = "Google Chrome" ]; then
+    open -a "$before_app" 2>/dev/null || true
   fi
   printf '%s' "$id"
+}
+
+# Active tab id of the front window. Pure read — no activation.
+_active_tab_id() {
+  osascript -e 'tell application "Google Chrome" to return (id of active tab of front window) as text' 2>/dev/null
+}
+
+# Make a tab active WITHIN its window. Deliberately omits `set index of w to 1` and
+# `activate` — those two are what turn a tab switch into a focus theft.
+_select_tab_intrawindow() { # $1=tabId
+  osascript - "$1" <<'APPLESCRIPT' 2>&1
+on run argv
+  set tid to item 1 of argv
+  tell application "Google Chrome"
+    repeat with w in windows
+      set idx to 0
+      repeat with t in tabs of w
+        set idx to idx + 1
+        if ((id of t) as text) is tid then
+          set active tab index of w to idx
+          return "selected"
+        end if
+      end repeat
+    end repeat
+  end tell
+  return "__NO_SUCH_TAB__"
+end run
+APPLESCRIPT
 }
 
 # Raw creator. ACTIVATES Chrome — always call it through _tab_create, never directly.
