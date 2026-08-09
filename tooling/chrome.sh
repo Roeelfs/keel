@@ -142,8 +142,52 @@ end run
 APPLESCRIPT
 }
 
-# Navigate a tab by id and wait for load. Never changes focus.
+# Run navigation JS in a tab and wait for the load to settle. Does NOT activate Chrome.
+_tab_nav_js() { # $1=tabId  $2=javascript
+  osascript - "$1" "$2" <<'APPLESCRIPT' 2>&1
+on run argv
+  set tid to item 1 of argv
+  set theJS to item 2 of argv
+  tell application "Google Chrome"
+    repeat with w in windows
+      repeat with t in tabs of w
+        if ((id of t) as text) is tid then
+          -- Navigate by running location.href IN THE PAGE, not by `set URL of t`.
+          -- Measured on macOS: `set URL of t` ACTIVATES Chrome (steals the human's
+          -- keyboard focus mid-typing); `execute t javascript` does NOT. Same
+          -- navigation, no focus theft. Do not "simplify" this back to set URL.
+          execute t javascript theJS
+          delay 0.3
+          repeat 120 times
+            if (loading of t) is false then exit repeat
+            delay 0.25
+          end repeat
+          return "loaded"
+        end if
+      end repeat
+    end repeat
+  end tell
+  return "__NO_SUCH_TAB__"
+end run
+APPLESCRIPT
+}
+
+# Navigate a tab by id without activating Chrome. Falls back to `set URL` (which DOES
+# activate) only when the page refuses JS — e.g. chrome:// pages, where execute is denied.
 _tab_nav() { # $1=tabId  $2=url
+  local esc r
+  esc="${2//\\/\\\\}"; esc="${esc//\'/\\\'}"     # single-quote-safe for the JS literal
+  r="$(_tab_nav_js "$1" "location.href='${esc}'")"
+  case "$r" in
+    loaded|__NO_SUCH_TAB__) printf '%s' "$r"; return 0 ;;
+  esac
+  # JS refused (chrome:// page, or GATE 2 off). Accept the activation rather than fail.
+  _c_yel "note: page refused JS navigation — falling back to set URL (this focuses Chrome once)." >&2
+  _tab_nav_seturl "$1" "$2"
+}
+
+# Legacy navigator. ACTIVATES Chrome — fallback only, never the default path.
+_tab_nav_seturl() { # $1=tabId  $2=url
   osascript - "$1" "$2" <<'APPLESCRIPT' 2>&1
 on run argv
   set tid to item 1 of argv
@@ -168,8 +212,33 @@ end run
 APPLESCRIPT
 }
 
-# Create a tab and RESTORE the human's active tab. Prints the new tab id.
+# The frontmost application name, in the form `open -a` accepts. Read-only: reading it
+# does NOT activate anything, and lsappinfo needs no Accessibility grant (System Events
+# does, and this process usually lacks it).
+_front_app() {
+  lsappinfo info -only name "$(lsappinfo front 2>/dev/null)" 2>/dev/null | sed 's/.*=//; s/"//g'
+}
+
+# Create a tab, then give the human back BOTH the app focus and the active tab.
+#
+# `make new tab` activates Chrome — measured, and unavoidable through AppleScript (unlike
+# navigation, which we do via page JS precisely to dodge this). So we snapshot the
+# frontmost app first and re-activate it after. That costs one brief flash on the FIRST
+# command of a session; every later navigate/read/JS is silent because the tab already
+# exists. Never remove the snapshot: without it Chrome simply keeps the focus.
 _tab_create() { # $1=url
+  local before after id
+  before="$(_front_app)"
+  id="$(_tab_create_raw "$1")"
+  after="$(_front_app)"
+  if [ -n "$before" ] && [ "$before" != "$after" ] && [ "$after" = "Google Chrome" ]; then
+    open -a "$before" 2>/dev/null || true
+  fi
+  printf '%s' "$id"
+}
+
+# Raw creator. ACTIVATES Chrome — always call it through _tab_create, never directly.
+_tab_create_raw() { # $1=url
   osascript - "$1" <<'APPLESCRIPT' 2>&1
 on run argv
   set theURL to item 1 of argv
