@@ -21,3 +21,7 @@ claude-workflow/
 .env*
 *.pem
 *.key
+
+# python bytecode (skill test suites)
+__pycache__/
+*.pyc

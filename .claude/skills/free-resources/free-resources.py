@@ -30,6 +30,18 @@ PROJECTS      = os.path.expanduser("~/.claude/projects")
 HEAVY = re.compile(r'vitest|cdk|esbuild|\btsc\b|turbo run|next build|webpack|jest|'
                    r'playwright|deploy|seed|pnpm install|npm install|\btsx ', re.I)
 
+# `timeout [--flags] <secs> <cmd>` (GNU coreutils / homebrew `gtimeout`): a deliberately
+# BOUNDED job. Nobody launches a daemon this way, so an orphaned one is in-flight work
+# whose shell parent exited — never a stale server.
+TIMEOUT_WRAPPER = re.compile(r'(?:^|[\s/])g?timeout\s+(?:-\S+\s+)*\d+\s', re.I)
+
+# long-running servers that are safe to reap once orphaned. \bvite\b, NOT bare `vite`:
+# the unanchored form matched the `vite` INSIDE `vitest`, which is how an in-flight test
+# run entered the always-safe orphan bucket in the first place.
+DEVSERVER = re.compile(r'next dev|next-server|\bvite\b|webpack|nodemon|opencode|daytona|'
+                       r'node /Users.*(pnpm|sandbox|vitest)', re.I)
+VENDOR    = re.compile(r'Logitech|logi_|/usr/libexec|loginwindow|/System/', re.I)
+
 
 def load_ps():
     out = subprocess.run(['ps', '-Ao', 'pid=,ppid=,pcpu=,rss=,command='],
@@ -53,6 +65,36 @@ def subtree(ch, root):
             continue
         seen.add(x); stack += ch.get(x, [])
     return seen
+
+
+def heavy_hit(ch, cmd, root):
+    """First in-flight heavy op at or under `root` -> (pid, why, command), else None.
+
+    Mirrors the [ACTIVE-WORK] test exactly: same HEAVY regex, same `mcp` exclusion. This
+    is the single predicate both kill routes must clear, so a process cannot become
+    reapable merely by changing WHERE it hangs in the tree."""
+    for p in sorted(subtree(ch, root)):
+        c = cmd.get(p, '')
+        if 'mcp' in c.lower():
+            continue
+        if HEAVY.search(c):
+            return p, 'heavy op', c
+        if TIMEOUT_WRAPPER.search(c):
+            return p, 'timeout-wrapped job', c
+    return None
+
+
+def proc_cwd(pid):
+    """Working directory of a pid (reporting only), '' if it cannot be read."""
+    try:
+        out = subprocess.run(['lsof', '-a', '-p', str(pid), '-d', 'cwd', '-Fn'],
+                             capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return ''
+    for ln in out.splitlines():
+        if ln.startswith('n'):
+            return ln[1:]
+    return ''
 
 
 def session_root(pid, ppid, cmd):
@@ -130,18 +172,48 @@ def diagnostics():
     return load, swap, ram
 
 
-def orphans_and_zombies(ppid, cmd):
-    """ppid==1 dev-servers / node scripts (excluding vendor daemons) + zombie count."""
-    orph = []
-    devre = re.compile(r'next dev|next-server|vite|webpack|nodemon|opencode|daytona|'
-                       r'node /Users.*(pnpm|sandbox|vitest)', re.I)
-    vend  = re.compile(r'Logitech|logi_|/usr/libexec|loginwindow|/System/', re.I)
-    for pid, pp in ppid.items():
-        if pp == 1 and devre.search(cmd.get(pid, '')) and not vend.search(cmd.get(pid, '')):
+def orphans_and_zombies(ppid, ch, cmd):
+    """ppid==1 dev-servers / node scripts (excluding vendor daemons) + zombie count.
+
+    ppid==1 is NOT by itself a licence to kill. When an intermediate `/bin/zsh -c`
+    wrapper exits, the in-flight `timeout`/vitest job under it is reparented to init —
+    which drops it out of every session process tree, so the [ACTIVE-WORK] guard that
+    protected it a moment earlier stops seeing it. Reaping on ppid==1 alone therefore
+    kills exactly the class this tool promises never to touch (observed 2026-08-11:
+    a live vitest run destroyed while its owning session was alive and flagged
+    [ACTIVE-WORK]). Every candidate is vetoed if it — or anything in its subtree — is a
+    heavy op or a `timeout`-wrapped job.
+
+    The scan is deliberately WIDER than the reap: a reparented heavy op is picked up even
+    when it looks nothing like a dev server, so that declining to kill it produces a
+    visible receipt. Staying silent about it is what made the incident unreadable — the
+    dry-run printed `orphan dev-servers (ppid=1): none` while the job was still parented,
+    so "nothing to see" and "something is being protected" looked identical.
+
+    Returns (reapable_pids, protected_records, zombie_count)."""
+    orph, prot = [], []
+    for pid, pp in sorted(ppid.items()):
+        c = cmd.get(pid, '')
+        if pp != 1 or VENDOR.search(c):
+            continue
+        # Scan arm matches the ROOT command only. Walking the whole subtree here swept in
+        # every GUI app (Chrome/Roam/Claude renderers loosely match HEAVY), which reported
+        # "reparented in-flight work" about a browser — noise that discredits the receipt.
+        root_is_job = 'mcp' not in c.lower() and bool(HEAVY.search(c) or
+                                                      TIMEOUT_WRAPPER.search(c))
+        if not (DEVSERVER.search(c) or root_is_job):
+            continue
+        # Veto arm stays full-subtree: a benign-looking root can front a heavy child.
+        hit = heavy_hit(ch, cmd, pid)
+        if hit:
+            hpid, why, hcmd = hit
+            prot.append({'pid': pid, 'why': why, 'at': hpid, 'cmd': hcmd,
+                         'cwd': proc_cwd(pid)})
+        else:
             orph.append(pid)
     zc = subprocess.run("ps -Ao stat | grep -c '^Z'", shell=True,
                         capture_output=True, text=True).stdout.strip()
-    return orph, zc
+    return orph, prot, zc
 
 
 def main():
@@ -207,22 +279,44 @@ def main():
         print(f"{mark}{hms(s['idle_s']):>6}  {s['title'][:40]:<40} {s['pid']:>6} "
               f"{s['tree_cpu']:>5} {s['tree_rss_mb']:>5}  {s['worktree'][:22]}{flag}")
 
-    orph, zc = orphans_and_zombies(ppid, cmd)
+    orph, prot_orph, zc = orphans_and_zombies(ppid, ch, cmd)
     print(f"\norphan dev-servers (ppid=1): {orph or 'none'}   zombies: {zc} (self-reap)")
+    for o in orph:
+        print(f"    reap {o}: {cmd.get(o,'')[:60]}  [cwd {proc_cwd(o) or '?'}]")
+    for r in prot_orph:
+        print(f"  ! PROTECTED orphan {r['pid']} — {r['why']} at pid {r['at']}: "
+              f"{r['cmd'][:60]}\n      reparented in-flight work, not a stale server"
+              f"  [cwd {r['cwd'] or '?'}]")
+    if not prot_orph:
+        print("    (no reparented in-flight work found — heavy-op veto had nothing to hold)")
 
-    kill = set()
+    # One gate for BOTH kill routes. A tree is reaped only if nothing at or under its
+    # root is a heavy op — so reparenting can no longer launder work into the kill set.
+    kill, roots = set(), []
     for s in targets:
         if s['tree'] & protected:                    # safety: never cross into a protected tree
             print(f"  ! skip {s['title'][:30]} — tree overlaps a protected session")
             continue
-        kill |= s['tree']
+        roots.append((f"session {s['title'][:30]}", s['root'], s['tree']))
     if args.reap_orphans:
-        for o in orph:
-            kill |= subtree(ch, o)
+        roots += [(f"orphan {o}", o, subtree(ch, o)) for o in orph]
+    for label, root, tree in roots:
+        hit = heavy_hit(ch, cmd, root)
+        if hit:
+            print(f"  ! skip {label} — {hit[1]} in tree (pid {hit[0]}): {hit[2][:60]}")
+            continue
+        kill |= tree
 
     print(f"\n{'APPLY' if args.apply else 'DRY-RUN'} — "
-          f"{len(targets)} idle sessions + {len(orph)} orphans = {len(kill)} procs")
+          f"{len(targets)} idle sessions + {len(orph)} orphans = {len(kill)} procs"
+          f"{f' ({len(prot_orph)} orphan(s) protected)' if prot_orph else ''}")
     assert mypid not in kill, "REFUSING: self in kill set"
+    # Belt-and-braces: by construction no HEAVY command can reach `kill` via either
+    # route. Assert it anyway — this is the invariant the whole safety model rests on.
+    stray = sorted(p for p in kill if 'mcp' not in cmd.get(p, '').lower()
+                   and HEAVY.search(cmd.get(p, '')))
+    assert not stray, ("REFUSING: heavy op in kill set: " +
+                       '; '.join(f"{p} {cmd.get(p,'')[:60]}" for p in stray))
 
     if not args.apply:
         print("(re-run with --apply to execute)")
