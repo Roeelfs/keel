@@ -43,6 +43,21 @@ reason in the label or the comment, and is justified on synthesis lanes, not on 
 existence-checking or per-item verification. An unpinned `agent()` call inherits the expensive tier by
 default, which is the exact pathology Workflow E's metric 6 exists to measure.
 
+**Ask the second-runtime gate BEFORE spending the primary window.** Mining, census, research,
+extraction, existence-checking and per-finding verification are exactly the classes that belong on
+the second runtime — self-contained prompt, document deliverable, read-only. Where the operator's
+layer provides a headroom gate, ask it for the go/no-go **and** the model, and fall back to the
+Claude ladder above only when it says so. Two rules travel with this, both learned expensively:
+
+- **Never hardcode a dispatch budget — parse the live cap.** A second-runtime weekly cap has
+  saturated repeatedly, and each blowout is a HARD failure: dispatches stop returning at all, unlike
+  an expensive Claude lane that still completes. **An unknown cap counts as saturated**, and a fresh
+  0% window is as often the aftermath of a blowout as it is headroom.
+- **A fan-out counts against that cap as a BLOCK, not as one item.** Measured: 8 concurrent
+  dispatches burned a weekly window from 24% to 100% in under eight minutes, and a 14-lane fan-out
+  is roughly half a week in twenty minutes. Cap concurrent second-runtime lanes at 5; a wider
+  fan-out stays on Claude rather than silently spending the week.
+
 **"Zero survived" and "zero completed" are different facts — `.filter(Boolean)` erases the
 difference.** Every template's `parallel(...).filter(Boolean)` treats a lane that THREW — session
 limit, quota, timeout — identically to one that ran and found nothing; both vanish from the array with
