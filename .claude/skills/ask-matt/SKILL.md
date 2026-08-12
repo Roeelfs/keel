@@ -36,6 +36,8 @@ The limit on this is the **[smart zone](https://www.aihero.dev/ai-coding-diction
 
 A starting situation that generates work, then merges onto the main flow.
 
+- **A product workflow or multi-surface UI needs redesigning** → use the [UI/UX redesign flow](../../../docs/ui-ux-redesign-flow.md). Model the service and information architecture before changing the page chrome, explore structurally different variants with `/prototype`, and use UI Craft as the single visual-authoring lane. The flow then rejoins the main path at `/to-spec`; do not implement every variant.
+
 - **Bugs and requests piling up** → **`/triage`**. It moves issues through triage roles and produces agent-ready issues, which **`/implement`** later picks up.
 
   Triage is only for issues **you didn't create** — bug reports, incoming feature requests, anything that arrives raw. Tickets that `/to-tickets` produced are already agent-ready, so **don't triage them**.
