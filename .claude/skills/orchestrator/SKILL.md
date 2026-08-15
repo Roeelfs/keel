@@ -19,15 +19,19 @@ Depth lives in `references/` and is **not** auto-loaded:
 - **Long-lived Codex root:** use `gpt-5.6-terra` at Medium. The root pays for accumulated context on every turn, so it coordinates, integrates, and keeps state on the everyday tier.
 - **Sol escalation:** use a fresh, bounded `gpt-5.6-sol` lane only for architecture with irreversible consequences, security/trust boundaries, hard RCA, or final adversarial adjudication. Give it no history or the smallest evidence slice, one decision artifact, and a stop condition.
 - Return the decision artifact to the Terra root. When a Sol planning phase ends, start or resume a fresh Terra-medium implementation task instead of extending the Sol session through execution and review.
-- Routine implementation, mining, topical review, tests, and coordination stay on Terra at the effort in `prompts/model-routing.md`. An explicit user model choice overrides this default.
+- Routine implementation and topical review stay on Terra. Mining, file search, and deterministic procedure default to Luna-low. An explicit user model choice overrides this default.
 
 ## Root control plane, worker execution plane
 
 The long-lived orchestrator root owns the **control plane**: state/ledger decisions, scope and target selection, product edits, failure interpretation, human/auth gates, and every production mutation. It may run small bounded read-only probes that complete in one tool call and immediately inform a decision.
 
-The root does not retain the **execution plane** for deterministic command batches. When a targeted pass would require process continuation, retain large raw output, or run the full project gate, dispatch one fresh native Codex procedural worker for the whole pass using `prompts/procedural-worker.md`. Never spawn one child per command. The worker is Terra-low with no inherited history; the root grades its pointer artifact and makes the next decision.
+The root does not retain the **execution plane** for deterministic command batches. When a targeted pass would require process continuation, retain large raw output, or run the full project gate, dispatch one fresh native Codex procedural worker for the whole pass using `prompts/procedural-worker.md`. Never spawn one child per command. The worker is Luna-low with no inherited history; the root grades its pointer artifact and makes the next decision.
 
 Source-mutating formatters, dependency-changing installs, migrations, and product fixes belong to the build phase, not the procedural worker. Interactive authentication and production mutations stay in the root even after authorization; post-mutation verification may use a worker.
+
+## Terminal stop override
+
+When the user says to stop review/testing, stop the endless cycle, preserve weekly usage, or return a backlog, treat it as a terminal control instruction—not feedback to apply after the current phase. Immediately interrupt active review/test lanes, spawn none, perform **zero further verification**, preserve dirty work, and return a concise handoff of completed artifacts, current state, blockers, and backlog. Do not finish the current test, wait for a reviewer, repair the ledger, or earn one last closure pass. If a foreign task cannot be interrupted from this runtime, send one terminal stop message and report that limitation; never poll it.
 
 ## Program state — three bounded files
 

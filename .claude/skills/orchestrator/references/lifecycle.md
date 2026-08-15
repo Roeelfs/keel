@@ -12,6 +12,12 @@ Choose once during `define` and record it in the ledger:
 
 Mode controls verification depth, not implementation ambition. `moderate` and `critical` use the provisional planner budget (12 unique obligations, 2 customer journeys) with a named override for uncovered risk.
 
+## Existing implementation fast path
+
+When the task begins with implementation, commits, tests, or review artifacts already present, inventory those artifacts once and resume from the first genuinely non-terminal changed seam. Evidence remains valid at the **same SHA**; conversation age and a new task do not invalidate it. Run at most **one changed-seam review** and **one grouped verification pass** for work not already proven. Reuse a same-SHA gate receipt when project law permits.
+
+Never replay define or build merely because orchestration started late, a skill was invoked, or a new root took ownership. Do not review unchanged implementation, regenerate a test plan after code exists, or rerun PASS rows. If the user asks to proceed, complete, finalize, or backlog residue, the next forcing function is the nearest implementation/ship blocker—not another broad review.
+
 ## Phase 1 — define
 
 Inputs: issue/goal, relevant project memory and law.

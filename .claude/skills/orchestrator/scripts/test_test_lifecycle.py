@@ -71,6 +71,27 @@ class TestLifecycleContractTests(unittest.TestCase):
         self.assertNotIn("Monitor` with an until-loop", core)
         self.assertNotIn("Lanes never run the machine's full verify gate", core)
 
+    def test_existing_implementation_resumes_without_lifecycle_replay(self):
+        lifecycle = FILES["references/lifecycle.md"]
+        for text in (
+            "Existing implementation fast path",
+            "same SHA",
+            "one changed-seam review",
+            "one grouped verification pass",
+            "never replay define or build",
+        ):
+            self.assertIn(text.lower(), lifecycle.lower())
+
+    def test_user_stop_is_terminal_for_review_and_testing(self):
+        core = FILES["SKILL.md"]
+        for text in (
+            "Terminal stop override",
+            "interrupt active review/test lanes",
+            "zero further verification",
+            "return a concise handoff",
+        ):
+            self.assertIn(text, core)
+
 
 if __name__ == "__main__":
     unittest.main()

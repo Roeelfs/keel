@@ -30,14 +30,19 @@ class ModelRoutingContractTests(unittest.TestCase):
     def test_bounded_children_keep_minimal_history(self):
         self.assertIn('`fork_turns: "none"`', ROUTING)
 
-    def test_procedural_worker_is_terra_low_not_sol(self):
+    def test_procedural_worker_is_luna_low_not_sol(self):
         row = next(
             line for line in ROUTING.splitlines()
             if line.startswith("| Procedural worker: deterministic command pass |")
         )
-        self.assertIn("gpt-5.6-terra", row)
+        self.assertIn("gpt-5.6-luna", row)
         self.assertIn("standard / Low", row)
         self.assertNotIn("gpt-5.6-sol", row)
+
+    def test_cheap_native_children_default_to_luna_low(self):
+        for role in ("State miner", "Procedural worker", "Doc writer / file search"):
+            row = next(line for line in ROUTING.splitlines() if line.startswith(f"| {role} |"))
+            self.assertIn("gpt-5.6-luna (low)", row, role)
 
     def test_routine_planning_and_refactors_stay_on_terra(self):
         for purpose in (

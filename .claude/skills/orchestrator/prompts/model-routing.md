@@ -8,7 +8,7 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 
 > Keep Fable + Opus in the deep-review panel for model diversity even though the vendor now documents Fable as the most capable widely released model.
 
-**Codex:** Sol is the frontier judgement tier; Terra is the everyday implementation/review tier; Luna is the headless high-volume mining tier; Spark is headless trivial/mechanical only. Native `spawn_agent` currently exposes Sol and Terra overrides, so native mining uses Terra low even when the headless dispatcher can use Luna/Spark.
+**Codex:** Sol is the frontier judgement tier; Terra is the everyday implementation/review tier; Luna is the high-volume mining/procedure tier; Spark is trivial/mechanical only. Native `spawn_agent` exposes all four tiers. Machine defaults are Luna-low for children; every Terra or Sol child is an explicit role choice.
 
 ## Effort
 
@@ -25,12 +25,12 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 | Define: unresolved security/irreversible dispute | Opus + Codex | gpt-5.6-sol | think harder / Extra high |
 | Build: implementation + targeted tests | Sonnet | gpt-5.6-terra | think / Medium |
 | Verify-release: finite execution | Sonnet | gpt-5.6-terra | think / Medium |
-| Procedural worker: deterministic command pass | Haiku | gpt-5.6-terra | standard / Low |
+| Procedural worker: deterministic command pass | Haiku | gpt-5.6-luna | standard / Low |
 | Verify-release: failure-cluster diagnosis | Sonnet | gpt-5.6-terra | think / Medium |
 | Bug fix < 200 LOC | Sonnet | gpt-5.6-terra | think / Medium |
-| Trivial < 50 LOC, docs | Haiku | gpt-5.6-terra | standard / Low |
-| Mining / surveys / parsing | Haiku | gpt-5.6-terra | standard / Low |
-| Soak observation | Haiku | gpt-5.6-terra | standard / Low |
+| Trivial < 50 LOC, docs | Haiku | gpt-5.6-luna | standard / Low |
+| Mining / surveys / parsing | Haiku | gpt-5.6-luna | standard / Low |
+| Soak observation | Haiku | gpt-5.6-luna | standard / Low |
 | Soak ESCALATE investigation | Sonnet | gpt-5.6-terra | think / Medium |
 | PR comment review | Sonnet | gpt-5.6-terra | think / Medium |
 | Refactor (no API change) | Sonnet | gpt-5.6-terra | think / Medium |
@@ -49,14 +49,14 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 
 | Role | Claude `Agent` | Codex `spawn_agent` |
 |---|---|---|
-| State miner | Haiku | gpt-5.6-terra (low) |
+| State miner | Haiku | gpt-5.6-luna (low) |
 | Topical reviewers | Sonnet | gpt-5.6-terra (medium) |
 | Boundary / security / adversarial | Fable 5 + Opus 5 | gpt-5.6-sol (xhigh) |
 | Coverage verifier | n/a | gpt-5.6-terra (medium) |
 | Failure diagnostician | Sonnet | gpt-5.6-terra (medium) |
 | Failure-cluster diagnostician | Sonnet | gpt-5.6-terra (medium) |
-| Procedural worker | Haiku | gpt-5.6-terra (low) |
-| Doc writer / file search | Haiku | gpt-5.6-terra (low) |
+| Procedural worker | Haiku | gpt-5.6-luna (low) |
+| Doc writer / file search | Haiku | gpt-5.6-luna (low) |
 
 ## Rules
 
@@ -70,3 +70,5 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 8. **Bounded Codex children do not inherit the whole parent by default.** Give them a self-contained mission and `fork_turns: "none"` or the smallest positive slice that carries the evidence. Use `"all"` only when the whole conversation is genuinely load-bearing; full-history forks also inherit the parent's model and effort.
 9. **The long-lived Codex orchestrator root is Terra-medium.** Context accumulation is the root's dominant multiplier; do not pay frontier weight on coordination, waiting, integration, or routine execution.
 10. **Sol is a fresh bounded escalation, not a phase-spanning root.** Use it for irreversible architecture, security/trust boundaries, hard RCA, or final adversarial judgment. Return one decision artifact to the Terra root, then stop the Sol lane.
+11. **Existing implementation is resume work, not a new lifecycle.** Honor same-SHA evidence; do not spend a new review/test wave proving unchanged code.
+12. **A user stop instruction overrides every review manifest and proof gate.** Interrupt, preserve, hand off. No final test or closure pass is earned.
