@@ -110,6 +110,24 @@ Before any unattended stretch, compute the set of work reachable **without a hum
 
 Declare the finite review protocol, lane manifest, and stop condition before dispatching reviewers.
 
+For native Codex collaboration calls, every review activation carries the same machine-readable
+protocol block in its `message`. Declare the complete finite manifest up front; a slot is unique
+within the protocol and is launched at most once.
+
+```text
+[review-protocol:v1]
+protocol_id=<stable task-scoped id>
+stage=primary|investigator|falsifier|security|closure
+artifact_paths=<comma-separated paths relative to cwd>
+manifest=primary:<slot>,falsifier:<slot>,closure:<slot>
+manifest_slot=<the unique slot launched by this call>
+```
+
+List every allowed slot in `manifest`, repeating a stage for multiple slots. Use explicit artifact
+files, never a whole-repository fingerprint. `send_message` and `interrupt_agent` remain available
+for corrections and stopping work. Legacy unmarked calls are valid but receive no protocol-state
+assessment.
+
 1. Run one broad primary wave in parallel. Give each reviewer a self-contained mission and no history, or the smallest slice that contains the evidence.
 2. Consolidate and deduplicate once. Falsify the material survivors before fixing them; reviewer output is evidence, not an instruction to apply every finding verbatim.
 3. A named finite skill may run its declared investigator, falsifier, security, or bounded cross-examination stages. Those are parts of the declared protocol, not permission to repeat a completed broad stage.

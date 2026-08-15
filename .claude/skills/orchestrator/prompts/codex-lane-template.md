@@ -34,6 +34,14 @@ Hard constraints:
     over changed seams. Named finite skill stages are allowed; never repeat a completed broad stage.
     Another broad cycle requires explicit user authorization and a fresh task. Backlog non-blocking
     or cosmetic residue instead of keeping reviewers alive with follow-ups or interrupt/restart loops.
+  - Put this block in every native Codex review activation's message. Declare all finite slots before
+    the first spawn and reuse the identical protocol_id, artifact_paths, and manifest throughout:
+      [review-protocol:v1]
+      protocol_id=<stable task-scoped id>
+      stage=primary|investigator|falsifier|security|closure
+      artifact_paths=<comma-separated explicit files relative to cwd>
+      manifest=primary:<slot>,falsifier:<slot>,closure:<slot>
+      manifest_slot=<unique slot launched by this call>
 
 DO-NOT-TOUCH:
   - <other-lane-1 paths>
