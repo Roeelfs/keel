@@ -26,6 +26,7 @@ BUILD: implement only the exact accepted task group from durable artifacts, run 
 VERIFY-RELEASE: group deterministic commands into one targeted pass and dispatch one fresh Terra-low native procedural worker with `fork_turns:"none"`; include the project gate last and exactly once. A changed SHA may earn one fresh correction-pass worker. The phase root interprets results and updates the ledger; it never owns the worker's exec/write_stdin session. Reuse existing tests. FAIL is an owned defect; BLOCKED is an external prerequisite preventing the next accepted action; DEFERRED is owned backlog. A runtime claim needs real-boundary evidence when project law requires it.
 
 Hard rules:
+- Native goal commands belong to the orchestrator root. This lane never creates, replaces, completes, or blocks the root's goal.
 - Never merge, deploy, or mutate production unless this mission includes the project's explicit authorization.
 - Never sleep or poll CI/deploy. External wait/readiness failure gets one blocker/resume artifact and ends the task.
 - A spawned child owned by the accepted task group is internal work, not an external wait. Give it an explicit lease; consume its terminal result before final, or interrupt it once on lease expiry and continue from its durable handoff.

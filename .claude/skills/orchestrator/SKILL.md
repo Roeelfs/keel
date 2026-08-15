@@ -35,6 +35,12 @@ A native `spawn_agent` owned by the current accepted task group is **internal wo
 
 A wait timeout is a progress boundary, not completion. Report the changed state in commentary and continue with latency-sized event waits while the child remains inside its lease. The child mission declares the lease up front; expiry causes one interrupt and continuation from its durable handoff/artifacts, never an unbounded wait loop.
 
+## Goal command contract — bounded autonomy
+
+On Codex, use the native goal commands only when the user explicitly asks for autonomous goal execution. Scope the goal to the **reachable authorized autonomy frontier**: the current accepted task group through the next known human, production, or external gate. A goal keeps that bounded work moving across automatic continuations and owned-child waits; it does not broaden scope, production authority, or approval.
+
+Keep the goal active only while a safe, authorized action advances its objective. Each continuation selects one `next_forcing_function`; completed phases, PASS evidence, spent review slots, and unchanged failures remain terminal. Close the goal as soon as its frontier is genuinely achieved. An unexpected external blocker uses the native three-turn blocker audit with no repeated side effects, then stops. Explicit terminal stop still overrides the goal immediately. Read `references/codex-runtime.md` for the exact `create_goal` / `get_goal` / `update_goal` contract.
+
 ## Completion mode override
 
 When the user says to stop review/testing/cycles **and** asks to finish, complete, finalize, proceed, or return residue as backlog, interrupt active review/test lanes and freeze accepted scope. Continue only the **current declared build task group**; its owned children remain subject to the continuation invariant above. Absorb no adjacent discovery and start no new review or test plan. If testing is explicitly forbidden, hand off the result as `UNVERIFIED`; otherwise run only the minimum project-required gate once. Then return completed artifacts, current state, owned failures, external blockers, and deferred backlog.
