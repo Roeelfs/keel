@@ -4,10 +4,11 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 
 ## Models
 
-**Claude:** Fable 5 (`claude-fable-5`, alias `fable`) + Opus 5 (`claude-opus-5`, alias `opus`) — the two top reasoning tiers → Sonnet 5 (~0.2×) → Haiku 4.5 (~0.04×)
+**Claude:** Fable 5 (`claude-fable-5`, alias `fable`) is the highest-capability final/security gate; Opus 5 (`claude-opus-5`, alias `opus`) starts complex agentic coding and architecture; Sonnet 5 is the routine-development tier; Haiku 4.5 is the high-volume mining tier.
 
-> Opus 5 released 2026-07-24, superseding Opus 4.8. Its cost weight and its standing relative to Fable 5 are **unmeasured here** — the deep-review bucket stays split across both (see 6 below) rather than being re-ranked on a guess.
-**Codex:** `gpt-5.6-sol` — the only id named by standing law, so the Codex column below is uniform. Cheaper Codex tiers exist per release; **verify one exists before pinning it**, and never pin a dated id that the installed CLI does not know.
+> Keep Fable + Opus in the deep-review panel for model diversity even though the vendor now documents Fable as the most capable widely released model.
+
+**Codex:** Sol is the frontier judgement tier; Terra is the everyday implementation/review tier; Luna is the headless high-volume mining tier; Spark is headless trivial/mechanical only. Native `spawn_agent` currently exposes Sol and Terra overrides, so native mining uses Terra low even when the headless dispatcher can use Luna/Spark.
 
 ## Effort
 
@@ -21,39 +22,39 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 |---|---|---|---|
 | Spec authoring (step 2) | Opus | gpt-5.6-sol | think hard / High |
 | /spec-review (steps 3, 6) | Opus + Codex | gpt-5.6-sol | think harder / Extra high |
-| /spec-test-plan (step 4) | Sonnet | gpt-5.6-sol | think / Medium |
-| Step 4b spec patches | Sonnet | gpt-5.6-sol | think / Medium |
+| /spec-test-plan (step 4) | Sonnet | gpt-5.6-terra | think / Medium |
+| Step 4b spec patches | Sonnet | gpt-5.6-terra | think / Medium |
 | Implementation plan (step 5) | Opus | gpt-5.6-sol | think hard / High |
 | Plan review (step 6) | Opus + Codex | gpt-5.6-sol | think harder / Extra high |
-| Implementation (step 7) | Sonnet | gpt-5.6-sol | standard / Low |
-| spec-test-execute (step 8) | Sonnet | gpt-5.6-sol | standard / Low |
-| Bug fix < 200 LOC | Sonnet | gpt-5.6-sol | standard / Low |
-| Trivial < 50 LOC, docs | Haiku | gpt-5.6-sol | standard / Low |
-| Mining / surveys / parsing | Haiku | gpt-5.6-sol | standard / Low |
-| Soak observation | Haiku | gpt-5.6-sol | standard / Low |
+| Implementation (step 7) | Sonnet | gpt-5.6-terra | think / Medium |
+| spec-test-execute (step 8) | Sonnet | gpt-5.6-terra | think / Medium |
+| Bug fix < 200 LOC | Sonnet | gpt-5.6-terra | think / Medium |
+| Trivial < 50 LOC, docs | Haiku | gpt-5.6-terra | standard / Low |
+| Mining / surveys / parsing | Haiku | gpt-5.6-terra | standard / Low |
+| Soak observation | Haiku | gpt-5.6-terra | standard / Low |
 | Soak ESCALATE investigation | Opus | gpt-5.6-sol | think hard / High |
-| PR comment review | Sonnet | gpt-5.6-sol | think / Medium |
-| Refactor (no API change) | Sonnet | gpt-5.6-sol | think / Medium |
+| PR comment review | Sonnet | gpt-5.6-terra | think / Medium |
+| Refactor (no API change) | Sonnet | gpt-5.6-terra | think / Medium |
 | Refactor (API change) | Opus | gpt-5.6-sol | think hard / High |
 | Critical-path debugging | Opus | gpt-5.6-sol | think harder / Extra high |
 | Security review | Fable 5 + Opus 5 | gpt-5.6-sol | think harder / Extra high |
-| Migration writing | Sonnet | gpt-5.6-sol | think / Medium |
+| Migration writing | Sonnet | gpt-5.6-terra | think / Medium |
 | Migration risk review | Opus | gpt-5.6-sol | think hard / High |
-| Self-managed interactive | Sonnet | gpt-5.6-sol | (user drives) |
-| Wake-driven soak watcher | Haiku | gpt-5.6-sol | standard / Low |
+| Self-managed interactive | Sonnet | gpt-5.6-terra | (user drives) |
+| Wake-driven soak watcher | Haiku | gpt-5.6-terra | standard / Low |
 | Orchestrator | Opus | gpt-5.6-sol | think / Medium |
 
 ## Subagent dispatch
 
 | Role | Claude `Agent` | Codex `spawn_agent` |
 |---|---|---|
-| State miner | Haiku | gpt-5.6-sol |
-| Topical reviewers | Sonnet | gpt-5.6-sol |
+| State miner | Haiku | gpt-5.6-terra (low) |
+| Topical reviewers | Sonnet | gpt-5.6-terra (medium) |
 | Boundary / security / adversarial | Fable 5 + Opus 5 | gpt-5.6-sol |
 | Coverage verifier | n/a | gpt-5.6-sol |
-| Failure diagnostician | Sonnet | gpt-5.6-sol |
+| Failure diagnostician | Sonnet | gpt-5.6-terra (medium) |
 | Codex rescue | n/a | gpt-5.6-sol |
-| Doc writer / file search | Haiku | gpt-5.6-sol |
+| Doc writer / file search | Haiku | gpt-5.6-terra (low) |
 
 ## Rules
 
@@ -64,3 +65,4 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 5. Cross-runtime second-opinion (flagship Claude + flagship Codex paired) is the one rational flagship double-up — different bug classes.
 6. Deep-review bucket (security review, adversarial review, final-gate critique) is split **Fable 5 + Opus 5** — model diversity beats a single-model monoculture; never route all deep-review lanes to one model.
 7. **Ad-hoc delegation defaults to `sonnet`.** Research / investigation / mining / exploration / execution dispatches route to `sonnet` or `haiku`; **`opus` requires a one-line justification in the dispatch**; `fable` (or `gpt-5.6-sol` on the Codex side) is reserved for the hardest verify / judge / adversarial reasoning. The Fable-pinned NAMED agents (critic, security-reviewer) stay Fable by design. A permissive default silently becomes an opus default — measured: 189 dispatches went opus 59 / sonnet ~80 / haiku 2.
+8. **Bounded Codex children do not inherit the whole parent by default.** Give them a self-contained mission and `fork_turns: "none"` or the smallest positive slice that carries the evidence. Use `"all"` only when the whole conversation is genuinely load-bearing; full-history forks also inherit the parent's model and effort.
