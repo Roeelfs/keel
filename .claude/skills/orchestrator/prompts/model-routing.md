@@ -20,29 +20,32 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 
 | Lane purpose | Claude | Codex | Effort |
 |---|---|---|---|
-| Spec authoring (step 2) | Opus | gpt-5.6-sol | think hard / High |
-| /spec-review (steps 3, 6) | Opus + Codex | gpt-5.6-sol | think harder / Extra high |
+| Spec authoring (step 2) | Sonnet | gpt-5.6-terra | think / Medium |
+| /spec-review coverage review (step 3) | Sonnet + Codex | gpt-5.6-terra | think / Medium |
+| /spec-review final adversarial gate (step 6) | Opus + Codex | gpt-5.6-sol | think harder / Extra high |
 | /spec-test-plan (step 4) | Sonnet | gpt-5.6-terra | think / Medium |
 | Step 4b spec patches | Sonnet | gpt-5.6-terra | think / Medium |
-| Implementation plan (step 5) | Opus | gpt-5.6-sol | think hard / High |
-| Plan review (step 6) | Opus + Codex | gpt-5.6-sol | think harder / Extra high |
+| Implementation plan (step 5) | Sonnet | gpt-5.6-terra | think / Medium |
+| Plan review final adversarial gate (step 6) | Opus + Codex | gpt-5.6-sol | think harder / Extra high |
 | Implementation (step 7) | Sonnet | gpt-5.6-terra | think / Medium |
 | spec-test-execute (step 8) | Sonnet | gpt-5.6-terra | think / Medium |
 | Bug fix < 200 LOC | Sonnet | gpt-5.6-terra | think / Medium |
 | Trivial < 50 LOC, docs | Haiku | gpt-5.6-terra | standard / Low |
 | Mining / surveys / parsing | Haiku | gpt-5.6-terra | standard / Low |
 | Soak observation | Haiku | gpt-5.6-terra | standard / Low |
-| Soak ESCALATE investigation | Opus | gpt-5.6-sol | think hard / High |
+| Soak ESCALATE investigation | Sonnet | gpt-5.6-terra | think / Medium |
 | PR comment review | Sonnet | gpt-5.6-terra | think / Medium |
 | Refactor (no API change) | Sonnet | gpt-5.6-terra | think / Medium |
-| Refactor (API change) | Opus | gpt-5.6-sol | think hard / High |
-| Critical-path debugging | Opus | gpt-5.6-sol | think harder / Extra high |
+| Refactor (API change) | Sonnet | gpt-5.6-terra | think / Medium |
+| Hard RCA / critical-path debugging | Opus | gpt-5.6-sol | think harder / Extra high |
 | Security review | Fable 5 + Opus 5 | gpt-5.6-sol | think harder / Extra high |
+| Irreversible architecture decision | Opus | gpt-5.6-sol | think hard / High |
 | Migration writing | Sonnet | gpt-5.6-terra | think / Medium |
-| Migration risk review | Opus | gpt-5.6-sol | think hard / High |
-| Self-managed interactive | Sonnet | gpt-5.6-terra | (user drives) |
+| Migration risk review | Sonnet | gpt-5.6-terra | think / Medium |
+| Self-managed interactive | Sonnet | gpt-5.6-terra | think / Medium |
 | Wake-driven soak watcher | Haiku | gpt-5.6-terra | standard / Low |
-| Orchestrator | Opus | gpt-5.6-sol | think / Medium |
+| Orchestrator (Claude) | Opus | n/a | think / Medium |
+| Orchestrator (long-lived Codex root) | n/a | gpt-5.6-terra | Medium |
 
 ## Subagent dispatch
 
@@ -50,10 +53,10 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 |---|---|---|
 | State miner | Haiku | gpt-5.6-terra (low) |
 | Topical reviewers | Sonnet | gpt-5.6-terra (medium) |
-| Boundary / security / adversarial | Fable 5 + Opus 5 | gpt-5.6-sol |
-| Coverage verifier | n/a | gpt-5.6-sol |
+| Boundary / security / adversarial | Fable 5 + Opus 5 | gpt-5.6-sol (xhigh) |
+| Coverage verifier | n/a | gpt-5.6-terra (medium) |
 | Failure diagnostician | Sonnet | gpt-5.6-terra (medium) |
-| Codex rescue | n/a | gpt-5.6-sol |
+| Codex rescue | n/a | gpt-5.6-terra (medium) |
 | Doc writer / file search | Haiku | gpt-5.6-terra (low) |
 
 ## Rules
@@ -66,3 +69,5 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 6. Deep-review bucket (security review, adversarial review, final-gate critique) is split **Fable 5 + Opus 5** — model diversity beats a single-model monoculture; never route all deep-review lanes to one model.
 7. **Ad-hoc delegation defaults to `sonnet`.** Research / investigation / mining / exploration / execution dispatches route to `sonnet` or `haiku`; **`opus` requires a one-line justification in the dispatch**; `fable` (or `gpt-5.6-sol` on the Codex side) is reserved for the hardest verify / judge / adversarial reasoning. The Fable-pinned NAMED agents (critic, security-reviewer) stay Fable by design. A permissive default silently becomes an opus default — measured: 189 dispatches went opus 59 / sonnet ~80 / haiku 2.
 8. **Bounded Codex children do not inherit the whole parent by default.** Give them a self-contained mission and `fork_turns: "none"` or the smallest positive slice that carries the evidence. Use `"all"` only when the whole conversation is genuinely load-bearing; full-history forks also inherit the parent's model and effort.
+9. **The long-lived Codex orchestrator root is Terra-medium.** Context accumulation is the root's dominant multiplier; do not pay frontier weight on coordination, waiting, integration, or routine execution.
+10. **Sol is a fresh bounded escalation, not a phase-spanning root.** Use it for irreversible architecture, security/trust boundaries, hard RCA, or final adversarial judgment. Return one decision artifact to the Terra root, then stop the Sol lane.

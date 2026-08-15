@@ -14,6 +14,13 @@ Depth lives in `references/` and is **not** auto-loaded:
 - **Read `references/merge-and-retire.md` before merging any lane PR or signing off a retire** — merge tiers, post-merge phase chain, retire checklist.
 - **Read `references/codex-runtime.md` first when `$CLAUDE_SESSION_ID` is unset** — you are hosted by Codex CLI and most verbs below do not exist there.
 
+## Model topology — cheap root, intelligent escalations
+
+- **Long-lived Codex root:** use `gpt-5.6-terra` at Medium. The root pays for accumulated context on every turn, so it coordinates, integrates, and keeps state on the everyday tier.
+- **Sol escalation:** use a fresh, bounded `gpt-5.6-sol` lane only for architecture with irreversible consequences, security/trust boundaries, hard RCA, or final adversarial adjudication. Give it no history or the smallest evidence slice, one decision artifact, and a stop condition.
+- Return the decision artifact to the Terra root. When a Sol planning phase ends, start or resume a fresh Terra-medium implementation task instead of extending the Sol session through execution and review.
+- Routine implementation, mining, topical review, tests, and coordination stay on Terra at the effort in `prompts/model-routing.md`. An explicit user model choice overrides this default.
+
 ## Program state — three bounded files
 
 Under `~/.claude/orchestrator/programs/`, per program. Declaring them is the first act of every orchestrator.
@@ -72,8 +79,8 @@ A lane goes interactive **only when it needs the human**; everything else runs p
 | **Chip session** | human judgment | `spawn_task` — **requires a human click** | grillings, decision gates, and resurrecting a parked lane the human will personally drive (`sessions-to-chips`) — never a substitute for a headless lane in an unattended stretch |
 
 ```bash
-cd <repo> && echo '' | codex exec --skip-git-repo-check -m gpt-5.6-sol \
-  -c model_reasoning_effort=high -s read-only -o <outfile> -- "<prompt>"
+cd <repo> && echo '' | codex exec --skip-git-repo-check -m gpt-5.6-terra \
+  -c model_reasoning_effort=medium -s read-only -o <outfile> -- "<prompt>"
 ```
 > **Grade this lane by its ARTIFACT before counting it** — exit 0 is not evidence. Invocation flags, the `wc -l` / severity-grep check, and the DEAD vs **BLOCKED-ON-QUOTA** vs REAL classification live in [`docs/codex-lane-contract.md`](../../../docs/codex-lane-contract.md). Measured 2026-08-02/03: 18 of 52 rollouts hit a quota wall while exiting normally; 20 of 52 completed fine, so a dead lane is never proof the runtime is down.
 
@@ -170,7 +177,7 @@ List which paths each in-flight lane owns and name them DO-NOT-TOUCH in the new 
 
 Backlog lives on the repo's tracker, named in its `AGENTS.md` `## Agent skills` block. For a huge/foggy multi-session effort run `/wayfinder` FIRST; to break a settled plan into tickets, `/to-tickets`.
 
-Per-lane model/effort recommendations: `prompts/model-routing.md`. Ad-hoc delegation defaults to **sonnet**; `opus` needs a one-line justification; the deep verify/judge/adversarial bucket is `fable` (Claude) or `gpt-5.6-sol` (Codex).
+Per-lane model/effort recommendations: `prompts/model-routing.md`. A Codex orchestrator root defaults to **Terra-medium**; Sol is a bounded judgment escalation, never the context-accumulating execution loop. Ad-hoc Claude delegation defaults to **sonnet**; `opus` needs a one-line justification; the deep verify/judge/adversarial bucket is `fable` (Claude) or `gpt-5.6-sol` (Codex).
 
 ## Skill memory
 
