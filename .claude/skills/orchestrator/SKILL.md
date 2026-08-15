@@ -106,6 +106,17 @@ Before any unattended stretch, compute the set of work reachable **without a hum
 - **Grade by ARTIFACT, never by the completion envelope.** Before marking a lane done, check the objective thing it was asked to produce — commits on the branch, the named file, the row. A green `subtype:"success"` over **zero commits** is a dead lane (observed: exit 1 on an API 429 after 66 turns and $7.24). Exit 143 + a 0-byte output = SIGTERM under machine load: **salvage the dirty worktree before re-dispatching.** State the artifact in the manifest lane entry and in the mission, so the check is unambiguous.
 - **A lane that ends short of its artifact owes a handoff note** — one line of what remains plus the last verified fact, appended to `<slug>.events.jsonl`. Without it the operator re-types the original GOAL (observed: one prompt resent byte-identical 5×). A re-dispatch is a **continuation**, never a replay.
 
+## Review convergence
+
+Declare the finite review protocol, lane manifest, and stop condition before dispatching reviewers.
+
+1. Run one broad primary wave in parallel. Give each reviewer a self-contained mission and no history, or the smallest slice that contains the evidence.
+2. Consolidate and deduplicate once. Falsify the material survivors before fixing them; reviewer output is evidence, not an instruction to apply every finding verbatim.
+3. A named finite skill may run its declared investigator, falsifier, security, or bounded cross-examination stages. Those are parts of the declared protocol, not permission to repeat a completed broad stage.
+4. After fixes, run one narrow closure pass over the changed seams. Then stop. Backlog non-blocking or cosmetic residue with the evidence already gathered.
+
+Another broad cycle requires explicit user authorization and a fresh task. Do not interrupt and restart the same reviewer, or keep sending follow-ups, without a changed diff, artifact, or final result that justifies the next declared stage.
+
 ## Pre-flight verification — before any routing claim
 
 Verify the source of truth; never infer from secondary signals.

@@ -29,7 +29,11 @@ Hard constraints:
   - DO NOT use /tmp/ or /private/tmp/ for any source-of-truth files. Patches, drafts, work-in-progress
     all live in the lane worktree (<repo>/<lane-name>-impl/).
   - DO NOT touch paths owned by other lanes — see DO-NOT-TOUCH list below.
-  - Apply ALL reviewer findings verbatim. Cap review→fix at 2 rounds; remainder → tracked issues.
+  - Before spawning reviewers, declare a finite review protocol and stop condition. Run one broad
+    primary wave, consolidate and falsify material findings once, then run one narrow closure pass
+    over changed seams. Named finite skill stages are allowed; never repeat a completed broad stage.
+    Another broad cycle requires explicit user authorization and a fresh task. Backlog non-blocking
+    or cosmetic residue instead of keeping reviewers alive with follow-ups or interrupt/restart loops.
 
 DO-NOT-TOUCH:
   - <other-lane-1 paths>
