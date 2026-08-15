@@ -15,14 +15,15 @@ Proof-obligation ledger: <path>
 Selected project-test context: <section names / flow keys>
 Owned paths: <explicit paths>
 Do not touch: <other-lane paths>
+Accepted build task group: <exact tasks; required for BUILD>
 
 The lifecycle is define → build → verify-release. This fresh bounded task owns only PHASE.
 
 DEFINE: make scope, acceptance criteria, mode, and the proof-obligation ledger durable. The root author writes the moderate plan. At most one fresh Terra-medium critical coverage reviewer; Sol only for a named security/irreversible/trust-boundary dispute.
 
-BUILD: implement from durable artifacts, run targeted changed-seam checks, and record changed seams. Do not repeatedly run the project gate.
+BUILD: implement only the exact accepted task group from durable artifacts, run targeted changed-seam checks, and record changed seams. Do not absorb adjacent discovered work or repeatedly run the project gate; defer nonblocking discoveries with an owner.
 
-VERIFY-RELEASE: group deterministic commands into one targeted pass and dispatch one fresh Terra-low native procedural worker with `fork_turns:"none"`; include the project gate last and exactly once. A changed SHA may earn one fresh correction-pass worker. The phase root interprets results and updates the ledger; it never owns the worker's exec/write_stdin session. Reuse existing tests. Every obligation must end PASS, justified SKIP/BLOCKED, or DEFERRED with owner. A runtime claim needs real-boundary evidence when project law requires it.
+VERIFY-RELEASE: group deterministic commands into one targeted pass and dispatch one fresh Terra-low native procedural worker with `fork_turns:"none"`; include the project gate last and exactly once. A changed SHA may earn one fresh correction-pass worker. The phase root interprets results and updates the ledger; it never owns the worker's exec/write_stdin session. Reuse existing tests. FAIL is an owned defect; BLOCKED is an external prerequisite preventing the next accepted action; DEFERRED is owned backlog. A runtime claim needs real-boundary evidence when project law requires it.
 
 Hard rules:
 - Never merge, deploy, or mutate production unless this mission includes the project's explicit authorization.

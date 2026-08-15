@@ -37,6 +37,8 @@ Termination: acceptance criteria, scope, owning seams, mode, and proof obligatio
 
 Inputs: define artifacts and branch HEAD.
 
+Every build mission declares an **exact accepted task group**. A feature may use multiple fresh build tasks against one PR, but a task must not absorb adjacent discovered work. Owned defects required by the accepted group stay in build; nonblocking discoveries become `DEFERRED` backlog with an owner.
+
 Outputs:
 
 1. product code and focused tests;
@@ -46,7 +48,7 @@ Outputs:
 
 Do not run the project-wide gate repeatedly. A verification defect returns here once with its normalized failure signature and affected obligations.
 
-Termination: implementation is complete, targeted checks are green, and the branch identifies the changed seams for verification.
+Termination: the declared task group is complete, targeted checks are green, and the branch identifies the changed seams for verification. Do not keep the task open to consume the rest of a large implementation plan.
 
 ## Phase 3 — verify-release
 
@@ -61,6 +63,14 @@ Outputs:
 5. PR/release evidence and only the post-merge proof obligations that require merged/deployed substrate.
 
 Readiness failures end with a blocker/resume artifact; they do not start polling. Release remains subject to the project's human/prod gates.
+
+Status meanings are strict across the ledger and whole-program handoff:
+
+- `FAIL` means an owned code, test, or harness defect.
+- `BLOCKED` means a prerequisite outside the current task's control prevents reaching the changed seam and prevents the next accepted-scope owned action.
+- `DEFERRED` means incomplete or nonblocking backlog with an owner. Incomplete accepted or future scope is not itself a blocker.
+
+A repeated normalized failure signature stops execution but remains `FAIL`; it does not become `BLOCKED`.
 
 ## Fresh bounded handoff
 

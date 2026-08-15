@@ -17,7 +17,7 @@ Read `LEARNINGS.md` and the private overlay at `~/.claude/skills-overlay/spec-te
 - **Evidence before PASS.** Run the stated proof and retain the decisive output.
 - A PASS needs a **strong assertion** against the intended behavior, not only process exit zero or `200 OK`.
 - Every `SKIP` names the unavailable proof and the fallback attempted.
-- Every `BLOCKED` names the readiness failure or unresolved failure signature and a resumable next action.
+- Every `BLOCKED` names the external readiness prerequisite and a resumable next action. Owned code, test, or harness defects remain `FAIL`; incomplete/nonblocking backlog is `DEFERRED` with an owner.
 - Reuse **existing tests** before authoring new ones.
 - The **project test contract** owns safe identities, environments, deployment rules, commands, and the project gate.
 - A runtime behavior claim needs **real-boundary** evidence at the narrowest project-authorized seam.
@@ -35,9 +35,9 @@ python3 ~/.claude/skills/spec-test-plan/scripts/validate_plan.py <test-plan.md>
 
 Group rows by reusable command/setup so one command can prove several obligations. Keep raw output under `$TMPDIR/spec-test-execute/<run-id>/` and write concise evidence references into the ledger after each command group, not after every assertion.
 
-On native Codex, the phase root does not execute a deterministic pass inline when it would require process continuation, retain large output, or run the full gate. Dispatch **one procedural worker per pass**: one fresh history-free Luna-low worker owns all targeted command groups plus the project gate, writes raw logs outside the conversation, and returns only a compact structured result pointer. The root begins with one realistic wait, validates the pointer and evidence artifact, promotes decisive evidence into the durable ledger, and interprets the result. Do not spawn one worker per command or let the root take over the worker's process. Small bounded read-only probes that immediately inform judgment stay in the root.
+On native Codex, the phase root does not execute a deterministic pass inline when it would require process continuation, retain large output, or run the full gate. Dispatch **one procedural worker per pass**: one fresh history-free Terra-low worker owns all targeted command groups plus the project gate, writes raw logs outside the conversation, and returns only a compact structured result pointer. The root begins with one realistic wait, validates the pointer and evidence artifact, promotes decisive evidence into the durable ledger, and interprets the result. Do not spawn one worker per command or let the root take over the worker's process. Small bounded read-only probes that immediately inform judgment stay in the root.
 
-If existing artifacts already prove a row at the same SHA, keep it terminal; do not execute it again. If the user says stop review/testing or preserve usage, stop immediately and return the current ledger plus backlog. No readiness probe, current command completion, project gate, or closure pass survives that instruction.
+If existing artifacts already prove a row at the same SHA, keep it terminal; do not execute it again. If the user says stop review/testing and finish/finalize, end this verifier immediately and return the current ledger to the declared build group; start no replacement review/test plan. If testing is explicitly forbidden, mark the handoff `UNVERIFIED`. Only explicit stop-now/no-further-tools/handoff-now language is terminal for all work: interrupt every descendant and perform no further tools or waits.
 
 Before execution, query the worktree registry with `git worktree list --porcelain` and inspect only candidate sibling worktrees touching the ledger's test/fixture/helper paths. Reuse visible existing work. Relevant in-flight work that would collide produces a blocker artifact; do not scaffold a duplicate or dispatch a broad infrastructure-audit child.
 
@@ -88,7 +88,7 @@ After the build phase provides a changed SHA, run **one changed-seam correction 
 - directly dependent obligations invalidated by that change;
 - a real-boundary journey when the changed runtime seam is the proof target.
 
-Do not rerun unrelated rows or the project gate. A second occurrence of the same normalized signature becomes `BLOCKED`; there is no third identical execution.
+Do not rerun unrelated rows or the project gate. A second occurrence of the same normalized signature stops execution and remains `FAIL`; there is no third identical execution.
 
 ## 5. Finish
 
@@ -96,7 +96,8 @@ The verifier finishes when every row is terminal:
 
 - `PASS` with evidence;
 - justified `SKIP`;
-- `BLOCKED` with a blocker/resume artifact; or
+- `FAIL` with an owned defect/signature returned to build;
+- `BLOCKED` with an external prerequisite and blocker/resume artifact; or
 - `DEFERRED` with `owner:`.
 
 Report counts, executed command groups, product defects returned to build, changed-seam reruns, real-boundary evidence, and blockers. Optionally propose at most three reusable learning candidates, but apply them only in a separate approved change. Never auto-stage/commit unrelated knowledge, registry, or config files.

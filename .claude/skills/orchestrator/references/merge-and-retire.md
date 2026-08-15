@@ -9,7 +9,7 @@ The `verify-release` task confirms:
 - every proof obligation is terminal (`PASS`, justified `SKIP`/`BLOCKED`, or `DEFERRED` with owner);
 - the project gate ran exactly once when required;
 - the changed branch artifact exists and is pushed;
-- unresolved failures have a normalized signature and owner rather than another retry loop;
+- owned failures remain `FAIL` with a normalized signature and owner rather than becoming false external blockers or another retry loop;
 - the PR states its mode (`checklist`, `moderate`, or `critical`) and links the proof-obligation ledger.
 
 Grade the evidence in the ledger. Do not infer execution from a green build or a long test plan.

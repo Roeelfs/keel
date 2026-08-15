@@ -2,7 +2,7 @@
 
 Use one fresh worker for one deterministic command pass when inline execution would require process continuation, retain large raw output, or run the full project gate. Do not spawn one worker per command.
 
-The caller uses native `spawn_agent` with `model: "gpt-5.6-luna"`, `reasoning_effort: "low"`, and `fork_turns: "none"`.
+The caller uses native `spawn_agent` with `model: "gpt-5.6-terra"`, `reasoning_effort: "low"`, and `fork_turns: "none"`.
 
 ## Mission contract
 

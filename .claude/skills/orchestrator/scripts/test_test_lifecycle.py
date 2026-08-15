@@ -82,15 +82,36 @@ class TestLifecycleContractTests(unittest.TestCase):
         ):
             self.assertIn(text.lower(), lifecycle.lower())
 
-    def test_user_stop_is_terminal_for_review_and_testing(self):
+    def test_completion_mode_finishes_declared_scope_without_more_review(self):
+        core = FILES["SKILL.md"]
+        for text in (
+            "Completion mode override",
+            "freeze accepted scope",
+            "current declared build task group",
+            "UNVERIFIED",
+        ):
+            self.assertIn(text, core)
+
+    def test_explicit_terminal_stop_ends_all_descendants(self):
         core = FILES["SKILL.md"]
         for text in (
             "Terminal stop override",
-            "interrupt active review/test lanes",
-            "zero further verification",
+            "interrupt every active descendant",
+            "zero further tools or waits",
             "return a concise handoff",
         ):
             self.assertIn(text, core)
+
+    def test_build_activation_and_status_taxonomy_are_bounded(self):
+        lifecycle = FILES["references/lifecycle.md"]
+        for text in (
+            "exact accepted task group",
+            "must not absorb adjacent discovered work",
+            "FAIL` means an owned",
+            "BLOCKED` means a prerequisite outside",
+            "DEFERRED` means incomplete or nonblocking backlog",
+        ):
+            self.assertIn(text, lifecycle)
 
 
 if __name__ == "__main__":
