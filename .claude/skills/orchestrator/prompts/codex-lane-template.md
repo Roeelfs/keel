@@ -22,7 +22,7 @@ DEFINE: make scope, acceptance criteria, mode, and the proof-obligation ledger d
 
 BUILD: implement from durable artifacts, run targeted changed-seam checks, and record changed seams. Do not repeatedly run the project gate.
 
-VERIFY-RELEASE: run one targeted pass, at most one changed-seam correction pass after a build fix, and the project gate exactly once. Reuse existing tests. Every obligation must end PASS, justified SKIP/BLOCKED, or DEFERRED with owner. A runtime claim needs real-boundary evidence when project law requires it.
+VERIFY-RELEASE: group deterministic commands into one targeted pass and dispatch one fresh Terra-low native procedural worker with `fork_turns:"none"`; include the project gate last and exactly once. A changed SHA may earn one fresh correction-pass worker. The phase root interprets results and updates the ledger; it never owns the worker's exec/write_stdin session. Reuse existing tests. Every obligation must end PASS, justified SKIP/BLOCKED, or DEFERRED with owner. A runtime claim needs real-boundary evidence when project law requires it.
 
 Hard rules:
 - Never merge, deploy, or mutate production unless this mission includes the project's explicit authorization.

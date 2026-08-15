@@ -35,6 +35,8 @@ python3 ~/.claude/skills/spec-test-plan/scripts/validate_plan.py <test-plan.md>
 
 Group rows by reusable command/setup so one command can prove several obligations. Keep raw output under `$TMPDIR/spec-test-execute/<run-id>/` and write concise evidence references into the ledger after each command group, not after every assertion.
 
+On native Codex, the phase root does not execute a deterministic pass inline when it would require process continuation, retain large output, or run the full gate. Dispatch **one procedural worker per pass**: one fresh history-free Terra-low worker owns all targeted command groups plus the project gate, writes raw logs outside the conversation, and returns only a compact structured result pointer. The root begins with one realistic wait, validates the pointer and evidence artifact, promotes decisive evidence into the durable ledger, and interprets the result. Do not spawn one worker per command or let the root take over the worker's process. Small bounded read-only probes that immediately inform judgment stay in the root.
+
 Before execution, query the worktree registry with `git worktree list --porcelain` and inspect only candidate sibling worktrees touching the ledger's test/fixture/helper paths. Reuse visible existing work. Relevant in-flight work that would collide produces a blocker artifact; do not scaffold a duplicate or dispatch a broad infrastructure-audit child.
 
 ## 1. Readiness gate
@@ -51,7 +53,7 @@ Do not poll, deploy generically, or retry a readiness failure. A project-authori
 
 ## 2. One targeted pass
 
-Run **one targeted pass** over the command groups, ordered from cheap changed-seam checks to the smallest real-boundary journey. Capture:
+Run **one targeted pass** over the command groups, ordered from cheap changed-seam checks to the smallest real-boundary journey. On native Codex this is the procedural worker's pass; include the project gate last. Capture:
 
 - command/journey identity;
 - code/deploy SHA when relevant;
@@ -62,7 +64,7 @@ Run **one targeted pass** over the command groups, ordered from cheap changed-se
 
 Update rows to `PASS`, `FAIL`, `SKIP`, or `BLOCKED`. The plan is the durable ledger, but grouped evidence updates are preferred over edit-per-row churn.
 
-Run the project gate exactly once, after targeted rows are resolved, when a `project-gate` row exists. Do not rerun it as an inner loop.
+Run the project gate exactly once, as the final group in the targeted-pass worker when a `project-gate` row exists. Do not rerun it as an inner loop.
 
 ## 3. Cluster failures once
 
@@ -78,7 +80,7 @@ Return a product defect to the `build` phase with the signature, minimal reprodu
 
 ## 4. One correction pass
 
-After the build phase provides a changed SHA, run **one changed-seam correction pass** over only:
+After the build phase provides a changed SHA, run **one changed-seam correction pass** in one fresh procedural worker over only:
 
 - previously failed obligations whose owning seam changed;
 - directly dependent obligations invalidated by that change;

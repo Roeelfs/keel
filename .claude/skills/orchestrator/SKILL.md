@@ -21,6 +21,14 @@ Depth lives in `references/` and is **not** auto-loaded:
 - Return the decision artifact to the Terra root. When a Sol planning phase ends, start or resume a fresh Terra-medium implementation task instead of extending the Sol session through execution and review.
 - Routine implementation, mining, topical review, tests, and coordination stay on Terra at the effort in `prompts/model-routing.md`. An explicit user model choice overrides this default.
 
+## Root control plane, worker execution plane
+
+The long-lived orchestrator root owns the **control plane**: state/ledger decisions, scope and target selection, product edits, failure interpretation, human/auth gates, and every production mutation. It may run small bounded read-only probes that complete in one tool call and immediately inform a decision.
+
+The root does not retain the **execution plane** for deterministic command batches. When a targeted pass would require process continuation, retain large raw output, or run the full project gate, dispatch one fresh native Codex procedural worker for the whole pass using `prompts/procedural-worker.md`. Never spawn one child per command. The worker is Terra-low with no inherited history; the root grades its pointer artifact and makes the next decision.
+
+Source-mutating formatters, dependency-changing installs, migrations, and product fixes belong to the build phase, not the procedural worker. Interactive authentication and production mutations stay in the root even after authorization; post-mutation verification may use a worker.
+
 ## Program state — three bounded files
 
 Under `~/.claude/orchestrator/programs/`, per program. Declaring them is the first act of every orchestrator.
@@ -202,3 +210,4 @@ Read the private overlay if present: `~/.claude/skills-overlay/orchestrator/LEAR
 - ❌ Blind-retrying through a safety-classifier or model-outage window — 2nd identical denial ends the lane.
 - ❌ Opening a PR, or retiring a lane, while proof obligations are non-terminal or lack owned deferral (`references/merge-and-retire.md`).
 - ❌ Turning a moderate proof ledger into exhaustive test enumeration or an autonomous deploy/poll loop.
+- ❌ Running a long test/build/gate process in the context-heavy root, or spawning one procedural child per command. Batch one pass; keep judgment in the root.

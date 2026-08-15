@@ -59,6 +59,19 @@ class ExecutorContractTests(unittest.TestCase):
         self.assertIn("normalized failure signature", prompt.lower())
         self.assertFalse((SKILL_DIR / "prompts" / "codex-rescue-stuck.md").exists())
 
+    def test_native_codex_groups_procedural_work_off_root(self):
+        for text in (
+            "one procedural worker per pass",
+            "history-free",
+            "Terra-low",
+            "one realistic wait",
+            "Do not spawn one worker per command",
+            "promotes decisive evidence into the durable ledger",
+            "final group in the targeted-pass worker",
+            "one fresh procedural worker",
+        ):
+            self.assertIn(text, SKILL)
+
 
 if __name__ == "__main__":
     unittest.main()

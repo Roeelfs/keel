@@ -25,6 +25,7 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 | Define: unresolved security/irreversible dispute | Opus + Codex | gpt-5.6-sol | think harder / Extra high |
 | Build: implementation + targeted tests | Sonnet | gpt-5.6-terra | think / Medium |
 | Verify-release: finite execution | Sonnet | gpt-5.6-terra | think / Medium |
+| Procedural worker: deterministic command pass | Haiku | gpt-5.6-terra | standard / Low |
 | Verify-release: failure-cluster diagnosis | Sonnet | gpt-5.6-terra | think / Medium |
 | Bug fix < 200 LOC | Sonnet | gpt-5.6-terra | think / Medium |
 | Trivial < 50 LOC, docs | Haiku | gpt-5.6-terra | standard / Low |
@@ -54,6 +55,7 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 | Coverage verifier | n/a | gpt-5.6-terra (medium) |
 | Failure diagnostician | Sonnet | gpt-5.6-terra (medium) |
 | Failure-cluster diagnostician | Sonnet | gpt-5.6-terra (medium) |
+| Procedural worker | Haiku | gpt-5.6-terra (low) |
 | Doc writer / file search | Haiku | gpt-5.6-terra (low) |
 
 ## Rules
