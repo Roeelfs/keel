@@ -29,9 +29,15 @@ The root does not retain the **execution plane** for deterministic command batch
 
 Source-mutating formatters, dependency-changing installs, migrations, and product fixes belong to the build phase, not the procedural worker. Interactive authentication and production mutations stay in the root even after authorization; post-mutation verification may use a worker.
 
+## Owned child continuation invariant
+
+A native `spawn_agent` owned by the current accepted task group is **internal work, not an external wait**. Before any final answer or handoff, the root must either consume and grade that child's terminal result, or interrupt it under terminal-stop, completion-mode scope pruning, or an expired explicit child lease. The root **must not emit a final answer** while an in-scope child is active and thereby require the user to reactivate the task.
+
+A wait timeout is a progress boundary, not completion. Report the changed state in commentary and continue with latency-sized event waits while the child remains inside its lease. The child mission declares the lease up front; expiry causes one interrupt and continuation from its durable handoff/artifacts, never an unbounded wait loop.
+
 ## Completion mode override
 
-When the user says to stop review/testing/cycles **and** asks to finish, complete, finalize, proceed, or return residue as backlog, interrupt active review/test lanes and freeze accepted scope. Continue only the **current declared build task group**; absorb no adjacent discovery and start no new review or test plan. If testing is explicitly forbidden, hand off the result as `UNVERIFIED`; otherwise run only the minimum project-required gate once. Then return completed artifacts, current state, owned failures, external blockers, and deferred backlog.
+When the user says to stop review/testing/cycles **and** asks to finish, complete, finalize, proceed, or return residue as backlog, interrupt active review/test lanes and freeze accepted scope. Continue only the **current declared build task group**; its owned children remain subject to the continuation invariant above. Absorb no adjacent discovery and start no new review or test plan. If testing is explicitly forbidden, hand off the result as `UNVERIFIED`; otherwise run only the minimum project-required gate once. Then return completed artifacts, current state, owned failures, external blockers, and deferred backlog.
 
 ## Terminal stop override
 
@@ -110,7 +116,7 @@ Then read a **slice** of `<outfile>`. Codex starts **cold** — a lane needing a
 
 - **`ScheduleWakeup` is the continuation mechanism** — one snapshot per wake, never a poll loop. Size the delay to what you are waiting on (a CI run is minutes; a bake is hours). Re-arm only on a **changed fingerprint**; if nothing moved, extend the delay instead of re-firing at the same cadence.
 - **The wake prompt is a POINTER** — state-file path + "step N NOW" + the one fact that changed since arming. Never the state itself. (Measured: 97 of 170 wake prompts carried ≥1,000 chars of re-serialized state, up to ~6k, because nothing durable survived the turn boundary. `<slug>.state.md` is what makes the pointer sufficient.)
-- **External waits end the bounded task.** Write a blocker/wake artifact keyed by the awaited state; a later fresh task checks it once. Foreground sleep and polling loops are forbidden.
+- **External waits end the bounded task.** Write a blocker/wake artifact keyed by the awaited state; a later fresh task checks it once. An owned in-scope child is internal work governed by the continuation invariant, not an external wait. Foreground sleep and polling loops are forbidden.
 - **`AskUserQuestion`** is how a contested claim, a pre-authorization ask, or a genuine judgment call reaches the human. **`PushNotification`** tells an away operator something now needs them.
 - **`TaskCreate` / `TaskUpdate`** carry per-lane status the operator can see; prefer them to prose status dumps re-typed each turn.
 - **`send_message` is the orch→live-lane transport, and it surfaces as an approval prompt IN THE RECIPIENT** — an unattended lane stalls on it (operator, verbatim: *"Stop sending messages it will make this session stuck."*). Send only from a turn where the operator is present, and **never as the last act of an unattended wake**. For an unattended lane, leave the instruction where the lane reads it on its own next tick — its state file — not in its inbox.

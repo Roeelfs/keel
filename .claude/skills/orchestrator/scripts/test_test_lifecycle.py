@@ -102,6 +102,24 @@ class TestLifecycleContractTests(unittest.TestCase):
         ):
             self.assertIn(text, core)
 
+    def test_active_owned_child_cannot_become_a_user_reactivation_handoff(self):
+        core = FILES["SKILL.md"]
+        runtime = FILES["references/codex-runtime.md"]
+        for text in (
+            "internal work, not an external wait",
+            "must not emit a final answer",
+            "expired explicit child lease",
+        ):
+            self.assertIn(text, core)
+        for text in (
+            "A timeout is not completion",
+            "latency-sized event wait",
+            "interrupt the child",
+            "durable handoff",
+        ):
+            self.assertIn(text, runtime)
+        self.assertNotIn("distinct unrelated mailbox update", runtime)
+
     def test_build_activation_and_status_taxonomy_are_bounded(self):
         lifecycle = FILES["references/lifecycle.md"]
         for text in (

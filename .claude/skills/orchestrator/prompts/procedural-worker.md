@@ -18,9 +18,10 @@ command_groups:
     expected_assertion: <decisive success condition>
 allowed_write_paths: <none, or exact cache/receipt paths>
 timeout_ms: <realistic whole-pass bound>
+child_lease_ms: <timeout_ms plus a result-publication buffer of at most 60000>
 artifact_dir: <absolute temp/evidence directory>
 
-Start in absolute_cwd and confirm the pinned SHA. Run command groups sequentially. You own every exec session and write_stdin call until the command exits. Save exact commands, timestamps, full stdout/stderr, exit codes, and decisive excerpts under artifact_dir. Stop on the first FAIL or BLOCKED result.
+Start in absolute_cwd and confirm the pinned SHA. Run command groups sequentially. You own every exec session and write_stdin call until the command exits. Save exact commands, timestamps, full stdout/stderr, exit codes, and decisive excerpts under artifact_dir. After each command, atomically update `handoff.json` with the last completed command, current status, remaining command IDs, and artifact paths so lease expiry has a durable handoff. Stop on the first FAIL or BLOCKED result. Do not exceed `child_lease_ms`.
 
 This worker never edits source, formats files, installs dependencies, diagnoses a failure, retries an unchanged failure, asks the user, chooses a target, merges, deploys, or mutates production. An authentication/readiness problem is BLOCKED, not a recovery task.
 

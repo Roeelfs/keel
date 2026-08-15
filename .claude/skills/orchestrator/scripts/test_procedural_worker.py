@@ -33,8 +33,11 @@ class ProceduralWorkerContractTests(unittest.TestCase):
         for text in ('fork_turns: "none"', 'reasoning_effort: "low"', "Terra-low"):
             self.assertIn(text, RUNTIME + PROMPT + ROUTING)
         self.assertIn("root never calls `write_stdin`", RUNTIME)
-        self.assertIn("Start with one realistically sized `wait_agent`", RUNTIME)
-        self.assertIn("distinct unrelated mailbox update", RUNTIME)
+        self.assertIn("latency-sized event wait", RUNTIME)
+        self.assertIn("explicit child lease", RUNTIME + PROMPT)
+        self.assertIn("interrupt the child", RUNTIME)
+        self.assertIn("durable handoff", RUNTIME + PROMPT)
+        self.assertNotIn("distinct unrelated mailbox update", RUNTIME)
 
     def test_worker_does_not_take_judgment_or_write_scope(self):
         self.assertIn(
