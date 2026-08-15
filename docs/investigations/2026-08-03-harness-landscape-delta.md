@@ -54,14 +54,14 @@ Silent-wrong-success: exit 0, plausible banner, wrong containment, invisible to 
 - `~/.claude/skills/codex/LEARNINGS.md:33` *(machine-only)*
 - `.claude/skills/spec-test-plan/SKILL.md:98`
 - `.claude/skills/spec-review/SKILL.md:547`
-- `.claude/skills/spec-test-plan/prompts/codex-coverage-verifier.md:21,48`
+- Historical prompt at `git show 036f4b5:.claude/skills/spec-test-plan/prompts/codex-coverage-verifier.md`
 
 **B. Declared danger-full-access, silently downgraded to workspace-write.**
 The opposite direction — the rescue lane is *more* restricted than intended, so a rescue needing to write
 outside the workspace fails for a reason nobody would look for.
 
 - `.claude/skills/spec-test-execute/SKILL.md:279`
-- `.claude/skills/spec-test-execute/prompts/codex-rescue-stuck.md:80`
+- Historical prompt at `git show 036f4b5:.claude/skills/spec-test-execute/prompts/codex-rescue-stuck.md`
 
 **C. Redundant alongside an explicit `workspace-write`.**
 Same mode either way, so no mode change. **UNVERIFIED:** whether the override also resets the adjacent

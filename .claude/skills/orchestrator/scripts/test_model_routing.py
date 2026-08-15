@@ -32,8 +32,9 @@ class ModelRoutingContractTests(unittest.TestCase):
 
     def test_routine_planning_and_refactors_stay_on_terra(self):
         for purpose in (
-            "Spec authoring (step 2)",
-            "Implementation plan (step 5)",
+            "Define: spec + moderate proof ledger",
+            "Build: implementation + targeted tests",
+            "Verify-release: finite execution",
             "Soak ESCALATE investigation",
             "Refactor (API change)",
             "Migration risk review",
@@ -41,28 +42,26 @@ class ModelRoutingContractTests(unittest.TestCase):
             row = next(line for line in ROUTING.splitlines() if line.startswith(f"| {purpose} |"))
             self.assertIn("gpt-5.6-terra", row, purpose)
 
-    def test_rescue_defaults_to_terra_and_sol_effort_is_explicit(self):
-        self.assertIn("| Codex rescue | n/a | gpt-5.6-terra (medium) |", ROUTING)
+    def test_diagnosis_defaults_to_terra_and_sol_effort_is_explicit(self):
+        self.assertIn(
+            "| Failure-cluster diagnostician | Sonnet | gpt-5.6-terra (medium) |",
+            ROUTING,
+        )
         self.assertIn(
             "| Boundary / security / adversarial | Fable 5 + Opus 5 | gpt-5.6-sol (xhigh) |",
             ROUTING,
         )
 
-    def test_review_uses_sol_only_for_named_final_adversarial_gates(self):
+    def test_review_uses_sol_only_for_named_critical_dispute(self):
         self.assertIn(
-            "| /spec-review coverage review (step 3) | Sonnet + Codex | gpt-5.6-terra | think / Medium |",
+            "| Define: one critical coverage review | Sonnet | gpt-5.6-terra | think / Medium |",
             ROUTING,
         )
         self.assertIn(
-            "| /spec-review final adversarial gate (step 6) | Opus + Codex | gpt-5.6-sol | think harder / Extra high |",
+            "| Define: unresolved security/irreversible dispute | Opus + Codex | gpt-5.6-sol | think harder / Extra high |",
             ROUTING,
         )
-        self.assertIn(
-            "| Plan review final adversarial gate (step 6) | Opus + Codex | gpt-5.6-sol | think harder / Extra high |",
-            ROUTING,
-        )
-        self.assertNotIn("| /spec-review (steps 3, 6) |", ROUTING)
-        self.assertNotIn("| Plan review (step 6) |", ROUTING)
+        self.assertNotIn("| /spec-test-plan | Opus", ROUTING)
 
 
 if __name__ == "__main__":

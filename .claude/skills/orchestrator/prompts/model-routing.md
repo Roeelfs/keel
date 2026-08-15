@@ -20,15 +20,12 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 
 | Lane purpose | Claude | Codex | Effort |
 |---|---|---|---|
-| Spec authoring (step 2) | Sonnet | gpt-5.6-terra | think / Medium |
-| /spec-review coverage review (step 3) | Sonnet + Codex | gpt-5.6-terra | think / Medium |
-| /spec-review final adversarial gate (step 6) | Opus + Codex | gpt-5.6-sol | think harder / Extra high |
-| /spec-test-plan (step 4) | Sonnet | gpt-5.6-terra | think / Medium |
-| Step 4b spec patches | Sonnet | gpt-5.6-terra | think / Medium |
-| Implementation plan (step 5) | Sonnet | gpt-5.6-terra | think / Medium |
-| Plan review final adversarial gate (step 6) | Opus + Codex | gpt-5.6-sol | think harder / Extra high |
-| Implementation (step 7) | Sonnet | gpt-5.6-terra | think / Medium |
-| spec-test-execute (step 8) | Sonnet | gpt-5.6-terra | think / Medium |
+| Define: spec + moderate proof ledger | Sonnet | gpt-5.6-terra | think / Medium |
+| Define: one critical coverage review | Sonnet | gpt-5.6-terra | think / Medium |
+| Define: unresolved security/irreversible dispute | Opus + Codex | gpt-5.6-sol | think harder / Extra high |
+| Build: implementation + targeted tests | Sonnet | gpt-5.6-terra | think / Medium |
+| Verify-release: finite execution | Sonnet | gpt-5.6-terra | think / Medium |
+| Verify-release: failure-cluster diagnosis | Sonnet | gpt-5.6-terra | think / Medium |
 | Bug fix < 200 LOC | Sonnet | gpt-5.6-terra | think / Medium |
 | Trivial < 50 LOC, docs | Haiku | gpt-5.6-terra | standard / Low |
 | Mining / surveys / parsing | Haiku | gpt-5.6-terra | standard / Low |
@@ -56,7 +53,7 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 | Boundary / security / adversarial | Fable 5 + Opus 5 | gpt-5.6-sol (xhigh) |
 | Coverage verifier | n/a | gpt-5.6-terra (medium) |
 | Failure diagnostician | Sonnet | gpt-5.6-terra (medium) |
-| Codex rescue | n/a | gpt-5.6-terra (medium) |
+| Failure-cluster diagnostician | Sonnet | gpt-5.6-terra (medium) |
 | Doc writer / file search | Haiku | gpt-5.6-terra (low) |
 
 ## Rules

@@ -10,8 +10,8 @@ You orchestrate **ONE PROGRAM**: track its lanes, catch conflicts before they hi
 
 Depth lives in `references/` and is **not** auto-loaded:
 
-- **Read `references/lifecycle.md` before planning, spawning, or grading a spec-class lane** — the canonical 7-step lane, skip rules, ready-to-execute gate.
-- **Read `references/merge-and-retire.md` before merging any lane PR or signing off a retire** — merge tiers, post-merge phase chain, retire checklist.
+- **Read `references/lifecycle.md` before planning, spawning, or grading a spec-class lane** — the canonical **define → build → verify-release** lifecycle, modes, handoff, and terminal evidence gate.
+- **Read `references/merge-and-retire.md` before merging any lane PR or signing off a retire** — project-authorized merge, keyed post-merge proof, retire checklist.
 - **Read `references/codex-runtime.md` first when `$CLAUDE_SESSION_ID` is unset** — you are hosted by Codex CLI and most verbs below do not exist there.
 
 ## Model topology — cheap root, intelligent escalations
@@ -86,7 +86,7 @@ cd <repo> && echo '' | codex exec --skip-git-repo-check -m gpt-5.6-terra \
 
 Then read a **slice** of `<outfile>`. Codex starts **cold** — a lane needing accumulated conversation, harness state, or MCP servers stays on Claude. Do not route through a Claude subagent that only shells out to Codex; that charges the window you are sparing.
 
-**A headless lane is a ROOT session — push whole lifecycle phases into it.** The no-nested-dispatch rule binds Agent-tool subagents, not lanes: a lane may run subagent-driven implementation, review fan-outs, and Workflows internally (grant it explicitly in the mission text). The orchestrator plans and integrates; it does not run review panels itself.
+**A headless lane is a ROOT session — give it one fresh bounded lifecycle phase.** The no-nested-dispatch rule binds Agent-tool subagents, not lanes, but a phase lane still follows finite review and proof budgets. The orchestrator plans and integrates; it does not run review panels itself.
 
 **MCP tiers differ by substrate.** A Task subagent inherits the desktop MCP set (interactive OAuth included); a headless lane gets only static-credential MCPs the spawn wrapper attaches. Interactive-OAuth MCPs do **not** load in `-p` mode — a lane needing a tracker gets it via `--mcp-config` with an API-key header. Anything desktop-MCP-only, the orchestrator does itself. Missions stay self-contained regardless: MCP is for depth, not for the brief.
 
@@ -94,7 +94,7 @@ Then read a **slice** of `<outfile>`. Codex starts **cold** — a lane needing a
 
 - **`ScheduleWakeup` is the continuation mechanism** — one snapshot per wake, never a poll loop. Size the delay to what you are waiting on (a CI run is minutes; a bake is hours). Re-arm only on a **changed fingerprint**; if nothing moved, extend the delay instead of re-firing at the same cadence.
 - **The wake prompt is a POINTER** — state-file path + "step N NOW" + the one fact that changed since arming. Never the state itself. (Measured: 97 of 170 wake prompts carried ≥1,000 chars of re-serialized state, up to ~6k, because nothing durable survived the turn boundary. `<slug>.state.md` is what makes the pointer sufficient.)
-- **`Monitor` with an until-loop is the sanctioned way to BLOCK on a condition.** Foreground `sleep` is blocked at the tool layer and sleep-bridge poll loops are hook-denied.
+- **External waits end the bounded task.** Write a blocker/wake artifact keyed by the awaited state; a later fresh task checks it once. Foreground sleep and polling loops are forbidden.
 - **`AskUserQuestion`** is how a contested claim, a pre-authorization ask, or a genuine judgment call reaches the human. **`PushNotification`** tells an away operator something now needs them.
 - **`TaskCreate` / `TaskUpdate`** carry per-lane status the operator can see; prefer them to prose status dumps re-typed each turn.
 - **`send_message` is the orch→live-lane transport, and it surfaces as an approval prompt IN THE RECIPIENT** — an unattended lane stalls on it (operator, verbatim: *"Stop sending messages it will make this session stuck."*). Send only from a turn where the operator is present, and **never as the last act of an unattended wake**. For an unattended lane, leave the instruction where the lane reads it on its own next tick — its state file — not in its inbox.
@@ -135,9 +135,14 @@ files, never a whole-repository fingerprint. `send_message` and `interrupt_agent
 for corrections and stopping work. Legacy unmarked calls are valid but receive no protocol-state
 assessment.
 
-1. Run one broad primary wave in parallel. Give each reviewer a self-contained mission and no history, or the smallest slice that contains the evidence.
+The whole manifest is mode-bounded: `moderate` permits at most **two total activations** (one primary,
+one changed-seam closure); `critical` permits at most **five total activations** (up to two primary,
+up to two named investigator/falsifier/security slots, one closure). A named skill may use fewer slots,
+not exceed the mode ceiling. More requires explicit user authorization and a fresh task.
+
+1. Run one broad primary wave. `moderate` allows one primary reviewer; `critical` allows at most two independent primary slots. Each gets a self-contained mission and no history, or the smallest evidence slice. More requires explicit user authorization and a fresh task.
 2. Consolidate and deduplicate once. Falsify the material survivors before fixing them; reviewer output is evidence, not an instruction to apply every finding verbatim.
-3. A named finite skill may run its declared investigator, falsifier, security, or bounded cross-examination stages. Those are parts of the declared protocol, not permission to repeat a completed broad stage.
+3. A named finite skill may use investigator, falsifier, security, or bounded cross-examination slots only within the total mode ceiling. Those are not permission to repeat a completed stage.
 4. After fixes, run one narrow closure pass over the changed seams. Then stop. Backlog non-blocking or cosmetic residue with the evidence already gathered.
 
 Another broad cycle requires explicit user authorization and a fresh task. Do not interrupt and restart the same reviewer, or keep sending follow-ups, without a changed diff, artifact, or final result that justifies the next declared stage.
@@ -160,12 +165,12 @@ Stale, contradicted, or absent input → STOP and re-verify. Never state a routi
 `scripts/spawn-lane.sh` is the lane verb; the operator one-time allowlists it (a session may not invoke `--permission-mode bypassPermissions` directly). Rules, each earned by a real failure:
 
 - **Never pipe the spawn; detach stdin.** `spawn-lane.sh … | tail` can exit 0 with 0 bytes and zero work done. `claude -p --output-format json` ALWAYS emits a final JSON blob — **empty output + exit 0 is proof the lane never ran.**
-- **Chunk by lifecycle step** — background Bash has a runtime cap; a full spec→implement lane gets killed mid-flight. One bounded lane per step, each committing its artifact; the next lane resumes FROM THE BRANCH.
+- **Chunk by lifecycle phase** — background Bash has a runtime cap; a full feature marathon gets killed or accumulates context. Use one fresh bounded task for each of `define`, `build`, and `verify-release`; each resumes from branch artifacts and the proof-obligation ledger.
 - **`--worktree` on first spawn only; `--cwd <existing-worktree>` on every continuation** — a second `--worktree` collides with the locked one.
 - **Verify remotely.** After every lane exit run `git ls-remote --heads origin <branch>` — committed-but-unpushed looks successful and is a stall.
-- **Lanes never run the machine's full verify gate** — they background it and die waiting for a notification a `-p` lane can never receive. Targeted checks, commit, push; **CI is the authoritative gate** and the orchestrator watches it.
+- **Only the `verify-release` phase runs the project gate, exactly once.** Define/build lanes run targeted checks. A headless verifier runs the gate synchronously within its budget or stops with the command artifact; it never backgrounds the gate and waits for a notification.
 - **Deletability claims are HYPOTHESES.** Teardown missions instruct: grep-verify call sites, and "if verification shows the code isn't dead, STOP and report — never weaken a test to make deletion pass."
-- **Mission content:** goal one-liner · issue ref with the acceptance criteria embedded · owned paths + DO-NOT-TOUCH · lifecycle step · the artifact the orchestrator will grade · expected merge tier · `stacked_on:` edge · "NEVER merge to a protected branch, deploy, or touch prod" · "on a 2nd identical tool denial, print `BLOCKED_ON_CLASSIFIER` and stop" (orchestrator then backs off ≥30 min) · "final reply = one JSON status object". Fresh `--session-id`; scrub `CLAUDE_SESSION_ID`/`CLAUDE_CODE_ENTRYPOINT` from the child env. Keep global hooks in the child. The machine-global heavy lock serializes verify/build — cap concurrent heavy lanes at ~2.
+- **Mission content:** goal one-liner · issue ref with acceptance criteria · owned paths + DO-NOT-TOUCH · one lifecycle phase · mode + proof-obligation ledger · artifact to grade · `stacked_on:` edge · "NEVER merge to a protected branch, deploy, or touch prod" · "on a 2nd identical tool denial, print `BLOCKED_ON_CLASSIFIER` and stop" · "final reply = one JSON status object". Fresh `--session-id`; scrub `CLAUDE_SESSION_ID`/`CLAUDE_CODE_ENTRYPOINT` from the child env. Keep global hooks in the child. The machine-global heavy lock serializes verify/build — cap concurrent heavy lanes at ~2.
 
 Interactive lanes (human-driven only) use `prompts/session-template.md` + `prompts/loop-directive.md`. Chip prompts stay lean (≤~900 chars): GOAL / STATE (only facts not in repo law or the ticket) / START HERE (pointers, never pasted bodies) / mission-specific GUARDRAIL.
 
@@ -195,5 +200,5 @@ Read the private overlay if present: `~/.claude/skills-overlay/orchestrator/LEAR
 - ❌ Spawning a chip and calling the lane autonomous — a chip needs a human click.
 - ❌ Piping a lane spawn, or one monolithic spec→implement lane that the runtime cap kills.
 - ❌ Blind-retrying through a safety-classifier or model-outage window — 2nd identical denial ends the lane.
-- ❌ Opening a PR, or retiring a lane, with test-plan tiers still FAIL or unjustified-SKIP (`references/merge-and-retire.md`).
-- ❌ Skipping the test-plan gate because "this feels straightforward" — apply the rubric mechanically.
+- ❌ Opening a PR, or retiring a lane, while proof obligations are non-terminal or lack owned deferral (`references/merge-and-retire.md`).
+- ❌ Turning a moderate proof ledger into exhaustive test enumeration or an autonomous deploy/poll loop.

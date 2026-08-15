@@ -1,109 +1,111 @@
 ---
 license: MIT
 name: spec-test-plan
-description: Generate a lean, E2E-first test plan from a spec. The spine is real staging verification — deploy, run the actual feature/automation the way a customer would, read the logs, confirm customer-facing output. Unit/integration tests only where they're cheap and catch real regressions. No shortcuts, no smoke-test theatre.
+description: Use when a spec needs an executable verification contract. Produces the smallest proof-obligation ledger that covers its acceptance criteria and real runtime risks.
 ---
 
-# Spec Test Plan — E2E / Real-Staging First
+# Spec Test Plan
 
-Produces a test plan whose center of gravity is **proving the feature works in real staging the way a customer experiences it** — not a pyramid of unit tests. The question every plan must answer: *if we deployed this to a customer right now, what would they do, and how do we confirm it actually worked end-to-end?*
+Turn a spec into a compact, executable proof contract. The useful artifact is not a large catalogue of possible tests; it is a short ledger that a verifier will actually execute.
 
-**Trigger:** "generate test plan", "test plan for this spec", "testing plan".
+## Skill memory
 
-## Skill Memory (LEARNINGS)
+Read `LEARNINGS.md` and the private overlay at `~/.claude/skills-overlay/spec-test-plan/LEARNINGS.md` when present. Route operator-private learning to the overlay, project facts to project memory, and universal craft to `/improve-harness`.
 
-**Before starting:** Read `LEARNINGS.md` in this skill directory (curated seed) + the private overlay if present (`~/.claude/skills-overlay/spec-test-plan/LEARNINGS.md`).
+## Choose one mode
 
-**Before ending — route each learning by scope; NEVER append to this repo's committed `LEARNINGS.md`** (full routing: [`docs/skill-memory.md`](../../../docs/skill-memory.md)): operator-private skill craft → the overlay (create if absent); project-specific facts → the project's `.claude/memory/`; universal craft → note it for `/improve-harness` to promote (de-identified) into the seed via PR.
+- `checklist`: trivial or docs-only behavior. Put the exact checks in the implementation/PR artifact; a separate plan file is optional.
+- `moderate`: the default for a normal feature or changed customer/runtime behavior.
+- `critical`: auth, money, deletion, migration, isolation, irreversible state, or another named trust boundary.
 
-## Principles (read first)
+For `moderate` and `critical`, the provisional default is no more than 12 unique proof obligations and 2 customer journeys. These are compression defaults, not safety caps. Exceed either only when `budget_override_reason` names the uncovered acceptance criterion or risk that requires the additional row.
 
-1. **E2E on real staging is the spine, not the tip.** The plan leads with: deploy to staging → run the real feature/automation as a customer would → read the actual logs → confirm the actual customer-facing output. Unit and integration tests are supporting cast — include them only where they're cheap and catch a regression a human would otherwise miss.
-2. **No shortcuts.** A curl against `/health` is not a test. Mocking the thing under test is not a test. "Tests pass locally" is not staging verification. The plan must exercise the real deployed path on real infrastructure with real data flow.
-3. **Understand the system, then test the customer's experience.** Before writing rows, state in 3-5 lines what this feature *is* from the customer's seat and what "working" looks like to them. Every E2E scenario maps to that.
-4. **Lean.** No blast-radius checklists, no state-mutation matrices, no spec-patch feedback commits, no tier taxonomy for its own sake. If a section doesn't help someone verify the feature works, cut it.
+The root author writes the plan. Do not dispatch a mandatory child. A `critical` or genuinely ambiguous plan may receive one fresh Terra-medium, read-only coverage review using `prompts/critical-coverage-reviewer.md`. Use Sol only for one bounded unresolved security, irreversible-architecture, or trust-boundary dispute.
 
-## Flow
+## Read context: index, then select
 
-### 1. Read the spec + the project's test reality
+Read the spec fully. For large project test references, index, then select only the relevant sections and flow entries:
 
-- Read the spec fully.
-- Read `testing/config.md` (project root) if it exists — this is the source of truth for **how to run real tests here**: staging URLs, deploy command, test accounts, E2E runners, how to run an automation, where logs live, known limitations. If it's missing, infer from the codebase and tell the user to create one.
-- Read `testing/flows.json` if it exists — accumulated E2E flow knowledge and gotchas from past cycles. Treat gotchas as blocking operational knowledge (e.g. "wait for `ai_message`, not `step_change`"). Reuse existing flows; don't reinvent them.
+```bash
+rg -n '^## ' testing/config.md
+jq -r '.flows | to_entries[] | [.key, (.value.description // "")] | @tsv' testing/flows.json
+```
 
-Write the 3-5 line "what the customer does / what working looks like" summary now.
+Then extract the named section or keyed flow. For example:
 
-### 2. Extract the customer-facing surfaces (one focused pass)
+```bash
+awk '/^## <selected section>/{on=1; next} /^## /{on=0} on' testing/config.md
+jq '.flows["<selected-flow-key>"]' testing/flows.json
+```
 
-Dispatch **one** agent (`Agent`, `subagent_type: general-purpose`, model `opus`) with the spec + flow context:
+Include the selected known limitations and operational gotchas in the plan. Read an entire large registry only when keyed selection cannot answer the question; record that reason under `## Context selection`.
 
-> Read `<spec-path>` and this flow context. List every way a customer (or the customer's data flowing through the system) experiences this feature end-to-end. For each: what the customer does/triggers, what the system should produce, how you'd observe success on real staging (which UI surface, which log line, which DB/automation result, which channel message). Then list the smallest set of unit/integration tests that catch a real regression the E2E path wouldn't obviously surface. Be concrete — real selectors, real log strings, real commands, real test org (your project's test org, e.g. `acme-e2e`). Flag anything that genuinely needs human setup (third-party dashboard creds, hardware) as a blocking dependency. Deploying to staging is NOT a blocking dependency.
+## Build the proof-obligation ledger
 
-Wait for it.
+Map every acceptance criterion and material runtime risk to one unique row. Prefer existing tests and the narrowest proof that can fail for the intended reason. Add a customer journey only when a local seam check cannot establish the customer-visible outcome. Add a deployed bake only when the merged/deployed substrate is itself part of the claim.
 
-### 3. Write the plan
+Use these kinds:
 
-**Output file:** `<spec-dir>/<spec-name>-test-plan.md`. Structure:
+- `targeted`: focused local or component proof.
+- `invariant`: cheap assertion at a boundary mocks cannot cover.
+- `journey`: one customer-visible path across seams.
+- `project-gate`: the project-authoritative verification command; exactly one row for `moderate`/`critical`.
+- `deployed-bake`: changed runtime seam that requires a named deployed environment.
+
+Do not duplicate the same source and proof in multiple rows. Do not enumerate permutations merely because they exist. Vary cases only when they exercise a distinct contract or failure mode.
+
+## Output
+
+Write `<spec-dir>/<spec-name>-test-plan.md`:
 
 ```markdown
+---
+mode: moderate
+budget_override_reason:
+---
 # Test Plan: <title>
 
-## What working looks like (customer's seat)
-<3-5 lines — the feature from the customer's perspective and the definition of "done">
+## What working means
+<The customer/operator outcome in 2-4 lines.>
 
-## Blocking dependencies
-<only things requiring human action outside the agent — creds, hardware. "Deploy to staging" is NOT one.>
+## Context selection
+- `testing/config.md`: <named sections read>
+- `testing/flows.json`: <keys read>
+- Full-file exception: <reason, or none>
 
-## Prerequisites
-<test org, accounts, env vars/flags, fixtures, flow `requires`. Mark staging deploy steps "(auto-resolvable by spec-test-execute)">
-
-## E2E on staging (the spine)
-| ID | Customer action / trigger | How to run it | Observable success signal | Status |
-|----|---------------------------|---------------|---------------------------|--------|
-| E2E-1 | <what the customer does> | <exact command / browser steps / automation run> | <exact UI text / log line / DB row / channel message to confirm> | PENDING |
-
-For each E2E row, specify:
-- The real runner (Playwright on staging URL, Chrome extension for auth/visual, or the platform's automation runner).
-- **How to read the logs** — exact log group / structured-log query / dashboard page — and what a healthy vs failed run looks like there. Reading logs is part of the test, not optional.
-- Tenant/org variants if behavior differs by org.
-
-## Integration tests (only where they earn their place)
-| ID | What it covers | Why E2E won't catch it | Status |
-
-## Unit tests (cheap regression guards only)
-| ID | What it covers | Status |
-
-## Verification commands
-<exact commands to run each tier, including the staging deploy + health-confirm sequence>
+## Proof-obligation ledger
+| ID | Kind | Source | Proof | Status | Evidence / deferred owner |
+|---|---|---|---|---|---|
+| PO-01 | targeted | AC-1 | `<exact command>` proves <strong assertion> | PENDING | |
+| PO-02 | journey | RISK-auth-callback | <exact runner, safe identity, expected state/log/output> | PENDING | |
+| PO-03 | project-gate | project test contract | `<project command>` once after targeted proofs | PENDING | |
 ```
 
-Rules for the rows:
-- **Specific, not generic** — exact selectors, exact assertions, exact log strings, exact commands.
-- Every E2E scenario names its success signal in something a customer or operator would actually see (rendered output, a channel reply, a portal value, a real log line) — never just "200 OK".
-- Don't pad the unit/integration tables. If the E2E path already proves it, don't duplicate it.
+Every row needs:
 
-### 4. Commit
+- a stable ID;
+- a source reference to an acceptance criterion or named risk;
+- an exact command/journey and a strong assertion;
+- a status from `PENDING`, `PASS`, `FAIL`, `BLOCKED`, `SKIP`, or `DEFERRED`;
+- for `DEFERRED`, `owner: <issue/person>` in the last column.
+
+Escape a literal pipe in a proof command as `\|`; malformed table rows fail validation rather than disappearing from the budget.
+
+Validate the artifact before handoff:
 
 ```bash
-git add <test-plan-file>
-git commit -m "test(<scope>): E2E-first test plan for <spec-name>"
+python3 ~/.claude/skills/spec-test-plan/scripts/validate_plan.py <test-plan.md>
 ```
 
-### 5. Optional Codex coverage check (only for risky specs)
+Commit it with the rest of the define artifact. A separate plan-only commit is optional.
 
-For auth / money / data-migration / deletion specs, dispatch one Codex pass (Bash, `run_in_background: true`, no `&`) to find E2E gaps:
+## Handoff
 
-```bash
-cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
-  -m gpt-5.6-sol --config model_reasoning_effort="high" --config service_tier="fast" \
-  --sandbox read-only \
-  "Read the test plan at <RELATIVE_TEST_PLAN_PATH> and spec at <RELATIVE_SPEC_PATH>. Focus on the E2E-on-staging section. What customer-facing failure modes would these scenarios miss in real staging — env/infra divergence, multi-step chain breaks, format/encoding at boundaries, deploy-time drift, observability gaps where a failure would look like a success? List each: failure scenario, the staging E2E test to add, how to observe it failing. Max 12. Skip unit-test nitpicks." \
-  2>&1 | tee /tmp/codex-cov-$$.txt
-```
-> **Grade this lane by its ARTIFACT before counting it** — exit 0 is not evidence. Invocation flags, the `wc -l` / severity-grep check, and the DEAD vs **BLOCKED-ON-QUOTA** vs REAL classification live in [`docs/codex-lane-contract.md`](../../../docs/codex-lane-contract.md). Measured 2026-08-02/03: 18 of 52 rollouts hit a quota wall while exiting normally; 20 of 52 completed fine, so a dead lane is never proof the runtime is down.
+Return the plan path, mode, row count, journey count, selected context slices, and any budget override. A material planning finding may patch the spec before build. Zero findings require no stub or no-op commit.
 
-Read the output, add the real E2E gaps to the spine, re-commit. Skip this step entirely for low-risk specs.
+## Do not use
 
-## When NOT to use
-- Trivial specs (<50 lines) — a short manual E2E checklist in the PR is enough.
-- Specs with no customer-facing change — a couple of integration tests, skip the E2E spine.
+- Do not create a second adversarial spec review disguised as a test plan.
+- Do not load large registries repeatedly into agents.
+- Do not deploy, poll, or execute the plan here.
+- Do not require one test per consumer, permutation, or severity tier.
