@@ -54,6 +54,19 @@ class TestLifecycleContractTests(unittest.TestCase):
             self.assertIn(text, retire)
         self.assertIn("never rerun local suites", retire)
 
+    def test_substrate_is_confirmed_before_dispatch_and_stated_once(self):
+        # A verify lane dispatched at a SHA no environment carries returns
+        # BLOCKED with zero information, and costs a second lane to locate the
+        # environment (verify_e2_fix -> verify_current_staging_head).
+        core = FILES["SKILL.md"]
+        self.assertIn("Verify the substrate BEFORE dispatch", core)
+        self.assertIn("git branch --contains", core)
+        # One canonical statement: merge-and-retire's resume path points at the
+        # SKILL.md bullet rather than restating the rule a third time.
+        retire = FILES["references/merge-and-retire.md"]
+        self.assertIn("Verify the substrate BEFORE dispatch", retire)
+        self.assertIn("this line is its resume-path pointer", retire)
+
     def test_project_gate_once_and_terminal_or_owned_deferred(self):
         lifecycle = FILES["references/lifecycle.md"]
         self.assertIn("project gate exactly once", lifecycle)

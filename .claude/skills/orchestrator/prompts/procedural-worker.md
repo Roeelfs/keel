@@ -19,7 +19,7 @@ command_groups:
 allowed_write_paths: <none, or exact cache/receipt paths>
 timeout_ms: <realistic whole-pass bound>
 child_lease_ms: <timeout_ms plus a result-publication buffer of at most 60000>
-artifact_dir: <absolute temp/evidence directory>
+artifact_dir: <absolute evidence directory; its basename MUST be <ticket>-<pass-kind>-<short-sha>, e.g. cyn1489-verify-68db987e5>
 
 Start in absolute_cwd and confirm the pinned SHA. Run command groups sequentially. You own every exec session and write_stdin call until the command exits. Save exact commands, timestamps, full stdout/stderr, exit codes, and decisive excerpts under artifact_dir. After each command, atomically update `handoff.json` with the last completed command, current status, remaining command IDs, and artifact paths so lease expiry has a durable handoff. Stop on the first FAIL or BLOCKED result. Do not exceed `child_lease_ms`.
 
@@ -38,3 +38,5 @@ python3 ~/.claude/skills/orchestrator/scripts/validate_procedural_result.py --ex
 ```
 
 The root grades the artifact and SHA, then makes the next decision. It never inherits or polls the worker's process session.
+
+**`artifact_dir`'s basename is a contract, not a convention.** `<ticket>-<pass-kind>-<short-sha>` makes the evidence root the durable record of how many passes a ticket has actually spent: `ls <evidence-root>/<ticket>-verify-*` answers "how many times has this ticket been through the gate" without reading a single session. Every bound in this skill is otherwise per-phase and self-declared, so a new lane **name** mints a fresh budget — `verify_release → verify_release_correction → verify_release_final → verify_release_final_lint → verify_release_harness_fix` is one ticket spending five gate passes, each nominally its first. A ticket-keyed count is the only signal a rename cannot reset. Left as free text this was an unenforced habit and the count was unavailable.

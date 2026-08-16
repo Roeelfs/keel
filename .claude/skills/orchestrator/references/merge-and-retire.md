@@ -28,7 +28,7 @@ Post-merge work contains only proof obligations whose claim depends on merged/de
 
 Run the smallest project-authorized proof against the **changed runtime seam**. Record the assertion, logs/state evidence, and safe test identity. **never rerun local suites** after merge merely because a merge happened.
 
-If deploy completion or another external system is not ready, write one resumable blocker/wake artifact and stop. Do not sleep or poll. A later fresh task resumes by the key above and first confirms the deploy SHA.
+If deploy completion or another external system is not ready, write one resumable blocker/wake artifact and stop. Do not sleep or poll. A later fresh task resumes by the key above and confirms the deploy SHA per SKILL.md §Spawning a headless lane, *Verify the substrate BEFORE dispatch* — that bullet is the canonical statement; this line is its resume-path pointer.
 
 ## Retire gate
 

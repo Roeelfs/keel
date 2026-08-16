@@ -40,6 +40,17 @@ class ProceduralWorkerContractTests(unittest.TestCase):
         ):
             self.assertIn(text, PROMPT)
 
+    def test_artifact_dir_basename_is_a_ticket_keyed_contract(self):
+        # Left as free text, the evidence root could not answer "how many passes
+        # has this ticket spent" — so a per-phase budget was reset by renaming
+        # the lane (verify_release -> _correction -> _final -> _final_lint).
+        for text in (
+            "<ticket>-<pass-kind>-<short-sha>",
+            "is a contract, not a convention",
+            "a rename cannot reset",
+        ):
+            self.assertIn(text, PROMPT)
+
     def test_native_worker_is_fresh_low_effort_and_owns_process(self):
         for text in ('fork_turns: "none"', 'reasoning_effort: "low"', "Terra-low"):
             self.assertIn(text, RUNTIME + PROMPT + ROUTING)
