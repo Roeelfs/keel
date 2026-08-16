@@ -29,6 +29,17 @@ class ProceduralWorkerContractTests(unittest.TestCase):
         ):
             self.assertIn(text, CORE)
 
+    def test_excerpt_carries_every_sub_check_not_only_the_failure(self):
+        # A gate whose output enumerates N/M sub-checks was reported to the root
+        # as one failing line, so the root fixed one check per gate run (five
+        # cyn1489-verify-<sha> evidence dirs for one ticket, 2026-08-15).
+        for text in (
+            "enumerates named sub-checks",
+            "every** sub-check",
+            "one-bit report",
+        ):
+            self.assertIn(text, PROMPT)
+
     def test_native_worker_is_fresh_low_effort_and_owns_process(self):
         for text in ('fork_turns: "none"', 'reasoning_effort: "low"', "Terra-low"):
             self.assertIn(text, RUNTIME + PROMPT + ROUTING)
