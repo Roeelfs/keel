@@ -28,6 +28,13 @@ COMMAND_STATUSES = {"pass", "fail", "blocked"}
 MAX_SUMMARY_BYTES = 65_536
 MAX_EXCERPT_BYTES = 2_048
 
+# An evidence directory is named <ticket>-<pass-kind>-<short-sha> (see
+# prompts/procedural-worker.md). The stem <ticket>-<pass-kind> is the budget key:
+# it is what a lane rename cannot change.
+EVIDENCE_DIR_RE = re.compile(r"^(?P<stem>.+)-(?P<sha>[0-9a-f]{7,40})$")
+# The third FAILING pass on one stem is the treadmill. Two is a correction cycle.
+MAX_FAILING_PASSES = 3
+
 
 def _inside(path: Path, directory: Path) -> bool:
     try:
@@ -136,6 +143,71 @@ def validate_correction(text: str, previous_text: str) -> list[str]:
     return errors
 
 
+def _summary_status(directory: Path) -> str | None:
+    """Terminal status recorded in a sibling evidence dir, or None if unreadable.
+
+    Legacy directories predating the naming contract, half-written passes, and
+    dirs whose summary is absent or malformed all return None. An unreadable
+    sibling is NOT counted as a failure — absence of evidence is not evidence of
+    a failing pass.
+    """
+    for name in ("procedural-summary.json", "summary.json"):
+        candidate = directory / name
+        if not candidate.is_file():
+            continue
+        try:
+            value = json.loads(candidate.read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
+        if isinstance(value, dict):
+            status = value.get("status")
+            return status.lower() if isinstance(status, str) else None
+    return None
+
+
+def validate_pass_budget(pointer: dict[str, object], evidence_root: Path | None = None) -> list[str]:
+    """Refuse a third FAILING pass against one <ticket>-<pass-kind> stem.
+
+    This runs in the validator the root already invokes on every procedural
+    result, which is downstream of all four lane-dispatch substrates (headless
+    `spawn-lane.sh`, raw `codex exec`, native `Agent`/`Workflow`, native Codex
+    `spawn_agent`). A preflight at any single spawn path would cover one of the
+    four and be evaded by substrate choice.
+
+    Only repeated FAILURE counts. Many passing gates on one ticket is
+    convergence, or the sequential runtime carve-out where each ship is verified
+    green — neither is the treadmill this bounds.
+    """
+    if str(pointer.get("status", "")).lower() != "fail":
+        return []
+    artifact = pointer.get("artifact")
+    if not isinstance(artifact, str):
+        return []
+    current = Path(artifact).parent
+    root = evidence_root or current.parent
+    match = EVIDENCE_DIR_RE.match(current.name)
+    if not match:
+        # Non-conforming basename: the budget key does not exist, so there is
+        # nothing to count. validate_text warns about the naming separately.
+        return []
+    stem = match.group("stem")
+    try:
+        siblings = sorted(p for p in root.glob(f"{stem}-*") if p.is_dir() and p != current)
+    except OSError:
+        return []
+    failing = [p for p in siblings if _summary_status(p) == "fail"]
+    if len(failing) + 1 < MAX_FAILING_PASSES:
+        return []
+    names = ", ".join(p.name for p in failing)
+    return [
+        f"pass budget: this is failing pass #{len(failing) + 1} for '{stem}' "
+        f"(prior failing passes: {names}). One fix per gate run is the treadmill — "
+        "each pass costs a full lane and returns one check. Batch EVERY open failure "
+        "from the decisive excerpts into a single fix mission, or escalate to the "
+        "operator. Re-running the gate on another single fix is not the next move."
+    ]
+
+
 def validate_text(text: str, expected_sha: str | None = None) -> list[str]:
     errors: list[str] = []
     if len(text.encode("utf-8")) > 1024:
@@ -176,10 +248,29 @@ def main(argv: list[str]) -> int:
     parser.add_argument("result", type=Path)
     parser.add_argument("--expected-sha")
     parser.add_argument("--previous-result", type=Path)
+    parser.add_argument(
+        "--evidence-root",
+        type=Path,
+        help="directory holding the <ticket>-<pass-kind>-<sha> dirs; defaults to the artifact's grandparent",
+    )
     args = parser.parse_args(argv[1:])
-    errors = validate_text(args.result.read_text(), args.expected_sha)
+    text = args.result.read_text()
+    errors = validate_text(text, args.expected_sha)
     if args.previous_result:
-        errors.extend(validate_correction(args.result.read_text(), args.previous_result.read_text()))
+        errors.extend(validate_correction(text, args.previous_result.read_text()))
+    try:
+        pointer = json.loads(text)
+    except json.JSONDecodeError:
+        pointer = None
+    if isinstance(pointer, dict):
+        errors.extend(validate_pass_budget(pointer, args.evidence_root))
+        artifact = pointer.get("artifact")
+        if isinstance(artifact, str) and not EVIDENCE_DIR_RE.match(Path(artifact).parent.name):
+            print(
+                f"WARN: artifact_dir '{Path(artifact).parent.name}' is not "
+                "<ticket>-<pass-kind>-<short-sha>; this pass is invisible to the pass budget",
+                file=sys.stderr,
+            )
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)

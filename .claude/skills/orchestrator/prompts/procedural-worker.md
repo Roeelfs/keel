@@ -39,4 +39,15 @@ python3 ~/.claude/skills/orchestrator/scripts/validate_procedural_result.py --ex
 
 The root grades the artifact and SHA, then makes the next decision. It never inherits or polls the worker's process session.
 
+That validator also enforces the **pass budget**: the third *failing* pass against one
+`<ticket>-<pass-kind>` stem is refused, naming the prior failing passes. The next move is then to
+batch every open failure from the decisive excerpts into a single fix mission, or escalate — never
+another single fix and another gate run. Only repeated **failure** counts: many passing gates on one
+ticket is convergence, or the sequential runtime carve-out where each ship verifies green, and
+neither trips it. Evidence that predates the naming contract, or whose summary is unreadable, is
+skipped rather than counted — absence of evidence is not evidence of a failing pass. The check lives
+in the validator, which the root runs on **every** procedural result, because that is downstream of
+all four lane-dispatch substrates; a preflight at any single spawn path covers one of the four and is
+evaded by substrate choice.
+
 **`artifact_dir`'s basename is a contract, not a convention.** `<ticket>-<pass-kind>-<short-sha>` makes the evidence root the durable record of how many passes a ticket has actually spent: `ls <evidence-root>/<ticket>-verify-*` answers "how many times has this ticket been through the gate" without reading a single session. Every bound in this skill is otherwise per-phase and self-declared, so a new lane **name** mints a fresh budget — `verify_release → verify_release_correction → verify_release_final → verify_release_final_lint → verify_release_harness_fix` is one ticket spending five gate passes, each nominally its first. A ticket-keyed count is the only signal a rename cannot reset. Left as free text this was an unenforced habit and the count was unavailable.

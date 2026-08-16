@@ -40,6 +40,14 @@ class ProceduralWorkerContractTests(unittest.TestCase):
         ):
             self.assertIn(text, PROMPT)
 
+    def test_pass_budget_is_documented_where_the_worker_contract_lives(self):
+        for text in (
+            "pass budget",
+            "third *failing* pass",
+            "all four lane-dispatch substrates",
+        ):
+            self.assertIn(text, PROMPT)
+
     def test_artifact_dir_basename_is_a_ticket_keyed_contract(self):
         # Left as free text, the evidence root could not answer "how many passes
         # has this ticket spent" — so a per-phase budget was reset by renaming
@@ -129,6 +137,78 @@ class ProceduralWorkerContractTests(unittest.TestCase):
             self.assertTrue(validator.validate_text(json.dumps(value | {"pass_id": "x" * 1100})))
             artifact.write_text("{}")
             self.assertTrue(validator.validate_text(text, "a" * 40))
+
+    def test_pass_budget_refuses_the_third_failing_pass_on_one_stem(self):
+        # cyn1489 spent five gate passes moving one check at a time, because each
+        # new lane name (verify_release -> _correction -> _final -> _final_lint)
+        # minted a fresh per-phase budget. The stem is what a rename cannot change.
+        validator = load_validator()
+
+        def make_dir(root, name, status):
+            directory = Path(root) / name
+            directory.mkdir()
+            if status is not None:
+                (directory / "procedural-summary.json").write_text(json.dumps({"status": status}))
+            return directory
+
+        def pointer_for(directory, status):
+            return {
+                "schema": "procedural-worker/v1",
+                "pass_id": directory.name,
+                "status": status,
+                "head_sha": "c" * 40,
+                "artifact": str(directory / "procedural-summary.json"),
+                "unexpected_writes": [],
+            }
+
+        with tempfile.TemporaryDirectory() as temp:
+            make_dir(temp, "cyn1489-verify-0f770780d", "fail")
+            second = make_dir(temp, "cyn1489-verify-68db987e5", "fail")
+            # Second failing pass is a correction cycle, not the treadmill.
+            self.assertEqual([], validator.validate_pass_budget(pointer_for(second, "fail"), Path(temp)))
+            third = make_dir(temp, "cyn1489-verify-02d19e055", "fail")
+            errors = validator.validate_pass_budget(pointer_for(third, "fail"), Path(temp))
+            self.assertEqual(1, len(errors))
+            self.assertIn("failing pass #3", errors[0])
+            self.assertIn("cyn1489-verify", errors[0])
+            self.assertIn("Batch EVERY open failure", errors[0])
+            # Convergence is not the treadmill: a PASSING gate never trips it,
+            # which is also what keeps the sequential runtime carve-out legal.
+            self.assertEqual([], validator.validate_pass_budget(pointer_for(third, "pass"), Path(temp)))
+            # A different stem has its own budget.
+            other = make_dir(temp, "cyn1490-verify-aaaaaaaaa", "fail")
+            self.assertEqual([], validator.validate_pass_budget(pointer_for(other, "fail"), Path(temp)))
+
+    def test_pass_budget_tolerates_evidence_predating_the_naming_contract(self):
+        # The naming contract is prospective. A legacy or half-written sibling is
+        # unreadable, not a failure — counting it would invent a treadmill.
+        validator = load_validator()
+        with tempfile.TemporaryDirectory() as temp:
+            # Enough unreadable siblings that counting ANY of them as a failure
+            # would trip the budget — otherwise this test cannot detect the bug.
+            for name in ("cyn1489-cyn1490-v30-verify", "cyn1489-verify-0af10d423"):
+                (Path(temp) / name).mkdir()
+            for name in ("cyn1489-verify-0f770780d", "cyn1489-verify-1111111"):
+                (Path(temp) / name).mkdir()
+                (Path(temp) / name / "procedural-summary.json").write_text("{ broken")
+            current = Path(temp) / "cyn1489-verify-68db987e5"
+            current.mkdir()
+            pointer = {
+                "schema": "procedural-worker/v1",
+                "pass_id": "p",
+                "status": "fail",
+                "head_sha": "c" * 40,
+                "artifact": str(current / "procedural-summary.json"),
+                "unexpected_writes": [],
+            }
+            self.assertEqual([], validator.validate_pass_budget(pointer, Path(temp)))
+            # A non-conforming CURRENT dir has no budget key, so nothing is counted.
+            stray = Path(temp) / "adhoc-scratch"
+            stray.mkdir()
+            self.assertEqual(
+                [],
+                validator.validate_pass_budget(pointer | {"artifact": str(stray / "s.json")}, Path(temp)),
+            )
 
     def test_summary_rejects_forged_success_and_unbounded_output(self):
         validator = load_validator()
