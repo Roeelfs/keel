@@ -18,6 +18,8 @@ The deciding test: **do you need a third-party vendor's DOCS, or your own LOGS?*
 
 **Currency self-check** (the gap topic-class can't see): familiarity is not currency. If your memory of a third-party API/SDK/version predates your knowledge cutoff and the work depends on its *current* shape, ground — you won't feel uncertain about a confidently-remembered-but-changed API, so make currency, not familiarity, the trigger. A borderline tie-breaker; it does not override the hard-skips.
 
+**Non-engineering external research grounds too.** Market, regulatory, vendor-sourcing, lodging, investor and GTM questions are external-facing by definition — the hard-skips below do not exclude them, and the catalog carries a Market & real-world tier for them. The DOCS-vs-LOGS test still decides: someone else's published record → ground; your own numbers → skip.
+
 **Hard-skip** (overrides the fire, even when a vendor is named): debugging or baking *your own* runtime — the services, jobs, handlers, sandbox, sign-in, deploys, backups, alarms you operate — where the truth is your own logs + this codebase, not the web; a one-sentence mechanical diff (typo, rename, log line); and pure internal authoring (spec, issue/tracker, memory, PR body, git mechanics).
 
 ## The grounding run — always a dynamic Workflow

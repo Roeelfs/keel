@@ -9,7 +9,7 @@ SEO result — agents measurably drift toward content farms otherwise.
 (measured 2026-08-18: SOURCES.md reached 2 of 29 generated scripts and 2 of 602 lane transcripts).
 **When you edit a row here, update the digest in the same change** — that is the only path by which a row
 reaches a lane. Divergence probe:
-`grep -c 'hn.algolia.com/api/v1/search\|api.deps.dev\|endoflife.date/api/v1' DEEP-WORKFLOW.md` → 3.
+`grep -c 'hn.algolia.com/api/v1/search\|api.deps.dev\|endoflife.date/api/v1\|efts.sec.gov' DEEP-WORKFLOW.md` → 4.
 
 **Pick sources by topic-fit.** Each research lane draws on whichever rows fit its one question — start
 primary, widen to the tier that fits *this* question. A version-currency question opens at Currency &
@@ -194,6 +194,29 @@ defended. A source no agent reaches is fake coverage.
 > a cross-model comparison in one call. HF `/filter` and `/search` fail on lazy indexing; only `/rows` is
 > reliable. Wikipedia is CC BY-SA (attribute if quoted); Wikidata is CC0.
 
+## Tier: Market & real-world
+
+Non-engineering external research is a real and recurring premise class — lodging, vendor sourcing,
+investor research, GTM, regulatory questions — and it produced real briefs
+(`2026-07-16-hotels-airbnb-search-tooling.md`, `2026-08-11-taking-cynap-to-investors.md`,
+`2026-08-11-marketing-gtm-professional-sourcing.md`). The catalog had zero rows for any of it.
+
+| Source | Query it with | Best for | Hit | Transport |
+|--------|---------------|----------|-----|-----------|
+| Federal Register | `https://www.federalregister.gov/api/v1/documents.json?conditions%5Bterm%5D=<term>&per_page=2` → `count`, `results[].{title,publication_date,agencies,html_url}` | US regulatory and policy ground truth, dated | 2026-08-18 | curl, keyless |
+| SEC EDGAR full-text | `https://efts.sec.gov/LATEST/search-index?q=%22<phrase>%22&forms=10-K` → `hits.hits[]._source` | what public companies actually disclose about a market | 2026-08-18 | curl **+ UA required** |
+| SEC company facts | `https://data.sec.gov/submissions/CIK<10-digit-zero-padded>.json` → `sic`, `sicDescription`, `filings.recent` | company identity, filing history | 2026-08-18 | curl **+ UA required** |
+| OpenAlex | `https://api.openalex.org/works?search=<q>&per-page=2&select=id,display_name,publication_year,cited_by_count` | adoption/evidence base for a market claim; institutions and authors | 2026-08-18 | curl, keyless |
+| Crossref | `https://api.crossref.org/works?query=<q>&rows=2&select=title,DOI,created` | literature provenance and dates behind a press claim | 2026-08-18 | curl, keyless |
+| Nominatim / OSM | `https://nominatim.openstreetmap.org/search?q=<query>&format=json&limit=2` | places, lodging, travel, geography | 2026-08-18 | curl **+ UA required** |
+
+> **Both SEC hosts and Nominatim require a descriptive `User-Agent` with contact info** — a bare curl is
+> refused or throttled. Nominatim's usage policy is 1 req/s absolute; do not fan out against it.
+> **`select=` is the difference between 865 B and 66,287 B on OpenAlex** for the identical query — the same
+> smallest-document-that-answers-the-question rule that governs the registry tier.
+> SEC company facts is 164,300 B for one CIK; take `filings.recent` and stop.
+> Wikipedia/Wikidata (Structured knowledge) is usually the cheaper first hop for a definition or an entity.
+
 ## DEAD CHANNELS — do not spend a retry
 
 Recorded so no future lane re-derives them. **Each row names the transport that produced the status** —
@@ -212,6 +235,7 @@ different transports give different answers, and conflating them is how a live c
 | **StackShare** | 429 | WebFetch | — |
 | **swebench.com** | 4.19 MB JS shell | WebFetch | the `swe-bench/experiments` repo |
 | **YouTube transcripts** | silent empty body | WebFetch | InfoQ / USENIX / podcast transcript pages |
+| **GDELT news API** | **429 on both attempts** from this machine — "limit requests to one every 5 seconds". Documented limit, but unproven from a shared egress IP, so treat as unavailable to a fan-out | curl (429 ×2) | Federal Register for policy; a `site:`-scoped WebSearch of a named outlet for press |
 | **Libraries.io** | inverts the credential rule — **no** key returns 200, an **invalid** key returns 403 — and `x-ratelimit-limit` is 10, too tight for a fan-out | curl | deps.dev |
 | **Google Scholar · Papers with Code** | deleted from this catalog 2026-08-18: **zero** events of any kind corpus-wide (0 queries, 0 fetches, 0 citations across 155 briefs); Scholar's recipe was a bot-blocked bare URL | — | arXiv |
 
