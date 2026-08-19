@@ -42,14 +42,49 @@ first, show the user the KILL list, then `--apply`** (or let the user pick).
 
 ## Canonical session names (the important bit)
 
-Do **not** label sessions by worktree slug (`gracious-murdock`) or sid prefix —
-use the title the user sees in the Claude desktop app.
+Do **not** label sessions by worktree slug (`gracious-murdock`) or sid prefix — use the
+title the user sees in the Claude app.
 
-- Live session → `~/.claude/sessions/<pid>.json` → `sessionId` (+ `kind==interactive`, pid alive).
-- Title lives in `~/Library/Application Support/Claude/claude-code-sessions/*/*/local_*.json`.
-- **Join key: the desktop file's `cliSessionId` == the live `sessionId`.** The desktop
-  file's own `sessionId` is a separate `local_*` id — do not join on it. `bridgeSessionIds`
-  is a secondary fallback. Field `title` (+ `titleSource`: `auto`|`user`).
+- Live session -> `~/.claude/sessions/<pid>.json` -> `sessionId` (+ `kind==interactive`, pid alive).
+- **Title = the LAST `custom-title` record in that session's OWN transcript**,
+  `~/.claude/projects/*/<sessionId>.jsonl`, field `customTitle`. Titles get rewritten as a
+  session evolves, so last-one-wins. They arrive HTML-escaped (`&amp;`) — unescape them.
+- That is the same file that supplies idle time, so title and idle can never disagree about
+  which session they describe. No second store, no extra join key.
+- Falls back to the worktree name when a session was never titled or has no transcript yet
+  (both occur live: a brand-new session, and a session whose jsonl has not appeared).
+
+### Do NOT join to the desktop app store (measured 2026-08-19)
+
+`~/Library/Application Support/Claude{,-Work}/claude-code-sessions/*/*/local_*.json` looks
+authoritative — every record carries `title`, `cliSessionId`, `bridgeSessionIds` — and this
+engine used to join on `cliSessionId`. It is dead weight: the newest file was written
+2026-08-16, and **0 of 26 live sessionIds matched any `cliSessionId` / `sessionId` /
+`bridgeSessionIds` key across its 680 records**. Every row silently rendered `(untitled)`,
+which reads as "the user never titled anything" rather than "the join is broken" — no error,
+no receipt. Pinned by `TitleResolution` in the regression tests.
+
+Re-derive the overlap claim before trusting either side of it:
+
+```bash
+python3 - <<'EOF'
+import json, glob, os
+S = os.path.expanduser('~/Library/Application Support/Claude/claude-code-sessions')
+keys = set()
+for f in glob.glob(os.path.join(S, '*', '*', 'local_*.json')):
+    try: d = json.load(open(f))
+    except Exception: continue
+    keys |= {d.get('cliSessionId'), d.get('sessionId')} | set(d.get('bridgeSessionIds') or [])
+live = {json.load(open(f)).get('sessionId')
+        for f in glob.glob(os.path.expanduser('~/.claude/sessions/*.json'))}
+print('overlap:', len(keys & live), 'of', len(live), 'live sessions')
+EOF
+```
+
+If that ever reports a real overlap the store is alive again — but the transcript stays the
+better source: the CLI writes it for **every** session, including ones the desktop app does
+not own. (Inside a Claude session the `ccd_session_mgmt` MCP `list_sessions` is a third,
+live view of the same titles; it is unavailable to this standalone script.)
 
 ## Safety model (never break running work)
 

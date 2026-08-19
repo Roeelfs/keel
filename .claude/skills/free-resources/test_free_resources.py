@@ -238,5 +238,92 @@ class LiveReparentScenario(unittest.TestCase):
                            capture_output=True)
 
 
+import json, shutil, tempfile
+
+
+class TitleResolution(unittest.TestCase):
+    """The 2026-08-19 SILENT regression: every session rendered "(untitled)".
+
+    The engine joined live sessions to the Claude desktop store
+    (~/Library/Application Support/Claude/claude-code-sessions/*/*/local_*.json)
+    on `cliSessionId`. That store stopped being written on this machine — newest
+    file 2026-08-16 — and 0 of 26 live sessionIds matched ANY of its
+    cliSessionId / sessionId / bridgeSessionIds keys across 680 records. The join
+    degraded to "(untitled)" for every row with no error and no receipt, which
+    reads exactly like "the user never titled anything".
+
+    Titles now come from the LAST `custom-title` record in the session's OWN
+    transcript — the same file already used for idle time.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._orig = fr.PROJECTS
+        fr.PROJECTS = self._tmp
+
+    def tearDown(self):
+        fr.PROJECTS = self._orig
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _write(self, sid, lines, project='-Users-roee-repo'):
+        d = os.path.join(self._tmp, project)
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, sid + '.jsonl')
+        with open(p, 'w', encoding='utf-8') as fh:
+            for ln in lines:
+                fh.write((ln if isinstance(ln, str) else json.dumps(ln)) + '\n')
+        return p
+
+    def test_no_desktop_store_dependency(self):
+        """THE regression: a titled session resolves from ~/.claude/projects ALONE,
+        so the dead desktop store can never again silently blank every title."""
+        sid = 'aaaaaaaa-0000-0000-0000-000000000001'
+        self._write(sid, [{'type': 'custom-title', 'customTitle': 'Free resources'}])
+        self.assertEqual(fr.session_title(sid), 'Free resources')
+        self.assertFalse(hasattr(fr, 'DESKTOP_STORE'),
+                         "engine still binds the dead desktop session store")
+
+    def test_last_custom_title_wins(self):
+        """Titles are rewritten as a session evolves; only the newest is current."""
+        sid = 'aaaaaaaa-0000-0000-0000-000000000002'
+        self._write(sid, [{'type': 'custom-title', 'customTitle': 'First guess'},
+                          {'type': 'user', 'message': 'irrelevant'},
+                          {'type': 'custom-title', 'customTitle': 'Root cause analysis'}])
+        self.assertEqual(fr.session_title(sid), 'Root cause analysis')
+
+    def test_html_entities_are_unescaped(self):
+        """Observed live: 'Spec the account &amp; authorization surface'."""
+        sid = 'aaaaaaaa-0000-0000-0000-000000000003'
+        self._write(sid, [{'type': 'custom-title',
+                           'customTitle': 'Spec the account &amp; authorization surface'}])
+        self.assertEqual(fr.session_title(sid),
+                         'Spec the account & authorization surface')
+
+    def test_untitled_session_returns_empty_so_caller_falls_back(self):
+        """Empty (not '(untitled)') — main() falls back to the worktree name."""
+        sid = 'aaaaaaaa-0000-0000-0000-000000000004'
+        self._write(sid, [{'type': 'user', 'message': 'hello'}])
+        self.assertEqual(fr.session_title(sid), '')
+
+    def test_missing_transcript_returns_empty(self):
+        self.assertEqual(fr.session_title('no-such-session-id'), '')
+
+    def test_malformed_lines_do_not_break_resolution(self):
+        """A live transcript's last line is often half-written."""
+        sid = 'aaaaaaaa-0000-0000-0000-000000000005'
+        self._write(sid, ['{"type": "custom-title", "customTitle": "Good title"}',
+                          '{"type": "custom-title", TRUNCA',
+                          'not json at all'])
+        self.assertEqual(fr.session_title(sid), 'Good title')
+
+    def test_idle_and_title_read_the_same_transcript(self):
+        """One file backs both signals, so they can never describe different sessions."""
+        sid = 'aaaaaaaa-0000-0000-0000-000000000006'
+        p = self._write(sid, [{'type': 'custom-title', 'customTitle': 'Same file'}])
+        self.assertEqual(fr.transcript_path(sid), p)
+        self.assertIsNotNone(fr.jsonl_age_seconds(sid))
+        self.assertEqual(fr.session_title(sid), 'Same file')
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

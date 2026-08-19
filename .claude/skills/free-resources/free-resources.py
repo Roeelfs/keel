@@ -4,14 +4,13 @@ free-resources: safely reclaim CPU/RAM/swap on an overloaded Mac by reaping
 orphans/stale dev-servers and CLOSING long-idle Claude Code sessions — never
 touching a session that is actively running work or the one invoking this.
 
-Sessions are resolved to their CANONICAL Claude-desktop title (the name the user
-sees in the app), read from:
-    ~/Library/Application Support/Claude/claude-code-sessions/*/*/local_*.json  (field: title)
-joined by sessionId to the live process from:
-    ~/.claude/sessions/<pid>.json                                              (kind==interactive)
+Sessions are resolved to their CANONICAL title (the name shown in the Claude app),
+read from the LAST `custom-title` record in the session's OWN transcript:
+    ~/.claude/projects/*/<sessionId>.jsonl                            (field: customTitle)
+keyed by sessionId to the live process from:
+    ~/.claude/sessions/<pid>.json                                     (kind==interactive)
 
-Idle time = seconds since the session's transcript jsonl was last written
-    ~/.claude/projects/*/<sessionId>.jsonl
+Idle time = seconds since that same transcript jsonl was last written.
 
 DRY-RUN by default. Pass --apply to actually SIGTERM (then SIGKILL stragglers).
 
@@ -20,10 +19,9 @@ Usage:
     free-resources.py --idle-mins 30 --apply
     free-resources.py --json              # machine-readable session list
 """
-import argparse, json, os, glob, subprocess, collections, re, signal, time
+import argparse, collections, glob, html, json, os, re, signal, subprocess, time
 
 APP_SESSIONS  = os.path.expanduser("~/.claude/sessions")
-DESKTOP_STORE = os.path.expanduser("~/Library/Application Support/Claude/claude-code-sessions")
 PROJECTS      = os.path.expanduser("~/.claude/projects")
 
 # heavy = genuinely-running work that must NOT be interrupted even if idle
@@ -106,38 +104,49 @@ def session_root(pid, ppid, cmd):
     return pid
 
 
-def title_map():
-    """Map every id a live session might present (cliSessionId primary, plus the
-    desktop sessionId and any bridgeSessionIds) -> {title, ...}. The desktop store
-    keys sessions by its own `sessionId` (a `local_*` id); the CLI's sessionId — the
-    one in ~/.claude/sessions/<pid>.json — is stored as `cliSessionId`. Prefer the
-    newest file per key so a stale empty-title duplicate never clobbers a good title."""
-    m = {}
-    for f in glob.glob(os.path.join(DESKTOP_STORE, '*', '*', 'local_*.json')):
-        try:
-            d = json.load(open(f))
-        except Exception:
-            continue
-        rec = {'title': (d.get('title') or '').strip(),
-               'titleSource': d.get('titleSource'),
-               'worktreeName': d.get('worktreeName') or '',
-               'isArchived': bool(d.get('isArchived')),
-               '_at': d.get('lastActivityAt') or os.path.getmtime(f)}
-        keys = [d.get('cliSessionId'), d.get('sessionId')] + list(d.get('bridgeSessionIds') or [])
-        for k in filter(None, keys):
-            prev = m.get(k)
-            # keep the record that actually has a title, else the newest
-            if prev is None or (rec['title'] and not prev['title']) or \
-               (bool(rec['title']) == bool(prev['title']) and rec['_at'] > prev['_at']):
-                m[k] = rec
-    return m
+def transcript_path(sid):
+    """The session's own transcript jsonl — the source for BOTH its idle time and title."""
+    cands = glob.glob(os.path.join(PROJECTS, '*', sid + '.jsonl'))
+    return max(cands, key=os.path.getmtime) if cands else None
+
+
+def session_title(sid):
+    """Canonical title = the LAST `custom-title` record in the session's transcript.
+
+    Read from the transcript rather than the desktop app's own session store
+    (~/Library/Application Support/Claude*/claude-code-sessions/*/*/local_*.json).
+    That store holds only sessions the app itself owns, keys them by a `local_*` id
+    that never matches a live CLI sessionId, and goes stale — on this machine it
+    stopped being written altogether, so every session resolved to "(untitled)".
+    The transcript is authored by the CLI, is keyed by the same sessionId already
+    used for idle time, and exists for every live session.
+
+    Titles arrive HTML-escaped ("account &amp; auth"), so unescape them. Returns ''
+    for a session that has never been titled; the caller falls back to the worktree.
+    """
+    p = transcript_path(sid)
+    if not p:
+        return ''
+    title = ''
+    try:
+        with open(p, errors='replace') as fh:
+            for line in fh:
+                if '"custom-title"' not in line:   # cheap prefilter; parse only candidates
+                    continue
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                if d.get('type') == 'custom-title' and d.get('customTitle'):
+                    title = d['customTitle']       # last one wins — titles get rewritten
+    except OSError:
+        return ''
+    return html.unescape(title).strip()
 
 
 def jsonl_age_seconds(sid):
-    cands = glob.glob(os.path.join(PROJECTS, '*', sid + '.jsonl'))
-    if not cands:
-        return None
-    return time.time() - max(os.path.getmtime(p) for p in cands)
+    p = transcript_path(sid)
+    return None if p is None else time.time() - os.path.getmtime(p)
 
 
 def live_sessions(ppid):
@@ -227,14 +236,12 @@ def main():
     TH = args.idle_mins * 60
 
     ppid, ch, cpu, rss, cmd = load_ps()
-    titles = title_map()
     mypid = os.getpid()
 
     sessions = []
     for s in live_sessions(ppid):
         root = session_root(s['pid'], ppid, cmd)
         tree = subtree(ch, root)
-        meta = titles.get(s['sid'], {})
         wt = ''
         if '/worktrees/' in s['cwd']:
             wt = s['cwd'].split('/worktrees/')[-1].split('/')[0]
@@ -242,9 +249,8 @@ def main():
                  if HEAVY.search(cmd.get(p, '')) and 'mcp' not in cmd.get(p, '').lower()]
         sessions.append({
             'pid': s['pid'], 'root': root, 'sid': s['sid'],
-            'title': meta.get('title') or '(untitled)',
-            'title_source': meta.get('title_source') or meta.get('titleSource'),
-            'worktree': wt or meta.get('worktreeName') or '(main)',
+            'title': session_title(s['sid']) or wt or '(untitled)',
+            'worktree': wt or '(main)',
             'idle_s': jsonl_age_seconds(s['sid']),
             'tree_procs': len(tree), 'tree': tree,
             'tree_cpu': round(sum(cpu.get(p, 0) for p in tree), 1),
@@ -271,12 +277,12 @@ def main():
     targets = [s for s in sessions
                if not s['is_self'] and (s['idle_s'] or 0) >= TH and not s['active_work']]
 
-    print(f"{'IDLE':>7}  {'CANONICAL TITLE':<40} {'PID':>6} {'CPU':>5} {'RSSm':>5}  worktree")
-    print('-' * 104)
+    print(f"{'IDLE':>7}  {'SESSION TITLE':<52} {'PID':>6} {'CPU':>5} {'RSSm':>5}  worktree")
+    print('-' * 116)
     for s in sessions:
         flag = ' [SELF]' if s['is_self'] else (' [ACTIVE-WORK]' if s['active_work'] else '')
         mark = 'KILL ' if s in targets else '     '
-        print(f"{mark}{hms(s['idle_s']):>6}  {s['title'][:40]:<40} {s['pid']:>6} "
+        print(f"{mark}{hms(s['idle_s']):>6}  {s['title'][:52]:<52} {s['pid']:>6} "
               f"{s['tree_cpu']:>5} {s['tree_rss_mb']:>5}  {s['worktree'][:22]}{flag}")
 
     orph, prot_orph, zc = orphans_and_zombies(ppid, ch, cmd)
