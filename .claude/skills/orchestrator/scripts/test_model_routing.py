@@ -80,3 +80,26 @@ class ModelRoutingContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SolJudgmentLaneTests(unittest.TestCase):
+    """Sol is bounded by SHAPE, not by frequency — the distinction the burn data forced."""
+
+    def test_sol_lane_contract_exists_and_is_referenced(self):
+        skill_dir = Path(__file__).resolve().parents[1]
+        lane = (skill_dir / "prompts" / "sol-judgment-lane.md").read_text()
+        for text in (
+            "One question · fresh context · one document · stop",
+            "research-as-retrieval is Terra",
+            "codex-headroom.sh --model falsifier",
+            "You are a leaf agent",
+        ):
+            self.assertIn(text, lane)
+        routing = (skill_dir / "prompts" / "model-routing.md").read_text()
+        self.assertIn("prompts/sol-judgment-lane.md", routing,
+                      "rule 10 must point at the mission contract")
+        self.assertIn("The bound is the SHAPE, not the frequency", routing)
+
+
+if __name__ == "__main__":
+    unittest.main()
