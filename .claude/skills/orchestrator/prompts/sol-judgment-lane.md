@@ -8,11 +8,11 @@ mining, or execution — those stay on Terra or Luna.
 
 **One question · fresh context · one document · stop.**
 
-A Sol lane is a *lane*, never a root. `model-routing.md` rule 10 says this; the burn data says why.
-Measured 2026-08-17: the weekly window went 15% → 100% in four hours, and that burst was **59% root
-sessions** — 37 roots in seven hours. Cost is `turns × context_size × model_weight`. A root
-maximizes the first two terms, so putting the heaviest model on one multiplies the worst case. A
-fresh bounded lane pays the weight exactly once, on the turn where judgment happens.
+A Sol lane is a *lane*, never a root. `model-routing.md` rule 10 says this; the cost formula says why.
+Cost is `turns × context_size × model_weight`. A root maximizes the first two terms, so putting the
+heaviest model on one multiplies the worst case, while a fresh bounded lane pays the weight exactly
+once, on the turn where judgment happens. Roots are few but heavy: measured 2026-08-21, one session
+spawned 30 subagent threads and another produced 81 rollout files, against a median root of 1.
 
 So the rule is not "use Sol sparingly." It is **use Sol freely in this shape, never in the other
 one.**
