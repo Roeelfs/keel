@@ -79,7 +79,11 @@ because a frontier model's wrong answer is the most persuasive kind.
 
 ## Before dispatching
 
-Ask the gate — `codex-headroom.sh --model falsifier` — and honor it. At 99%+ it answers `CLAUDE`, and
-a Sol lane you cannot afford is a Claude lane you did not plan for. The cap has saturated four times
+Ask the gate — `codex-headroom.sh --model falsifier` — and honor it. The gate grades on **pace**
+(usage against the fraction of the weekly window elapsed), not on the absolute number: spending
+evenly reads as 1.0x and never degrades however high the total climbs, while a burst reads high
+immediately. The judgment class does not degrade — past ~2x pace or 90% used it answers `CLAUDE`,
+because a falsifier wave on a mining-tier model returns confident-wrong verdicts, and that is worse
+than no verdict. So a `CLAUDE` answer here means route to fable/opus, not "try again cheaper". The cap has saturated four times
 (2026-07-18, 2026-08-02..05, 2026-08-11, 2026-08-17); a fresh 0% window is as often the aftermath of
 a blowout as it is headroom.
