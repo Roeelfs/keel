@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 INDEX_PATH = Path.home() / ".codex/session_index.jsonl"
 SESSIONS_ROOT = Path.home() / ".codex/sessions"
+ARCHIVED_SESSIONS_ROOT = Path.home() / ".codex/archived_sessions"
 
 
 def cwd_slug() -> str:
@@ -62,6 +63,7 @@ class SessionRecord:
     updated_at: Optional[float] = None
     mtime: Optional[float] = None
     status: str = "unknown"
+    archived: bool = False
     line_count: int = 0
     meta: Dict[str, Any] = field(default_factory=dict)
     turn_context: Dict[str, Any] = field(default_factory=dict)
@@ -88,6 +90,7 @@ class SessionRecord:
             "sid": self.sid,
             "title": self.title,
             "status": self.status,
+            "archived": self.archived,
             "updated_at": self.updated_at,
             "mtime": self.mtime,
             "path": str(self.path) if self.path else None,
@@ -142,9 +145,50 @@ def load_index() -> List[Dict[str, Any]]:
 
 
 def build_transcript_paths() -> List[Path]:
-    if not SESSIONS_ROOT.exists():
-        return []
-    return list(SESSIONS_ROOT.rglob("*.jsonl"))
+    paths: List[Path] = []
+    for root in (SESSIONS_ROOT, ARCHIVED_SESSIONS_ROOT):
+        if root.exists():
+            paths.extend(sorted(root.rglob("*.jsonl")))
+    return paths
+
+
+def is_archived_transcript(path: Path) -> bool:
+    try:
+        path.resolve().relative_to(ARCHIVED_SESSIONS_ROOT.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def parse_transcript_header(path: Path) -> SessionRecord:
+    """Read enough metadata for shallow list output without walking a full rollout."""
+    sid = extract_sid_from_path(path)
+    record = SessionRecord(sid=sid, path=path)
+    try:
+        record.mtime = path.stat().st_mtime
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if obj.get("type") != "session_meta":
+                    continue
+                payload = obj.get("payload", {}) or {}
+                record.sid = str(payload.get("id") or payload.get("session_id") or sid)
+                record.title = str(payload.get("thread_name") or "")
+                record.cwd = payload.get("cwd")
+                record.meta = payload
+                record.updated_at = ts_from_iso(
+                    payload.get("timestamp") or obj.get("timestamp")
+                )
+                break
+    except Exception:
+        pass
+    record.updated_at = record.updated_at or record.mtime
+    record.archived = is_archived_transcript(path)
+    record.status = "archived" if record.archived else "indexed"
+    return record
 
 
 def extract_sid_from_path(path: Path) -> str:
@@ -187,14 +231,13 @@ def find_transcript_for_session(sid: str, cached: Dict[str, Path], index_entry: 
                 cached[sid] = p
                 return p
 
-    root = SESSIONS_ROOT
-    if not root.exists():
-        return None
-
-    matches = list(root.rglob(f"*{sid}*.jsonl"))
-    if matches:
-        cached[sid] = max(matches, key=lambda p: p.stat().st_mtime)
-        return cached[sid]
+    for root in (SESSIONS_ROOT, ARCHIVED_SESSIONS_ROOT):
+        if not root.exists():
+            continue
+        matches = list(root.rglob(f"*{sid}*.jsonl"))
+        if matches:
+            cached[sid] = max(matches, key=lambda p: p.stat().st_mtime)
+            return cached[sid]
 
     # Fallback: scan by session_meta.id
     for path in build_transcript_paths():
@@ -459,6 +502,10 @@ def parse_transcript(path: Path, sid: str) -> SessionRecord:
     else:
         record.status = "idle"
 
+    record.archived = is_archived_transcript(path)
+    if record.archived:
+        record.status = "archived"
+
     return record
 
 
@@ -510,8 +557,6 @@ def collect_sessions(
             if not shallow_match:
                 continue
             sessions.append(rec)
-            if limit and len(sessions) >= limit:
-                break
             continue
 
         if path:
@@ -542,49 +587,75 @@ def collect_sessions(
             continue
 
         sessions.append(rec)
-        if limit and len(sessions) >= limit:
-            break
 
-    if (terms or deep) and (not limit or len(sessions) < limit):
-        seen_paths = {s.path.resolve() for s in sessions if s.path}
-        seen_sids = {s.sid for s in sessions if s.sid}
-        transcript_paths = sorted(
-            build_transcript_paths(),
-            key=lambda p: p.stat().st_mtime if p.exists() else 0.0,
-            reverse=True,
+    seen_paths = {s.path.resolve() for s in sessions if s.path}
+    seen_sids = {s.sid for s in sessions if s.sid}
+    if terms or deep:
+        transcript_paths = build_transcript_paths()
+        live_sids: set[str] = set()
+    else:
+        transcript_paths = (
+            sorted(ARCHIVED_SESSIONS_ROOT.rglob("*.jsonl"))
+            if ARCHIVED_SESSIONS_ROOT.exists()
+            else []
         )
-        for path in transcript_paths:
-            try:
-                mtime = path.stat().st_mtime
-            except Exception:
-                continue
-            if min_ts and mtime < min_ts:
-                continue
-            try:
-                resolved = path.resolve()
-            except Exception:
-                resolved = path
-            if resolved in seen_paths:
-                continue
+        live_sids = (
+            {
+                extract_sid_from_path(path)
+                for path in SESSIONS_ROOT.rglob("*.jsonl")
+            }
+            if SESSIONS_ROOT.exists()
+            else set()
+        )
+    for path in transcript_paths:
+        try:
+            mtime = path.stat().st_mtime
+        except Exception:
+            continue
+        if min_ts and mtime < min_ts:
+            continue
+        try:
+            resolved = path.resolve()
+        except Exception:
+            resolved = path
+        if resolved in seen_paths:
+            continue
 
-            rec = parse_transcript(path, extract_sid_from_path(path))
-            rec.path = path
-            if rec.sid in seen_sids:
-                continue
-            if terms and not match_filter(record_search_blob(rec), terms):
-                continue
+        rec = (
+            parse_transcript(path, extract_sid_from_path(path))
+            if terms or deep
+            else parse_transcript_header(path)
+        )
+        rec.path = path
+        if isinstance(rec.meta.get("source"), dict):
+            continue
+        if rec.sid in seen_sids or rec.sid in live_sids:
+            continue
+        if terms and not match_filter(record_search_blob(rec), terms):
+            continue
 
-            sessions.append(rec)
-            seen_paths.add(resolved)
-            seen_sids.add(rec.sid)
-            if limit and len(sessions) >= limit:
-                break
+        sessions.append(rec)
+        seen_paths.add(resolved)
+        seen_sids.add(rec.sid)
 
     sessions.sort(
         key=lambda record: record.updated_at or record.mtime or 0.0,
         reverse=True,
     )
-    return sessions
+    return sessions[:limit] if limit else sessions
+
+
+def collect_session_by_sid(sid: str) -> List[SessionRecord]:
+    """Resolve one explicit session without walking every indexed task."""
+    path = find_transcript_for_session(sid, {}, {})
+    if not path:
+        return []
+
+    record = parse_transcript(path, extract_sid_from_path(path))
+    record.path = path
+    if not record.sid.startswith(sid):
+        return []
+    return [record]
 
 
 def list_sessions(sessions: List[SessionRecord]) -> None:
@@ -846,11 +917,7 @@ def find_rollout_for_sid(sid: str) -> Optional[Path]:
             p = find_transcript_for_session(eid, cache, entry)
             if p:
                 return p
-    if SESSIONS_ROOT.exists():
-        matches = list(SESSIONS_ROOT.rglob(f"*{sid}*.jsonl"))
-        if matches:
-            return max(matches, key=lambda p: p.stat().st_mtime)
-    return None
+    return find_transcript_for_session(sid, cache, {})
 
 
 def extract_decisions(sid: str, output_path: Path) -> Path:
@@ -1026,13 +1093,25 @@ def main() -> None:
         limit = 25
     if limit == 0:
         limit = None
-    sessions = collect_sessions(
-        args.filter,
-        limit,
-        deep=args.deep or args.command == "mine",
-        since=args.since,
-        days=days,
-    )
+    requested_sid = args.sid if args.command == "survey" else None
+    effective_filter = args.filter or requested_sid
+    if requested_sid:
+        sessions = collect_session_by_sid(requested_sid)
+        if args.filter:
+            terms = [term.lower() for term in args.filter.split() if term]
+            sessions = [
+                session
+                for session in sessions
+                if match_filter(record_search_blob(session), terms)
+            ]
+    else:
+        sessions = collect_sessions(
+            effective_filter,
+            limit,
+            deep=args.deep or args.command == "mine",
+            since=args.since,
+            days=days,
+        )
 
     if args.command == "list":
         list_sessions(sessions)

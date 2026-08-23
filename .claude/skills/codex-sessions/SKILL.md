@@ -1,7 +1,7 @@
 ---
 license: MIT
 name: codex-sessions
-description: Mine local Codex sessions and summarize active and recent sessions. Reports Codex-side session state only; it does NOT own program state — the orchestrator skill owns the program manifest and `<slug>.state.md`.
+description: Mine local Codex sessions and summarize active and recent sessions. Reports Codex-side session state only; it does NOT own program state — the orchestrator skill owns the program manifest and slug state file.
 ---
 
 # codex-sessions
@@ -11,7 +11,8 @@ This skill exposes `python3 ~/.claude/skills/codex-sessions/scripts/sessions.py`
 ## Commands
 
 ### `list`
-Show Codex sessions from local session metadata and optional filters.
+Show Codex sessions from local session metadata and optional filters. Default listing
+includes archive-only rollouts and labels them `archived`; a duplicate live rollout wins.
 
 ```bash
 python3 ~/.claude/skills/codex-sessions/scripts/sessions.py list --filter <project> --limit 20
@@ -67,6 +68,8 @@ The walker maps Codex's event schema onto the shared contract:
 
 ## Notes
 - The script is designed to tolerate partial/missing event fields in transcripts.
+- Transcript discovery covers both `~/.codex/sessions` and
+  `~/.codex/archived_sessions`; archival state does not imply who archived the task.
 - `list` is shallow by default and filters only session id/thread title. Use `--deep` when matching cwd/path is needed.
 - `mine` parses transcripts and defaults to the last 2 days unless `--since` or `--days` is provided.
 - For orchestrator work, run `mine`, then delegate the generated `state-miner-*.md` file to a cheap subagent for the actual synthesis.
