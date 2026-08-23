@@ -136,6 +136,86 @@ Before any unattended stretch, compute the set of work reachable **without a hum
 3. **Deliberate park.** Frontier genuinely empty → ONE wake at the human's expected return with a morning summary and the ready-to-merge stack. Never poll a gate only a human can open.
 4. **Frontier refresh on every event** — a merge, a lane exit, or an operator message re-opens the computation; newly un-gated work dispatches immediately.
 
+## The advance tick — one unattended wake, many lanes
+
+The sections above define the *parts* of autonomy. This is the order they run in when a
+wake fires and nobody is watching. It **composes** those sections; where one of them owns a
+rule, this tick invokes it and does not restate or re-derive it.
+
+Run in this order. The first three are gates on whether the tick may act at all — they come
+**before any tool call**, because an override that is checked after a survey has already
+been violated by the survey.
+
+1. **Terminal stop?** Then zero further tools, zero waits (§Terminal stop override). The
+   tick does not begin.
+2. **Completion-mode freeze?** Prune scope to the declared build task group first
+   (§Completion mode override). No new review or test lane may be dispatched below.
+3. **Owned child active?** That is internal work, not an external wait — continue with
+   latency-sized event waits inside its lease (§Owned child continuation invariant). Do not
+   proceed to step 7 and start something new alongside it.
+4. **Survey once**, cache-diffed (§Per-turn state survey). One snapshot per wake, never a
+   poll loop.
+5. **Classify each lane — artifact and liveness are SEPARATE questions.** Artifact grading
+   is §Grading a lane. Liveness has two known-wrong probes, and both fail toward the
+   expensive error:
+   - `ps aux | grep -c "[c]laude -p"` returns **0 for healthy lanes** — the real command
+     line is `…/bin/claude --permission-mode … -p`, so `claude -p` is never a contiguous
+     substring. Use `ps -eo pid,etime,args | grep "[b]in/claude"`, and **sanity-control it
+     against a lane you know is running before believing any negative.**
+   - A **0-byte output file is not death**: `--output-format json` writes its blob only at
+     exit, so mid-run it is identical to a lane that never started.
+   Measured 2026-08-04: three live lanes were seconds from being declared dead and
+   re-dispatched, which would have raced two writers into one worktree.
+6. **Invoke the existing frontier** (§Autonomous stretches) to compute what is reachable
+   without a human. Do not reimplement that computation here; a second slightly-different
+   copy of it is the defect, not the feature.
+7. **Dispatch ONE forcing function**, within the phase, review-budget and heavy-lane caps
+   (~2 concurrent heavy lanes under the machine-global heavy lock). A dead lane is salvaged
+   before it is replaced — exit 143 with a 0-byte output is SIGTERM under load, and its
+   worktree may hold real uncommitted work; `git -C <worktree> status --porcelain` first.
+   The replacement is a **continuation** carrying the last verified fact, never a replay.
+8. **External readiness gets a keyed wake artifact and a later fresh check** — never a wait
+   held open inside this turn.
+
+### The deploy seam
+
+A build lane **commits and pushes synchronously**; it must never wait on a deploy, a preview
+URL, or CI. Shell poll loops are hook-denied and `ScheduleWakeup` fires into a session that
+no longer exists. Measured 2026-08-03: a lane whose mission implied the deploy was its to
+check spent 105 turns / $6.09, took two denials, opened no PR, and exited 0 promising to
+resume. Put the rule in the mission verbatim: *if you find yourself wanting to wait for a
+deploy, that is the signal you are done — commit, push, report.*
+
+The orchestrator owns **readiness detection**, not the verifying itself: a sleeping root
+verifies nothing, and a wake only triggers an inspection. Confirm the **exact deploy SHA**
+is present in the target environment (§Pre-flight verification); only then dispatch and
+grade a keyed `verify-release`. If the wake fired early and the SHA is absent, no verifier
+runs — retain the keyed wake artifact and end the bounded task.
+
+### Deciding the next wake
+
+Size the delay to the fastest pending change (§Transport). Then:
+
+- Something advancing → re-arm once, at that size.
+- Nothing advancing but work is reachable → dispatch it; do not sleep on work you are
+  allowed to start.
+- Everything reachable is gated on a human → **park**: one wake at the operator's expected
+  return, with the ready-to-merge stack.
+
+**There is no fixed number of idle wakes that means "stalled."** Wake count measures
+scheduler cadence, not progress: at a 10-minute default, three idle wakes parks a healthy
+40-minute build at minute 30, and if a *different* lane causes two-minute wakes the same
+count parks it after six. Continuous log writes produce the opposite failure — a wedged
+loop always looks like it is changing. So bound each lane by its **own lease or checkpoint
+deadline**, and judge movement by a **normalized semantic fingerprint**: artifact existence,
+branch or remote SHA, terminal ledger status, exact deploy-SHA readiness, process
+exit/identity, child result. Raw output bytes and JSONL or log mtimes do not qualify. A wake
+triggered by another lane never counts against a live lane still inside its lease; a lane
+that misses its own deadline is what escalates or gets interrupted.
+
+Record one line per tick in `<slug>.events.jsonl` — what advanced, what was salvaged, what
+is awaited, the next wake. The wake prompt itself stays a pointer.
+
 ## Grading a lane
 
 - **Grade by ARTIFACT, never by the completion envelope.** Before marking a lane done, check the objective thing it was asked to produce — commits on the branch, the named file, the row. A green `subtype:"success"` over **zero commits** is a dead lane (observed: exit 1 on an API 429 after 66 turns and $7.24). Exit 143 + a 0-byte output = SIGTERM under machine load: **salvage the dirty worktree before re-dispatching.** State the artifact in the manifest lane entry and in the mission, so the check is unambiguous.
