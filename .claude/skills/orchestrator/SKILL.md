@@ -101,7 +101,7 @@ A lane goes interactive **only when it needs the human**; everything else runs p
 
 | Runtime | Deliverable | Spawn | Reach for it when |
 |---|---|---|---|
-| **Headless lane** | a branch/PR | `scripts/spawn-lane.sh --mission <file> --cwd <worktree> --model <alias>` via Bash `run_in_background` | anything shippable; unattended stretches; work needing its own context window |
+| **Headless lane** | a branch/PR | `scripts/spawn-lane.sh --mission <file> --cwd <worktree> [--runtime codex] --model <alias>` via Bash `run_in_background` | anything shippable; unattended stretches; work needing its own context window |
 | **Background `Agent` / `Workflow`** | information: report, verdict, map | `Agent` / `Workflow` tools | mining, research, scope audit, cross-lane verification, judge panels |
 | **Codex lane** | an independent review/verify/research/census pass, or a bounded implementation from a written spec | see block below, via Bash `run_in_background` | the lane has a crisp contract and you want it **off the Claude 5-hour window** |
 | **Chip session** | human judgment | `spawn_task` — **requires a human click** | grillings, decision gates, and resurrecting a parked lane the human will personally drive (`sessions-to-chips`) — never a substitute for a headless lane in an unattended stretch |
@@ -112,7 +112,41 @@ cd <repo> && echo '' | codex exec --skip-git-repo-check -m gpt-5.6-terra \
 ```
 > **Grade this lane by its ARTIFACT before counting it** — exit 0 is not evidence. Invocation flags, the `wc -l` / severity-grep check, and the DEAD vs **BLOCKED-ON-QUOTA** vs REAL classification live in [`docs/codex-lane-contract.md`](../../../docs/codex-lane-contract.md). Measured 2026-08-02/03: 18 of 52 rollouts hit a quota wall while exiting normally; 20 of 52 completed fine, so a dead lane is never proof the runtime is down.
 
-Then read a **slice** of `<outfile>`. Codex starts **cold** — a lane needing accumulated conversation, harness state, or MCP servers stays on Claude. Do not route through a Claude subagent that only shells out to Codex; that charges the window you are sparing.
+Then read a **slice** of `<outfile>`. Codex starts **cold** — a lane needing accumulated conversation, harness state, or MCP servers stays on Claude.
+
+### Which runtime a SHIPPABLE lane gets
+
+The headless row takes `--runtime codex`, and it is the default choice for a shippable lane
+whenever the gate allows — the deciding question is *what the lane must do*, not which
+runtime you prefer. Codex is a separate billing pool; Claude time is the scarce one.
+
+**Keep a shippable lane on Claude only when it needs something Codex structurally lacks:**
+accumulated conversation, harness state (`$CLAUDE_SESSION_ID` trailers, the worktree
+registry, chips), MCP servers, or interactive judgment. "It ships" is no longer a reason —
+that was a tooling limit, and it is fixed.
+
+Why it was: until 2026-08-24 no Codex route could commit, so every shippable lane correctly
+fell to Claude and the Codex-first rule failed its metric three cycles running while being
+obeyed. Two blockers, routinely conflated:
+
+- `codex-dispatch.sh` isolates `$HOME` to strip the preamble (~30% off input) and thereby
+  strips git identity and ssh keys. Right for a read-only document lane; disqualifying for
+  one that ships. **`--runtime codex` does not use that wrapper** — so a shipping lane pays
+  the full preamble. That cost is real; keep the wrapper for document lanes.
+- Raw `codex exec -s workspace-write` still cannot commit: the sandbox excludes `.git`, and
+  the lane dies on `fatal: Unable to create .../.git/index.lock: Operation not permitted`.
+  Git **identity** was never the binding constraint — write access to `.git` was.
+
+`spawn-lane.sh` grants the worktree's own `.git` as a writable root, which fixes it
+(verified both directions: with the grant, a lane's commit carried the host identity
+unchanged; without it, the same prompt produced only the `index.lock` error). That grant
+permits history rewriting **inside that worktree** — bounded by one-lane-one-worktree, and
+never widened to a repo root shared with other lanes.
+
+**Stdin discipline binds both runtimes.** `codex exec` with an inherited pipe hangs on
+`Reading additional input from stdin` and never runs the mission — the same class as the
+`claude -p` no-op below, with a different symptom. `spawn-lane.sh` detaches stdin on both
+paths; a hand-rolled `codex exec` must do it too. Do not route through a Claude subagent that only shells out to Codex; that charges the window you are sparing.
 
 **A headless lane is a ROOT session — give it one fresh bounded lifecycle phase.** The no-nested-dispatch rule binds Agent-tool subagents, not lanes, but a phase lane still follows finite review and proof budgets. The orchestrator plans and integrates; it does not run review panels itself.
 
