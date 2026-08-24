@@ -90,8 +90,24 @@ if [ "$RUNTIME" = codex ]; then
   [ -n "$GIT_DIR_PATH" ] || { echo "spawn-lane.sh: --runtime codex must run inside a git repo (--cwd)" >&2; exit 2; }
   ROOTS="\"$GIT_DIR_PATH\""
   [ -n "$GIT_COMMON_PATH" ] && [ "$GIT_COMMON_PATH" != "$GIT_DIR_PATH" ] && ROOTS="$ROOTS,\"$GIT_COMMON_PATH\""
+  # Network access, or the lane commits and can never push — no branch, no PR, and the
+  # whole point of a shippable Codex lane is lost. `workspace-write` is network-DENIED by
+  # default, so this is required, not an optimization.
+  #
+  # It is a genuine widening: the lane can reach the network for the duration. That is the
+  # same posture a Claude lane already runs with, and it is bounded by the mission and the
+  # single worktree — but state it rather than let a reader assume the sandbox still
+  # contains egress.
+  #
+  # VERIFY BY BANNER, NEVER BY THE FLAG. `codex exec` silently ignores unknown `-c` keys and
+  # still exits 0 — a deliberately bogus `sandbox_workspace_write.this_key_does_not_exist`
+  # produced no error and no warning. So "the flag is in the command" is not evidence the
+  # setting took. The startup banner is: with this key it reads
+  #   sandbox: workspace-write [workdir, /tmp, $TMPDIR, ...] (network access enabled)
+  # and without it the parenthetical is simply absent.
   CARGS=( --skip-git-repo-check -m "$MODEL" -s workspace-write
-          -c "sandbox_workspace_write.writable_roots=[$ROOTS]" )
+          -c "sandbox_workspace_write.writable_roots=[$ROOTS]"
+          -c "sandbox_workspace_write.network_access=true" )
   # Same stdin discipline as the claude path, and for the same reason: `codex exec` with an
   # inherited pipe hangs on "Reading additional input from stdin" and never runs the mission.
   if [ "$MISSION_SRC" = "-" ]; then

@@ -74,6 +74,12 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn(f'"{(self.base / ".git").resolve()}"', roots,
                       "the COMMON git dir must be granted or the lane cannot commit")
 
+    def test_codex_runtime_enables_network_access(self):
+        # workspace-write is network-DENIED by default. Without this the lane commits and
+        # can never push: no branch, no PR, and the point of a shippable lane is lost.
+        _, argv = self.spawn(self.base, "--runtime", "codex")
+        self.assertIn("sandbox_workspace_write.network_access=true", argv)
+
     def test_codex_runtime_never_uses_the_home_isolating_wrapper(self):
         # That wrapper strips git identity; a shipping lane must keep it.
         _, argv = self.spawn(self.base, "--runtime", "codex")
