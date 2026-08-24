@@ -4,6 +4,7 @@
 Not phrase-matching: a stub `codex` earlier on PATH records the real argv, so these
 assert the command the script actually builds."""
 
+import json
 import os
 import subprocess
 import tempfile
@@ -74,11 +75,58 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn(f'"{(self.base / ".git").resolve()}"', roots,
                       "the COMMON git dir must be granted or the lane cannot commit")
 
-    def test_codex_runtime_enables_network_access(self):
-        # workspace-write is network-DENIED by default. Without this the lane commits and
-        # can never push: no branch, no PR, and the point of a shippable lane is lost.
+    def test_network_is_DENIED_by_default(self):
+        # The lane must not hold push authority. With HOME preserved, shared git config
+        # granted and network open, it could `git push origin HEAD:main` as easily as its
+        # own branch, gated only by prompt text. Denying egress removes the question.
         _, argv = self.spawn(self.base, "--runtime", "codex")
+        self.assertNotIn("sandbox_workspace_write.network_access=true", argv)
+
+    def test_network_is_opt_in_and_explicit(self):
+        _, argv = self.spawn(self.base, "--runtime", "codex", "--allow-network")
         self.assertIn("sandbox_workspace_write.network_access=true", argv)
+
+    def test_writable_roots_are_json_encoded_not_interpolated(self):
+        # A `"` in a path previously injected ADDITIONAL writable roots (demonstrated
+        # granting ~/.ssh, exit 0, no shell metacharacter needed).
+        evil = self.root / 'ev"il'
+        evil.mkdir()
+        git("init", "-q", ".", cwd=evil)
+        (evil / "s.txt").write_text("s")
+        git("add", "-A", cwd=evil)
+        git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "s", cwd=evil)
+        _, argv = self.spawn(evil, "--runtime", "codex")
+        roots = self.roots(argv)
+        self.assertTrue(roots.startswith("["), roots)
+        parsed = json.loads(roots)
+        self.assertTrue(all(isinstance(r, str) for r in parsed))
+        self.assertTrue(any('ev"il' in r for r in parsed), "the real path must survive encoding")
+        self.assertEqual(len(parsed), 1, "a quote in the path must not inject extra roots")
+
+    def test_a_lane_output_file_is_requested(self):
+        # Claude gets --output-format json so empty output + exit 0 proves it never ran.
+        # docs/codex-lane-contract.md requires -o <outfile> for the same classification.
+        _, argv = self.spawn(self.base, "--runtime", "codex")
+        self.assertIn("-o", argv)
+
+    def test_the_mission_carries_the_session_id_and_no_push_rule(self):
+        _, argv = self.spawn(self.base, "--runtime", "codex")
+        # The stub records one argv element per LINE, so a multi-line mission spans lines;
+        # search the joined text rather than the last line.
+        mission = "\n".join(argv)
+        self.assertIn("Session-Id: codex-lane-", mission)
+        self.assertIn("Do NOT push", mission)
+
+    def test_mcp_config_is_refused_rather_than_silently_dropped(self):
+        cfg = self.root / "m.json"; cfg.write_text("{}")
+        r, _ = self.spawn(self.base, "--runtime", "codex", "--mcp-config", str(cfg))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("claude-only", r.stderr)
+
+    def test_mode_is_refused_rather_than_silently_dropped(self):
+        r, _ = self.spawn(self.base, "--runtime", "codex", "--mode", "acceptEdits")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("claude-only", r.stderr)
 
     def test_codex_runtime_never_uses_the_home_isolating_wrapper(self):
         # That wrapper strips git identity; a shipping lane must keep it.

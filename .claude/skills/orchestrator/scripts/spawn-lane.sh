@@ -41,7 +41,7 @@
 set -euo pipefail
 
 MISSION_SRC="" ; WORKTREE="" ; MODEL="" ; MODE="bypassPermissions" ; LANE_CWD="" ; MCP_CFG=""
-RUNTIME="claude"
+RUNTIME="claude" ; ALLOW_NETWORK=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --mission)    MISSION_SRC="$2"; shift 2 ;;
@@ -49,6 +49,7 @@ while [ $# -gt 0 ]; do
     --worktree)   WORKTREE="$2"; shift 2 ;;
     --model)      MODEL="$2"; shift 2 ;;
     --runtime)    RUNTIME="$2"; shift 2 ;;
+    --allow-network) ALLOW_NETWORK=1; shift 1 ;;
     --mode)       MODE="$2"; shift 2 ;;
     --mcp-config) MCP_CFG="$2"; shift 2 ;;
     *) echo "spawn-lane.sh: unknown arg $1" >&2; exit 2 ;;
@@ -72,42 +73,92 @@ if [ -r "$LANE_HOOK" ]; then . "$LANE_HOOK"; fi
 [ -z "$MCP_CFG" ] && MCP_CFG="${LANE_MCP_CONFIG:-}"
 
 if [ "$RUNTIME" = codex ]; then
-  # The worktree must already exist: Codex has no --worktree equivalent, so the caller
-  # creates it and passes --cwd. Failing loudly beats spawning into the wrong directory.
+  # ---- parity: refuse options this path cannot honor, never accept-and-drop -------------
+  # Accepting a capability-bearing option and then omitting the capability is a dead-lane
+  # defect: a caller asking for a restrictive --mode would get Codex's unrelated defaults,
+  # and LANE_MCP_CONFIG (the documented product of .claude/lane-env.sh, SKILL.md:153) would
+  # become dead data while the skill still promises the lane gets those MCPs.
   [ -n "$WORKTREE" ] && { echo "spawn-lane.sh: --worktree is claude-only; create it first and pass --cwd" >&2; exit 2; }
-  # BOTH git dirs, or a lane in a linked worktree cannot commit. In a linked worktree
-  # --absolute-git-dir is .git/worktrees/<name> (HEAD, index, per-worktree refs) while
-  # objects and refs/heads live in the COMMON dir — and the common dir is outside the
-  # workspace. Granting only the first writes the file and then dies on
-  # `Operation not permitted`, which is the orchestrator's actual shape.
+  [ -n "$MCP_CFG" ] && { echo "spawn-lane.sh: --mcp-config is claude-only; a codex lane gets no MCP servers. Keep this lane on claude." >&2; exit 2; }
+  [ "$MODE" != bypassPermissions ] && { echo "spawn-lane.sh: --mode is claude-only; codex sandboxing is set by this script. Keep this lane on claude." >&2; exit 2; }
+
+  # ---- writable roots: BOTH git dirs, and ENCODED, never interpolated -------------------
+  # Both, because in a linked worktree --absolute-git-dir is .git/worktrees/<name> (HEAD,
+  # index, per-worktree refs) while objects and refs/heads live in the COMMON dir, outside
+  # the workspace. Granting only the first writes the file then dies on
+  # `Operation not permitted` — the orchestrator's actual shape.
   #
-  # This nearly shipped: the first end-to-end test passed because the scratch repo sat
-  # under /tmp, which `workspace-write` grants by DEFAULT (the banner reads
-  # `[workdir, /tmp, $TMPDIR, ...]`). Re-run outside /tmp it failed immediately. Any probe
-  # of this sandbox must live outside /tmp or it proves nothing.
+  # THE COMMON GRANT IS A REAL WIDENING. Do not repeat the earlier claim that it is "bounded
+  # by one-lane-one-worktree" — that was false. The common dir carries every local and
+  # remote-tracking ref, the stash, the object database, shared config, and metadata for
+  # EVERY linked worktree of this repo. It is also a persistence path: a lane can rewrite
+  # `.git/config` to point core.hooksPath at a hook it placed there, so a later git command
+  # in the parent or a sibling worktree would execute lane-authored code outside this
+  # sandbox. What actually bounds the blast radius is that the lane CANNOT PUSH (below), so
+  # damage stays local and is recoverable by discarding the worktree and resetting refs.
+  #
+  # The value is TOML, and it was previously built by pasting the path between literal
+  # quotes. A `"` in a path then injects ADDITIONAL writable roots — demonstrated granting
+  # ~/.ssh with exit 0 and no shell metacharacter. Encode with a real serializer.
   GIT_DIR_PATH="$(git rev-parse --path-format=absolute --absolute-git-dir 2>/dev/null || true)"
   GIT_COMMON_PATH="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
   [ -n "$GIT_DIR_PATH" ] || { echo "spawn-lane.sh: --runtime codex must run inside a git repo (--cwd)" >&2; exit 2; }
-  ROOTS="\"$GIT_DIR_PATH\""
-  [ -n "$GIT_COMMON_PATH" ] && [ "$GIT_COMMON_PATH" != "$GIT_DIR_PATH" ] && ROOTS="$ROOTS,\"$GIT_COMMON_PATH\""
-  # Network access, or the lane commits and can never push — no branch, no PR, and the
-  # whole point of a shippable Codex lane is lost. `workspace-write` is network-DENIED by
-  # default, so this is required, not an optimization.
+  ROOTS_JSON="$(GIT_DIR_PATH="$GIT_DIR_PATH" GIT_COMMON_PATH="$GIT_COMMON_PATH" /usr/bin/python3 -c '
+import json, os, sys
+roots = [os.environ["GIT_DIR_PATH"]]
+common = os.environ.get("GIT_COMMON_PATH") or ""
+if common and common != roots[0]:
+    roots.append(common)
+for r in roots:
+    # A control character cannot appear in a path we are willing to grant; refuse rather
+    # than emit an escape whose handling in the TOML reader we have not verified.
+    if any(ord(c) < 0x20 for c in r):
+        sys.exit("spawn-lane.sh: refusing a git dir containing a control character")
+print(json.dumps(roots))')" || exit 2
+
+  # ---- no push authority ---------------------------------------------------------------
+  # workspace-write is network-DENIED by default and STAYS that way. With HOME preserved,
+  # shared git config granted and network open, a lane would hold the operator's full push
+  # authority with no ref-level restriction — `git push origin HEAD:main` as spellable as
+  # its own branch, gated only by prompt text, against a machine contract that names that
+  # exact command a production verb needing in-session approval. Denying egress removes the
+  # question instead of guarding it.
   #
-  # It is a genuine widening: the lane can reach the network for the duration. That is the
-  # same posture a Claude lane already runs with, and it is bounded by the mission and the
-  # single worktree — but state it rather than let a reader assume the sandbox still
-  # contains egress.
+  # THE SEAM: the lane commits; the ORCHESTRATOR pushes after grading the artifact. That is
+  # the same division the advance tick already uses for deploys.
   #
-  # VERIFY BY BANNER, NEVER BY THE FLAG. `codex exec` silently ignores unknown `-c` keys and
-  # still exits 0 — a deliberately bogus `sandbox_workspace_write.this_key_does_not_exist`
-  # produced no error and no warning. So "the flag is in the command" is not evidence the
-  # setting took. The startup banner is: with this key it reads
-  #   sandbox: workspace-write [workdir, /tmp, $TMPDIR, ...] (network access enabled)
-  # and without it the parenthetical is simply absent.
+  # --allow-network re-opens egress for a lane that genuinely needs it (a package install,
+  # a vendor API). It confers push authority as a side effect. Do not use it to make a lane
+  # "ship by itself"; use it when the WORK needs the network, and grade what it pushed.
   CARGS=( --skip-git-repo-check -m "$MODEL" -s workspace-write
-          -c "sandbox_workspace_write.writable_roots=[$ROOTS]"
-          -c "sandbox_workspace_write.network_access=true" )
+          -c "sandbox_workspace_write.writable_roots=$ROOTS_JSON" )
+  if [ "$ALLOW_NETWORK" = 1 ]; then
+    CARGS+=( -c "sandbox_workspace_write.network_access=true" )
+  fi
+
+  # ---- dead-lane signal ----------------------------------------------------------------
+  # The claude path gets --output-format json, so empty stdout + exit 0 proves it never ran.
+  # Codex has no equivalent unless asked: docs/codex-lane-contract.md requires -o <outfile>
+  # and grades THAT to separate DEAD from BLOCKED-ON-QUOTA. Without it a caller has no
+  # runtime-health signal at all.
+  LANE_OUT="${LANE_OUT:-${TMPDIR:-/tmp}/codex-lane-$(uuidgen | tr 'A-Z' 'a-z').json}"
+  CARGS+=( -o "$LANE_OUT" )
+  echo "spawn-lane.sh: codex lane output -> $LANE_OUT" >&2
+
+  # ---- Session-Id trailer --------------------------------------------------------------
+  # ~/.codex/AGENTS.md requires every Codex commit to carry a Session-Id trailer, and no
+  # commit-msg hook exists here to add one. The launcher cannot force the model's git
+  # invocation, so it does the two things it CAN do deterministically: mint a stable lane
+  # key, and state the requirement in the mission every single time.
+  LANE_KEY="codex-lane-$(uuidgen | tr 'A-Z' 'a-z')"
+  MISSION="$MISSION
+
+--- appended by spawn-lane.sh (non-negotiable) ---
+Every commit you make MUST carry this git trailer, or it is invalid on this machine:
+  --trailer \"Session-Id: $LANE_KEY\"
+Do NOT push, open a PR, or touch a remote. Commit locally and report your branch and SHAs;
+the orchestrator pushes after grading. If you find yourself wanting to push, you are done."
+
   # Same stdin discipline as the claude path, and for the same reason: `codex exec` with an
   # inherited pipe hangs on "Reading additional input from stdin" and never runs the mission.
   if [ "$MISSION_SRC" = "-" ]; then

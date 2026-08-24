@@ -116,14 +116,30 @@ Then read a **slice** of `<outfile>`. Codex starts **cold** — a lane needing a
 
 ### Which runtime a SHIPPABLE lane gets
 
-The headless row takes `--runtime codex`, and it is the default choice for a shippable lane
-whenever the gate allows — the deciding question is *what the lane must do*, not which
-runtime you prefer. Codex is a separate billing pool; Claude time is the scarce one.
+The headless row takes `--runtime codex`. Codex is a separate billing pool and Claude time is
+the scarce one, so reach for it whenever the lane's work fits — but it is **not** an
+unconditional default, and the seam is narrower than "it ships":
 
-**Keep a shippable lane on Claude only when it needs something Codex structurally lacks:**
-accumulated conversation, harness state (`$CLAUDE_SESSION_ID` trailers, the worktree
-registry, chips), MCP servers, or interactive judgment. "It ships" is no longer a reason —
-that was a tooling limit, and it is fixed.
+**A Codex lane commits; it does not push.** Egress is denied by default, so the lane has no
+push authority at all, and the orchestrator pushes after grading the artifact — the same
+division the advance tick already uses for deploys. `--allow-network` re-opens egress when
+the WORK needs it (a package install, a vendor API); it confers push authority as a side
+effect, so grade what such a lane pushed.
+
+**Keep a lane on Claude when it needs:** MCP servers (a Codex lane gets none — the launcher
+refuses `--mcp-config` rather than dropping it), a permission mode other than the sandbox
+this script sets, accumulated conversation, or interactive judgment.
+
+**Two contracts a Codex lane must satisfy, both handled by the launcher:** every commit
+carries a `Session-Id:` trailer (it mints a lane key and states the requirement in the
+mission), and the lane writes an `-o` outfile so a caller can separate DEAD from
+BLOCKED-ON-QUOTA per [`docs/codex-lane-contract.md`](../../../docs/codex-lane-contract.md).
+
+**Repo hooks are a preflight condition, not parity.** This repo's `post-checkout`/`post-merge`
+run `wire-skills.sh`, which writes `$HOME/.claude`, `$HOME/.codex` and `$HOME/.agents` — none
+of them writable to a Codex lane — and both hooks swallow the failure with `|| true`. Check
+what a repo's hooks actually touch before assuming a Codex lane reproduces a Claude lane's
+side effects.
 
 Why it was: until 2026-08-24 no Codex route could commit, so every shippable lane correctly
 fell to Claude and the Codex-first rule failed its metric three cycles running while being
@@ -137,11 +153,19 @@ obeyed. Two blockers, routinely conflated:
   the lane dies on `fatal: Unable to create .../.git/index.lock: Operation not permitted`.
   Git **identity** was never the binding constraint — write access to `.git` was.
 
-`spawn-lane.sh` grants the worktree's own `.git` as a writable root, which fixes it
-(verified both directions: with the grant, a lane's commit carried the host identity
-unchanged; without it, the same prompt produced only the `index.lock` error). That grant
-permits history rewriting **inside that worktree** — bounded by one-lane-one-worktree, and
-never widened to a repo root shared with other lanes.
+`spawn-lane.sh` grants both git dirs as writable roots, which fixes it (verified both
+directions: with the grant a lane's commit carried the host identity unchanged; without it
+the same prompt produced only the `index.lock` error).
+
+**That grant is a real widening — do not describe it as bounded to one worktree.** An earlier
+version of this text said exactly that and it was false: the common dir carries every local
+and remote-tracking ref, the stash, the object database, shared config, and metadata for
+*every* linked worktree of the repo. It is also a persistence path — a lane can rewrite
+`.git/config` to point `core.hooksPath` at a hook it placed there, so a later git command in
+the parent or a sibling worktree would execute lane-authored code outside the sandbox. What
+actually bounds the blast radius is that **the lane cannot push**: damage stays local and is
+recoverable by discarding the worktree and resetting refs. That is why egress is denied by
+default rather than guarded.
 
 **Stdin discipline binds both runtimes.** `codex exec` with an inherited pipe hangs on
 `Reading additional input from stdin` and never runs the mission — the same class as the
