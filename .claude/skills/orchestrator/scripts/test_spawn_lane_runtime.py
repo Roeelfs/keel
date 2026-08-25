@@ -74,6 +74,17 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("worktrees/lane", roots, "per-worktree git dir must be granted")
         self.assertIn(f'"{(self.base / ".git").resolve()}"', roots,
                       "the COMMON git dir must be granted or the lane cannot commit")
+        # CLOSED SET, not a floor. The two assertIn calls above name WHICH paths must be
+        # granted; on their own they are blind to a THIRD root being added later — a
+        # silent widening of the sandbox. Measured 2026-08-25: adding an unconditional
+        # third root is caught by test_writable_roots_are_json_encoded_not_interpolated's
+        # existing assertEqual(len(parsed), 1), but adding one inside the linked-worktree
+        # branch left all 13 tests green. Cardinality closes that hole; keep both
+        # assertIn calls, because cardinality alone would not say which two.
+        parsed = json.loads(roots)
+        self.assertEqual(len(parsed), 2,
+                         "a linked worktree must grant exactly the per-worktree dir and "
+                         "the common dir, nothing else")
 
     def test_network_is_DENIED_by_default(self):
         # The lane must not hold push authority. With HOME preserved, shared git config
