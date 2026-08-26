@@ -64,6 +64,11 @@ Outputs:
 
 Readiness failures end with a blocker/resume artifact; they do not start polling. Release remains subject to the project's human/prod gates.
 
+When the project declares a verification-key function, the one manual project gate
+runs through its receipt-owning wrapper. Reuse requires the identical project key,
+verifier command, and semantic green assertions. A receipt never suppresses a
+production, pre-push, or deploy gate; those run forced.
+
 Status meanings are strict across the ledger and whole-program handoff:
 
 - `FAIL` means an owned code, test, or harness defect.

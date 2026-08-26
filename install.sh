@@ -111,6 +111,7 @@ echo ""
 echo "Optional: 'with-heavy-lock' on your PATH lets the serialize-heavy-ops hook"
 echo "enforce the machine-global lock. To install it:"
 echo "    sudo cp \"$TARGET/tooling/sandbox/with-heavy-lock\" /usr/local/bin/ && sudo chmod +x /usr/local/bin/with-heavy-lock"
+echo "    sudo cp \"$TARGET/tooling/sandbox/with-verification-receipt\" /usr/local/bin/ && sudo chmod +x /usr/local/bin/with-verification-receipt"
 
 # ---------------------------------------------------------------------------
 # 3. Optional: reaper timer

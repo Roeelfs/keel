@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# Run one project-declared verification command and reuse only an identical green receipt.
+# The project owns --key; this wrapper owns serialization, output assertions, and receipt IO.
+set -uo pipefail
+
+usage() {
+  echo "usage: with-verification-receipt --name NAME --key KEY [--require-output REGEX]... [--force] -- COMMAND [ARG...]" >&2
+  exit 64
+}
+
+name=""
+key=""
+force=""
+declare -a required_output=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --name) [ $# -ge 2 ] || usage; name=$2; shift 2 ;;
+    --key) [ $# -ge 2 ] || usage; key=$2; shift 2 ;;
+    --require-output) [ $# -ge 2 ] || usage; required_output+=("$2"); shift 2 ;;
+    --force) force=1; shift ;;
+    --) shift; break ;;
+    *) usage ;;
+  esac
+done
+
+[ -n "$name" ] && [ -n "$key" ] && [ $# -gt 0 ] || usage
+case "$name" in *[!A-Za-z0-9._-]*) usage ;; esac
+
+receipt_root=${VERIFICATION_RECEIPT_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/codex/verification-receipts}
+mkdir -p "$receipt_root" || exit 70
+chmod 700 "$receipt_root" 2>/dev/null || true
+
+identity=$(
+  {
+    printf '%s\0' "$name" "$key" "--requirements--"
+    printf '%s\0' "${required_output[@]}"
+    printf '%s\0' "--command--" "$@"
+  } | shasum -a 256 | awk '{print $1}'
+)
+receipt="$receipt_root/$name-$identity.json"
+lease="$receipt_root/$name.lock"
+log=$(mktemp "${TMPDIR:-/tmp}/verification-receipt.XXXXXX") || exit 70
+cleanup() { rm -f -- "$log"; }
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+
+if ! command -v flock >/dev/null 2>&1; then
+  echo "verification receipt: flock is required; refusing an unlocked receipt race" >&2
+  exit 69
+fi
+exec 201>"$lease"
+if ! flock -n 201; then
+  echo "verification receipt: queued behind $name" >&2
+  flock 201
+fi
+
+receipt_is_valid() {
+  python3 - "$receipt" "$name" "$identity" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        value = json.load(stream)
+    valid = (
+        value.get("schema") == 1
+        and value.get("name") == sys.argv[2]
+        and value.get("identity") == sys.argv[3]
+        and isinstance(value.get("output_sha256"), str)
+        and len(value["output_sha256"]) == 64
+    )
+except (OSError, ValueError, AttributeError):
+    valid = False
+raise SystemExit(0 if valid else 1)
+PY
+}
+
+if [ -z "$force" ] && [ -f "$receipt" ] && receipt_is_valid; then
+  echo "verification receipt: reusing green receipt for $name ($identity)" >&2
+  exit 0
+fi
+
+lock_command=${VERIFICATION_LOCK_COMMAND:-with-heavy-lock}
+set +e
+"$lock_command" "$@" 2>&1 | tee "$log"
+status=${PIPESTATUS[0]}
+set -e
+[ "$status" -eq 0 ] || exit "$status"
+
+for pattern in "${required_output[@]}"; do
+  if ! grep -Eq -- "$pattern" "$log"; then
+    echo "verification receipt: semantic success assertion missing: $pattern" >&2
+    exit 65
+  fi
+done
+
+output_sha=$(shasum -a 256 "$log" | awk '{print $1}')
+temporary="$receipt.tmp.$$"
+python3 - "$temporary" "$name" "$identity" "$output_sha" <<'PY'
+import json, os, sys
+from datetime import datetime, timezone
+path, name, identity, output_sha = sys.argv[1:]
+with open(path, "w", encoding="utf-8") as stream:
+    json.dump({
+        "schema": 1,
+        "name": name,
+        "identity": identity,
+        "output_sha256": output_sha,
+        "green_at": datetime.now(timezone.utc).isoformat(),
+    }, stream, sort_keys=True)
+    stream.write("\n")
+os.chmod(path, 0o600)
+PY
+mv -f -- "$temporary" "$receipt"
+echo "verification receipt: recorded green receipt for $name ($identity)" >&2

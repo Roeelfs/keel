@@ -60,12 +60,19 @@ your claims. The `PreToolUse` hook enforces the heavy-op lock.
 ```bash
 # Let the serialize-heavy-ops hook enforce the lock by putting the wrapper on PATH:
 sudo cp tooling/sandbox/with-heavy-lock /usr/local/bin/ && sudo chmod +x /usr/local/bin/with-heavy-lock
+sudo cp tooling/sandbox/with-verification-receipt /usr/local/bin/ && sudo chmod +x /usr/local/bin/with-verification-receipt
 
 # (macOS / Linux) install the crashed-session reaper timer — see:
 cat tooling/workflow/install/README.md
 ```
 
 If you don't have `flock` (macOS): `brew install flock`.
+
+Projects with an expensive full gate should declare a conservative verification key
+and run that gate through `with-verification-receipt`. The wrapper queues through the
+heavy lock, records a receipt only after exit-code and output assertions pass, and
+reuses it only for the identical project key plus command. Production hooks should
+use `--force`; a receipt never replaces the final deploy gate.
 
 ## 5. Run the flow
 

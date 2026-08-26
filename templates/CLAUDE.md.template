@@ -90,6 +90,9 @@ quality bar — e.g. "correctness over speed", "never lose customer data".}}
 - Heavy ops (tests, builds, installs) run under `with-heavy-lock` so parallel
   sessions queue instead of melting the machine. The `serialize-heavy-ops` hook
   enforces this.
+- If the project declares a full-gate verification key, run manual full gates through
+  `with-verification-receipt`. Reuse only an identical green key+command receipt;
+  production/pre-push gates run with `--force` and are never bypassed by a receipt.
 - Worktrees live under {{`.worktrees/` or your convention}}; launch the agent from
   the main checkout, then `cd` into the worktree.
 
