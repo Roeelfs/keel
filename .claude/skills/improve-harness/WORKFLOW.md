@@ -79,6 +79,23 @@ not throw them away.
 **No silent caps.** A lane that verifies only the top N claims logs the N it dropped. An undropped
 claim and an unverified one are different facts, and only the log distinguishes them.
 
+**And the cap you must actually fear is in the ORCHESTRATOR, not the lanes.** Never
+`.slice()` lane results into a synthesis prompt. Measured 2026-08-26 (`wf_89dbd38c-fd4`):
+`JSON.stringify(alive).slice(0, 60000)` fed the synthesis 4 of 7 lanes; the dropped
+`define-phase` lane held the run's actual answer (define→build gap median 36.55h, p90
+155.95h). The program then *claimed* "all 7 lanes were recovered from journal.jsonl" — read,
+yes; carried, no. **A claim of coverage is indistinguishable from coverage until you diff the
+two artifacts**, which is why this is a command and not a rule:
+
+```sh
+python3 tooling/workflow/lane_coverage_check.py --journal <wf>/journal.jsonl --program <program.md>
+```
+
+It fails naming any dispatched lane the program does not cite, and any lane that died. Run it
+before step 3; a program that has not passed it is not a program. (v1 of that checker judged
+coverage over the whole payload and PASSED its own negative control — incidental path/date
+matches certified a dropped lane. It now judges the lane's CLAIM fields and needs ≥2 tokens.)
+
 ---
 
 ## Launching
