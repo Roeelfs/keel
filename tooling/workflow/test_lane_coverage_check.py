@@ -59,7 +59,7 @@ class LaneCoverage(unittest.TestCase):
         rc, out = run(rows, program)
         self.assertEqual(rc, 0, out)
 
-    def test_lane_death_fails_even_when_survivors_are_cited(self):
+    def test_undisclosed_lane_death_fails_and_is_named(self):
         """dispatched > completed must never read as clean."""
         rows = [
             {"type": "started", "label": "falsify:p1"},
@@ -69,7 +69,22 @@ class LaneCoverage(unittest.TestCase):
         ]
         rc, out = run(rows, "falsify:p1 REJECT — the call site at 693 makes it green; 262 runs.")
         self.assertEqual(rc, 1, out)
+        self.assertIn("falsify:p4p5", out)
         self.assertIn("never returned", out)
+
+    def test_disclosed_lane_death_passes(self):
+        """A gate that cannot be satisfied gets ignored. Disclosure is the requirement."""
+        rows = [
+            {"type": "started", "label": "falsify:p1"},
+            {"type": "started", "label": "falsify:p4p5"},
+            lane("falsify:p1", verdict="REJECT",
+                 reason="return 0 at line 693 is a false green; 262 runs, 21.62h"),
+        ]
+        program = ("falsify:p1 REJECT — the call site at 693 makes it green; 262 runs. "
+                   "Lane falsify:p4p5 DIED (StructuredOutput retry cap); that axis is UNTESTED.")
+        rc, out = run(rows, program)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("is disclosed", out)
 
     def test_generic_numbers_do_not_count_as_citation(self):
         """A program that shares only stopwords/small ints with a lane is NOT citing it."""

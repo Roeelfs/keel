@@ -69,10 +69,19 @@ def distinctive_tokens(payload: object) -> set[str]:
     return {t for t in _TOKEN_RE.findall(text) if t not in _STOPWORDS and len(t) >= 3}
 
 
-def load_journal(path: str) -> tuple[list[dict], int, int]:
-    """Return (result rows, started count, malformed line count)."""
+def row_id(row: dict) -> str | None:
+    """Stable identity shared between a `started` row and its `result` row."""
+    for key in ("agentId", "id", "label", "agentLabel", "name"):
+        value = row.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def load_journal(path: str) -> tuple[list[dict], list[str], int]:
+    """Return (result rows, started identities, malformed line count)."""
     results: list[dict] = []
-    started = 0
+    started: list[str] = []
     malformed = 0
     with open(path, encoding="utf-8") as fh:
         for line in fh:
@@ -88,7 +97,8 @@ def load_journal(path: str) -> tuple[list[dict], int, int]:
             if kind == "result":
                 results.append(obj)
             elif kind in ("started", "start", "dispatch"):
-                started += 1
+                ident = row_id(obj)
+                started.append(ident if ident else f"<unidentified#{len(started)}>")
     return results, started, malformed
 
 
@@ -150,18 +160,29 @@ def main() -> int:
         else:
             uncited.append((name, len(tokens)))
 
-    died = max(0, started - len(results)) if started else 0
+    # A lane that DIED must be named in the program by its identifier. Counting deaths alone
+    # makes the gate permanently red on any run that had one, and a gate that cannot be
+    # satisfied is a gate that gets ignored — the same defect as a check that is red on every
+    # worktree. Disclosure is the satisfiable, and correct, requirement.
+    returned = {row_id(r) for r in results if row_id(r)}
+    dead = [ident for ident in started if ident not in returned]
+    dead_undisclosed = [ident for ident in dead if ident not in program]
 
-    print(f"lane-coverage: dispatched={started or 'unknown'} completed={len(results)} "
-          f"cited={len(cited)} uncited={len(uncited)} tokenless={len(tokenless)} died={died}")
+    print(f"lane-coverage: dispatched={len(started) or 'unknown'} completed={len(results)} "
+          f"cited={len(cited)} uncited={len(uncited)} tokenless={len(tokenless)} "
+          f"died={len(dead)} undisclosed_deaths={len(dead_undisclosed)}")
     if malformed:
         print(f"lane-coverage: {malformed} malformed journal line(s) skipped")
 
     ok = True
-    if died:
-        print(f"lane-coverage: FAIL — {died} lane(s) dispatched but never returned. "
-              f"A lane death is not a clean verdict; say so in the program.")
+    for ident in dead_undisclosed:
+        print(f"lane-coverage: FAIL — lane '{ident}' was dispatched and never returned, and the "
+              f"program does not name it. A lane death is not a clean verdict: record it with "
+              f"its identifier and say which axis went untested.")
         ok = False
+    for ident in dead:
+        if ident not in dead_undisclosed:
+            print(f"lane-coverage: ok — death of '{ident}' is disclosed in the program.")
     for name, count in uncited:
         print(f"lane-coverage: FAIL — lane '{name}' is not cited anywhere in the program "
               f"({count} distinctive tokens, none present). Either carry its finding or "
