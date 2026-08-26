@@ -17,16 +17,22 @@ const INCIDENTS = ARGS.incidents // [{id,title,introduced_by,fixed_by,summary,co
 const PIN = 'RCA only — read-only; ground every claim in the actual `git show` of the introducing+fixing commit; no mutation, no nested dispatch, no log confabulation.'
 
 const RCA = { type:'object', additionalProperties:false,
-  required:['incident_id','root_cause','failure_class','blast_radius','why_passed_local_green','earliest_cheap_signal','shared_substrate','confidence','evidence'], properties:{
+  required:['incident_id','root_cause','failure_class','blast_radius','why_passed_local_green','earliest_cheap_signal','shared_substrate','confidence','evidence','readiness_claim','production_path','harness_path','path_gap','earliest_unmockable_signal','mutation_that_must_fail'], properties:{
   incident_id:{type:'string'}, root_cause:{type:'string',description:'mechanism grounded in the diff'},
   failure_class:{type:'string'}, blast_radius:{enum:['prod-outage','customer-facing','security','data-correctness','cosmetic','internal-only']},
   why_passed_local_green:{type:'string',description:'THE crux — why tsc+vitest were green'},
   earliest_cheap_signal:{type:'string',description:'cheapest gate that would have caught it pre-merge'},
   shared_substrate:{type:'string',description:'hot-zone file/cluster or "isolated"'},
-  parallel_session_factor:{type:'string'}, confidence:{enum:['high','med','low']}, evidence:{type:'string'} }}
+  parallel_session_factor:{type:'string'}, confidence:{enum:['high','med','low']}, evidence:{type:'string'},
+  readiness_claim:{type:'string',description:'the exact automated readiness claim that was green'},
+  production_path:{type:'string',description:'ordered real runtime path from entrypoint through persistence/integration/rendering'},
+  harness_path:{type:'string',description:'ordered path actually traversed by the automated evidence'},
+  path_gap:{type:'string',description:'first material divergence between production_path and harness_path; generic coverage prose is invalid'},
+  earliest_unmockable_signal:{type:'string',description:'first observation at a real persistence, policy, provider, or rendered-browser seam'},
+  mutation_that_must_fail:{type:'string',description:'escaped-defect mutation plus the readiness plane/gate that must emit FAIL/NO_GO'} }}
 phase('RCA')
 const rcas = await parallel(INCIDENTS.map(i=>()=>agent(
-  `${PIN}\nRoot-cause ONE regression: ${JSON.stringify(i)}. \`git show --stat <sha>\` + \`git show <sha> -- <files>\` for BOTH the introducing and fixing commit — the pair reveals the mechanism. Pin deploy-timestamp-vs-onset (a PR deployed AFTER onset is exonerated) and read terminal status (your run-ledger / logs) before theorizing. The two questions that matter MOST: (A) WHY did local green (tsc + local vitest) NOT catch this? (B) what is the CHEAPEST signal — test/lint/ci-gate/one-flow bake — that would have caught it before the bad merge? Verify any prior memory claim against the actual diff.`,
+  `${PIN}\nRoot-cause ONE regression: ${JSON.stringify(i)}. \`git show --stat <sha>\` + \`git show <sha> -- <files>\` for BOTH the introducing and fixing commit — the pair reveals the mechanism. Pin deploy-timestamp-vs-onset (a PR deployed AFTER onset is exonerated) and read terminal status (your run-ledger / logs) before theorizing. The two questions that matter MOST: (A) WHY did local green (tsc + local vitest) NOT catch this? (B) what is the CHEAPEST signal — test/lint/ci-gate/one-flow bake — that would have caught it before the bad merge? Verify any prior memory claim against the actual diff. Map the exact production_path and harness_path, name their first path_gap, then specify the earliest_unmockable_signal and a mutation_that_must_fail with the readiness gate's terminal failure.`,
   {label:`rca:${i.id}`, phase:'RCA', schema:RCA, model:'sonnet', agentType:'general-purpose'})))
 
 phase('Synthesize')
@@ -86,5 +92,18 @@ const PROG = { type:'object', additionalProperties:false, required:['executive_s
   cross_session_coordination:{type:'string'}, rca_checklist:{type:'string'}, tracker_issues:{type:'array',items:{type:'string'}} }}
 return await agent(`Synthesize a tight, ACTIONABLE production-stability program from the verified guardrails. (1) exec summary + the single biggest leverage point; (2) hot zones — the few high-blast files, each with its now-explicit contract + the gate a change must pass; (3) prioritized guardrails ranked by leverage/effort — favor those that convert deploy-only defects to local-green RED, spanning the levers (documentation / CI / harness / cross-session / research-grounding / standing-invariant); (4) a low-ceremony cross-session coordination mechanism on EXISTING primitives (a hot-zones list + a deploy-ledger so an RCA can diff onset-vs-deploy-time; do NOT serialize all work — the real cost is RCA-misdirection, not line collisions); (5) the RCA-process hardening checklist; (6) 4–8 issue-ready tracker titles+priorities. Honor never-slice / delete-legacy / solo-operator (no heavyweight process). Drop any guardrail the verifier rated 'insufficient' unless its refinement is applied.\n\nOnly findings with an affirmative liveness probe may enter hot_zones or tracker_issues as an OPEN issue; anything else is described in the past tense as an already-fixed incident, with its probe. Never file a claim about current production state into an external tracker without the command that re-derived it at HEAD this run — a stale "live exposure" ticket is worse than a documented gap, because it reads as urgent and gets acted on. LIVENESS: ${JSON.stringify(liveness.filter(Boolean).map(l=>({incident:l.rca?.incident_id, still_live:l.live?.still_live ?? 'lane-died', probe:l.live?.probe})))}\n\nVERIFIED: ${JSON.stringify(guarded.filter(Boolean))}\nTAXONOMY: ${JSON.stringify(tax)}`, {label:'program', phase:'Program', effort:'high', schema:PROG, model:'opus', agentType:'general-purpose'})
 ```
+
+For any incident used to change readiness claims, persist the six path-gap fields as a
+standalone strict JSON record and validate it mechanically:
+
+```bash
+node .claude/skills/improve-harness/scripts/validate-production-stability-record.mjs < production-stability-record.json
+node --test .claude/skills/improve-harness/scripts/validate-production-stability-record.test.mjs
+```
+
+The validator rejects unknown keys, generic “tests lacked coverage” explanations,
+identical production/harness paths, and mutations that do not name a failing readiness
+effect. The record is the portable mutation contract; the narrative RCA may add context
+but may not replace it.
 
 **The load-bearing choices to keep when you adapt it:** one agent *per incident* (aggregation confabulates); the `why_passed_local_green` + `earliest_cheap_signal` fields (the whole point); the Mitigate→Verify `pipeline` where a *separate* skeptic refutes each guardrail; the four false-security probes; `effort:'high'` only on Program; and lever-tagging so the program's fixes route to docs / CI / harness / cross-session / research / standing-invariant — not just code. Its output feeds step 2's reconcile and lands in step 4 as guardrail-adds across your harness surfaces.
