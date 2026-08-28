@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # with-heavy-lock — run one CPU/disk-heavy command under a machine-global lock so
-# parallel agent sessions SERIALIZE (queue, not refuse) instead of melting the
-# machine. An 8-way parallel `vitest run` / `next build` can drive load average
-# to 25-34 and wedge the box; this makes heavy ops wait their turn and run one at
-# a time, locally.
+# parallel agent sessions SERIALIZE (queue, not refuse) instead of competing for
+# the same CPU, memory, and disk bandwidth. Uncoordinated test and build workloads
+# have made the development machine unresponsive; this keeps interactive capacity
+# available while heavy operations wait their turn.
 #
 # Why a wrapper and not just the PreToolUse hook: a hook is a GATE — it runs
 # before the command and exits, so it can only check-and-refuse and cannot HOLD a
