@@ -14,7 +14,6 @@ class VerificationReceiptTests(unittest.TestCase):
         env = {
             **os.environ,
             "VERIFICATION_RECEIPT_ROOT": str(root / "receipts"),
-            "VERIFICATION_LOCK_COMMAND": "/usr/bin/env",
         }
         return subprocess.run(
             [str(SCRIPT), "--name", "fixture", "--key", key, *extra, "--", *command],
@@ -35,6 +34,36 @@ class VerificationReceiptTests(unittest.TestCase):
             self.assertEqual((0, 0, 0), (first.returncode, second.returncode, changed.returncode))
             self.assertEqual(2, len(counter.read_text().splitlines()))
             self.assertIn("reusing green receipt", second.stderr)
+
+    def test_concurrent_writers_share_one_receipt_lease(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            counter = root / "counter"
+            env = {
+                **os.environ,
+                "VERIFICATION_RECEIPT_ROOT": str(root / "receipts"),
+            }
+            args = [
+                str(SCRIPT),
+                "--name",
+                "fixture",
+                "--key",
+                "race",
+                "--",
+                "sh",
+                "-c",
+                f"sleep 0.2; echo run >> {counter}",
+            ]
+            first = subprocess.Popen(args, cwd=root, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            second = subprocess.Popen(args, cwd=root, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            first_out, first_err = first.communicate(timeout=5)
+            second_out, second_err = second.communicate(timeout=5)
+
+            self.assertEqual((0, 0), (first.returncode, second.returncode))
+            self.assertEqual(1, len(counter.read_text().splitlines()))
+            combined = first_out + first_err + second_out + second_err
+            self.assertIn("queued behind fixture", combined)
+            self.assertIn("reusing green receipt", combined)
 
     def test_failure_never_writes_a_green_receipt(self):
         with tempfile.TemporaryDirectory() as tmp:

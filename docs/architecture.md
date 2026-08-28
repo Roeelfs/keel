@@ -18,7 +18,7 @@ coding CLI (primarily Claude Code) behaves. Four layers, each doing one thing:
 │               security-reviewer · sql-specialist · tracer · verifier│
 │               → focused sub-agents the skills dispatch in parallel │
 ├──────────────────────────────────────────────────────────────────┤
-│  SUBSTRATE    hooks (session lifecycle, id capture, heavy-op lock) │
+│  SUBSTRATE    hooks (session lifecycle, id capture)                │
 │               tooling/workflow (path ownership + in-flight registry)│
 │               → the coordination layer that runs under everything  │
 └──────────────────────────────────────────────────────────────────┘
@@ -39,9 +39,8 @@ Each layer answers a different failure mode of naive agent use:
 - **Agents** answer *"one context doing everything does each thing worse."* A
   dispatched sub-agent has a tight prompt, its own context window, and one job —
   and several run in parallel.
-- **Substrate** answers *"multiple agents/sessions collide and the machine melts."*
-  Path ownership and the heavy-op lock are pure coordination, invisible until two
-  sessions would otherwise step on each other.
+- **Substrate** answers *"multiple agents/sessions collide."* Path ownership is
+  invisible until two sessions would otherwise step on each other.
 
 ### How a typical flow uses all four
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run one project-declared verification command and reuse only an identical green receipt.
-# The project owns --key; this wrapper owns serialization, output assertions, and receipt IO.
+# The project owns --key; this wrapper owns receipt serialization, output assertions, and IO.
 set -uo pipefail
 
 usage() {
@@ -79,9 +79,8 @@ if [ -z "$force" ] && [ -f "$receipt" ] && receipt_is_valid; then
   exit 0
 fi
 
-lock_command=${VERIFICATION_LOCK_COMMAND:-with-heavy-lock}
 set +e
-"$lock_command" "$@" 2>&1 | tee "$log"
+"$@" 2>&1 | tee "$log"
 status=${PIPESTATUS[0]}
 set -e
 [ "$status" -eq 0 ] || exit "$status"

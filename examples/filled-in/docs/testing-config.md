@@ -14,8 +14,6 @@
 | Run the E2E suite | `pnpm e2e --env staging` |
 | Tail staging logs | `acme logs --env staging --service api --since 5m` |
 
-Run heavy commands under `with-heavy-lock` when multiple agent sessions are active.
-
 ## Staging environment
 
 - **API base:** `https://api.staging.acme-tasks.example.com`

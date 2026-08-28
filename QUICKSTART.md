@@ -51,15 +51,13 @@ for you. If you already had one, the installer left it alone and dropped
 The hooks do the following at session start: capture `$CLAUDE_SESSION_ID`, warn if
 you launched from a worktree, register your session in the shared workflow state,
 and inject the in-flight work registry into context. At session end they release
-your claims. The `PreToolUse` hook enforces the heavy-op lock.
+your claims.
 
 **Restart Claude Code in the repo** so the SessionStart hooks load.
 
 ## 4. Install the optional bits (recommended for parallel work)
 
 ```bash
-# Let the serialize-heavy-ops hook enforce the lock by putting the wrapper on PATH:
-sudo cp tooling/sandbox/with-heavy-lock /usr/local/bin/ && sudo chmod +x /usr/local/bin/with-heavy-lock
 sudo cp tooling/sandbox/with-verification-receipt /usr/local/bin/ && sudo chmod +x /usr/local/bin/with-verification-receipt
 
 # (macOS / Linux) install the crashed-session reaper timer — see:
@@ -69,8 +67,8 @@ cat tooling/workflow/install/README.md
 If you don't have `flock` (macOS): `brew install flock`.
 
 Projects with an expensive full gate should declare a conservative verification key
-and run that gate through `with-verification-receipt`. The wrapper queues through the
-heavy lock, records a receipt only after exit-code and output assertions pass, and
+and run that gate through `with-verification-receipt`. The wrapper serializes writers
+for the same receipt, records it only after exit-code and output assertions pass, and
 reuses it only for the identical project key plus command. Production hooks should
 use `--force`; a receipt never replaces the final deploy gate.
 
@@ -112,12 +110,7 @@ tooling/workflow/workflow claim-scope 'src/routes/sharing/**'
 tooling/workflow/workflow status        # see who owns what
 ```
 
-A second session that tries to claim an overlapping path is refused. Run heavy
-commands under the lock:
-
-```bash
-with-heavy-lock pnpm test
-```
+A second session that tries to claim an overlapping path is refused.
 
 ## Troubleshooting
 

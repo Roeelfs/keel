@@ -75,7 +75,3 @@ Hard-won traps, by phase. Read the relevant block before running that phase of s
 - **Bake in domain invariants or the agent is net-negative.** This is make-or-break: a generic specialist ignorant of your project's data-safety invariants (e.g. delete-protection on the production datastore, the data-access security gate, schema-first migration ordering) is *dangerous* (it'll suggest a drop-recreate). Encode your invariants in the agent's Constraints.
 - **A ported agent is UNVERIFIED until it runs once on a real in-scope task** — and new agent files only load next session, so you can't smoke-test them in the run that creates them. Flag them for first-task verification.
 - **Cap scope.** Add a role only if we BOTH lack it AND exercise it ~weekly; the ml/mobile/k8s long tail is a maintenance trap — skip.
-
-## Light vs heavy ops
-
-`npx skills`, `claude plugin`, `gh`, `git`, and WebFetch are **light** — they are not machine-global heavy-lock ops (vitest/build/cdk). Run them directly.

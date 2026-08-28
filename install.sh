@@ -81,7 +81,7 @@ copy_tree "tooling/workflow"
 copy_tree "tooling/sandbox"
 
 # Make scripts executable
-find "$TARGET/.claude/hooks" "$TARGET/tooling" -type f \( -name "*.sh" -o -name "workflow" -o -name "with-heavy-lock" \) -exec chmod +x {} + 2>/dev/null || true
+find "$TARGET/.claude/hooks" "$TARGET/tooling" -type f \( -name "*.sh" -o -name "workflow" -o -name "with-verification-receipt" \) -exec chmod +x {} + 2>/dev/null || true
 
 echo ""
 echo "Templates (only created if missing):"
@@ -105,12 +105,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Optional: put with-heavy-lock on PATH
+# 2. Optional: put the verification receipt helper on PATH
 # ---------------------------------------------------------------------------
 echo ""
-echo "Optional: 'with-heavy-lock' on your PATH lets the serialize-heavy-ops hook"
-echo "enforce the machine-global lock. To install it:"
-echo "    sudo cp \"$TARGET/tooling/sandbox/with-heavy-lock\" /usr/local/bin/ && sudo chmod +x /usr/local/bin/with-heavy-lock"
+echo "Optional: install the verification receipt helper on PATH:"
 echo "    sudo cp \"$TARGET/tooling/sandbox/with-verification-receipt\" /usr/local/bin/ && sudo chmod +x /usr/local/bin/with-verification-receipt"
 
 # ---------------------------------------------------------------------------

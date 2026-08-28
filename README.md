@@ -167,8 +167,7 @@ system — so keel bakes them all in as configuration, per repo:
 ## Parallel agents need lanes
 
 Running several agent sessions at once — one per worktree — is a force multiplier
-right up until two of them edit the same file, or eight of them launch full test
-builds simultaneously and melt your machine.
+right up until two of them edit the same file.
 [`tooling/workflow/`](tooling/workflow/) is a ~650-line coordination layer that
 prevents both:
 
@@ -180,9 +179,6 @@ prevents both:
   joined view of every worktree → branch → open PR → issue, and how stale each
   branch's base is — so a new agent continues existing work instead of opening a
   third branch for the same ticket.
-- **A machine-global heavy-op lock** (`with-heavy-lock` + the
-  `serialize-heavy-ops` hook) so tests/builds/installs queue and run one at a
-  time.
 - **Lifecycle + a reaper** so state from a crashed session gets cleaned up.
 
 The [`orchestrator`](.claude/skills/orchestrator/) skill sits on top for 3+
@@ -219,11 +215,11 @@ keel/
 │   │   #   explore · refactorer · scientist · security-reviewer
 │   │   #   sql-specialist · tracer
 │   ├── hooks/                   # session lifecycle, id capture, worktree warn,
-│   │   #                          heavy-op serializer, crashed-session reaper
+│   │   #                          crashed-session reaper
 │   └── settings.example.json    # model routing, permissions, hook wiring
 ├── tooling/
 │   ├── workflow/                # path-ownership CLI + in-flight registry
-│   └── sandbox/with-heavy-lock  # machine-global heavy-op lock
+│   └── sandbox/                 # verification receipt helper
 ├── templates/                   # CLAUDE.md / AGENTS.md / security-policy / testing-config
 ├── examples/filled-in/          # the templates populated for a sample project
 ├── docs/                        # one short essay per subsystem

@@ -17,8 +17,7 @@
       "Bash(tail:*)",
       "Bash(wc:*)",
       "Bash(which:*)",
-      "Bash(tooling/workflow/workflow:*)",
-      "Bash(with-heavy-lock:*)"
+      "Bash(tooling/workflow/workflow:*)"
     ],
     "deny": [
       "Bash(rm -rf /:*)",
@@ -48,14 +47,6 @@
         "matcher": "",
         "hooks": [
           { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-end.sh\"", "async": false }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/serialize-heavy-ops.sh\"", "async": false }
         ]
       }
     ]

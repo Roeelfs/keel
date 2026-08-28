@@ -22,9 +22,6 @@
 | Run the E2E suite | `{{E2E_CMD}}` |
 | Tail staging logs | `{{LOGS_CMD — how to read real logs after exercising a feature}}` |
 
-> Run heavy commands (tests, builds) under `with-heavy-lock` when multiple agent
-> sessions are active, so they queue instead of overloading the machine.
-
 ## Staging environment
 
 - **Staging URL(s):** {{https://staging.example.com — UI, API base, etc.}}

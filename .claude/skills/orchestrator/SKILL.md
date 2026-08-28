@@ -227,9 +227,8 @@ been violated by the survey.
 6. **Invoke the existing frontier** (§Autonomous stretches) to compute what is reachable
    without a human. Do not reimplement that computation here; a second slightly-different
    copy of it is the defect, not the feature.
-7. **Dispatch ONE forcing function**, within the phase, review-budget and heavy-lane caps
-   (~2 concurrent heavy lanes under the machine-global heavy lock). A dead lane is salvaged
-   before it is replaced — exit 143 with a 0-byte output is SIGTERM under load, and its
+7. **Dispatch ONE forcing function**, within the phase and review budget. A dead lane is salvaged
+   before it is replaced — exit 143 with a 0-byte output is SIGTERM, and its
    worktree may hold real uncommitted work; `git -C <worktree> status --porcelain` first.
    The replacement is a **continuation** carrying the last verified fact, never a replay.
 8. **External readiness gets a keyed wake artifact and a later fresh check** — never a wait
@@ -337,7 +336,7 @@ Stale, contradicted, or absent input → STOP and re-verify. Never state a routi
 - **Verify the substrate BEFORE dispatch.** Before spawning a verify lane against a staging or deployed target, confirm that environment actually carries the SHA — `git -C <env-worktree> rev-parse HEAD`, or `git branch --contains <sha>` on the deploy branch. Discovering "not deployed yet" inside the lane is a wasted activation, not a verification (observed: `verify_e2_fix` returned "no staging worktree is at `067541081`" and a second lane went to find out where staging actually was). This is the pre-dispatch counterpart to `Verify remotely` above, which is a post-exit *push* check; the same confirmation on the resume path is `references/merge-and-retire.md` §Post-merge proof.
 - **Only the `verify-release` phase runs the project gate, exactly once.** Define/build lanes run targeted checks. A headless verifier runs the gate synchronously within its budget or stops with the command artifact; it never backgrounds the gate and waits for a notification.
 - **Deletability claims are HYPOTHESES.** Teardown missions instruct: grep-verify call sites, and "if verification shows the code isn't dead, STOP and report — never weaken a test to make deletion pass."
-- **Mission content:** goal one-liner · issue ref with acceptance criteria · owned paths + DO-NOT-TOUCH · one lifecycle phase · mode + proof-obligation ledger · artifact to grade · `stacked_on:` edge · "NEVER merge to a protected branch, deploy, or touch prod" · "on a 2nd identical tool denial, print `BLOCKED_ON_CLASSIFIER` and stop" · "final reply = one JSON status object". Fresh `--session-id`; scrub `CLAUDE_SESSION_ID`/`CLAUDE_CODE_ENTRYPOINT` from the child env. Keep global hooks in the child. The machine-global heavy lock serializes verify/build — cap concurrent heavy lanes at ~2.
+- **Mission content:** goal one-liner · issue ref with acceptance criteria · owned paths + DO-NOT-TOUCH · one lifecycle phase · mode + proof-obligation ledger · artifact to grade · `stacked_on:` edge · "NEVER merge to a protected branch, deploy, or touch prod" · "on a 2nd identical tool denial, print `BLOCKED_ON_CLASSIFIER` and stop" · "final reply = one JSON status object". Fresh `--session-id`; scrub `CLAUDE_SESSION_ID`/`CLAUDE_CODE_ENTRYPOINT` from the child env. Keep global hooks in the child.
 
 Interactive lanes (human-driven only) use `prompts/session-template.md` + `prompts/loop-directive.md`. Chip prompts stay lean (≤~900 chars): GOAL / STATE (only facts not in repo law or the ticket) / START HERE (pointers, never pasted bodies) / mission-specific GUARDRAIL.
 

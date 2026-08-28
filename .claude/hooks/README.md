@@ -12,12 +12,13 @@ Those copies routinely **diverge upward** from these seeds, because a live hook 
 - **repo-scoping** — `case "$cwd" in */<repo>*)` guards that name a specific repository.
   Those can never live here: this repo is public and marker-free, so a rule naming a
   customer repo, tracker prefix, or machine path is a contract violation.
-- **machine-specific paths** — a project's memory dir, a local CLI, a lock file.
+- **machine-specific paths** — a project's memory dir or a local CLI.
 - **operator-private craft** — the same split that governs skills: the committed seed is
   de-identified, the private detail stays on the machine.
 
-Measured 2026-07-24, that divergence is real and large: `serialize-heavy-ops.sh` is 56
-lines here and 234 lines live; `warn-if-worktree-launch.sh` is 49 here and 110 live.
+Measured 2026-07-24, that divergence was real and large for the then-current resource
+serializer. That retired example remains in dated harness analytics; the live comparison
+today is `warn-if-worktree-launch.sh`, which is 49 lines here and 110 lines live.
 
 ## What this means in practice
 

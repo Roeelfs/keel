@@ -74,7 +74,7 @@ Strip ephemeral references a fresh session can't resolve (background-task watche
 ## Workflow gotchas (these cost retries)
 - `args` may arrive as a **string** → `JSON.parse` it inside the script (the template does).
 - `process`, `Date.now()`, `Math.random()`, argless `new Date()` are **undefined/throw** in workflow scripts. Pass timestamps via args; vary agent prompts by index for "randomness".
-- Mining agents must be **read-only** — no verify/build/test/heavy ops/push (those grab any machine-global heavy lock and stall other sessions).
+- Mining agents must be **read-only** — no verify/build/test/push.
 - Use `agentType: 'Explore'` for mining — fast read-only fan-out.
 
 ## Re-running / iterating

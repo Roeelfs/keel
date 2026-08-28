@@ -65,7 +65,6 @@ For end-to-end / staging verification, see `docs/testing-config.md`.
 ## Parallel agents
 
 - Claim scope before editing: `tooling/workflow/workflow claim-scope 'src/routes/sharing/**'`.
-- Run `pnpm test` / `pnpm build` under `with-heavy-lock` when other sessions are active.
 - Worktrees live under `.worktrees/`; launch from the main checkout, then `cd` in.
 
 ## Security

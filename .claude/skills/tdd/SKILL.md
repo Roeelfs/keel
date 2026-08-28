@@ -40,7 +40,7 @@ When shaping the interface behind a seam, run the `/codebase-design` skill for t
 
 ## Test-runner & iteration conventions
 
-- **Test runner:** if your test runner can choose a worker model and a worker cap, prefer process-isolated workers (e.g. vitest `pool: 'forks'`) with a bounded `maxWorkers` over thread-pool workers. Native addons can segfault during worker-thread teardown on some platforms, and an uncapped worker pool can saturate every core and starve the rest of the machine. Once your project settles on these values, don't change them casually.
-- **Targeted-first iteration:** loop on the narrow set of tests your change touches (a single file or a single named test), and run the full project verify gate (the command your project documents) ONCE at the end, never in the inner loop. Repeatedly firing the whole suite while iterating wastes time and can pin the machine.
+- **Test runner:** when native addons are involved, prefer process-isolated workers (for example Vitest `pool: 'forks'`) over worker threads; some addons can crash during thread teardown.
+- **Targeted-first iteration:** loop on the narrow set of tests your change touches (a single file or a single named test), and run the full project verify gate (the command your project documents) ONCE at the end, never in the inner loop.
 - **Partial mocks:** a partial `vi.mock(module)` MUST spread `...(await vi.importActual())` — see [mocking.md](mocking.md).
 - **TDD is for clean seams, not runtime paths.** Use it where there's a deterministic, in-process seam you can drive directly (pure logic, classifiers/extractors behind a test double, data rollups). For runtime paths that only exhibit real behavior under live traffic (request handlers, dispatch, sandbox/worker lifecycle, webhooks, RPC), green tests are necessary but NOT sufficient — the real gate is exercising the path against real traffic and confirming the outcome in your logs and your system's actual state.

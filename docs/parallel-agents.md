@@ -65,27 +65,6 @@ opening a third branch for a ticket someone's already on.
 It's fail-open by contract — `gh` missing, not a git repo, no worktrees: it stays
 silent and never blocks a session.
 
-## The machine-global heavy-op lock
-
-Parallel sessions are CPU-cheap until they all run `vitest` or `next build` at
-once. `tooling/sandbox/with-heavy-lock` serializes heavy ops by **queuing** them:
-
-```bash
-with-heavy-lock pnpm test
-```
-
-It holds a `flock` on a single machine-global lock file for the *entire* lifetime
-of the wrapped command (via an inherited fd), releasing it the instant the process
-exits — even if a test runner segfaults on teardown. Nested heavy ops see
-`KEEL_HEAVY_LOCK_HELD=1` and skip re-locking, so wrapping a command that itself
-self-locks won't deadlock.
-
-The `serialize-heavy-ops.sh` PreToolUse hook **enforces** it: it detects heavy
-commands (test runners, builds, installs) and, if `with-heavy-lock` is on PATH but
-the command isn't wrapped, refuses with a one-line fix. Crucially it does **not**
-suggest "push to CI" — the old anti-pattern that just moves the cost. Heavy ops
-queue and run *locally*, one at a time.
-
 ## Lifecycle & the reaper
 
 - `session-start.sh` registers the session and seeds its heartbeat.

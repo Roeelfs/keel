@@ -87,9 +87,6 @@ quality bar — e.g. "correctness over speed", "never lose customer data".}}
 - Before touching files, claim your scope: `tooling/workflow/workflow claim-scope
   '<glob>'`. It refuses if another live session already owns overlapping paths — so
   two agents never silently edit the same code.
-- Heavy ops (tests, builds, installs) run under `with-heavy-lock` so parallel
-  sessions queue instead of melting the machine. The `serialize-heavy-ops` hook
-  enforces this.
 - If the project declares a full-gate verification key, run manual full gates through
   `with-verification-receipt`. Reuse only an identical green key+command receipt;
   production/pre-push gates run with `--force` and are never bypassed by a receipt.
