@@ -32,6 +32,10 @@ This ritual mutates your live global harness. **Back up before any mutation** �
 - A scoped run that would **reverse a previously-recorded dated decision** — a vendoring entry, a standing rule, a prior conclusion — routes that reversal through step 3 even when everything else is skipped. A policy pivot decided inside one clarifying answer is precisely the contradiction step 3 exists to catch.
 - **A scoped run still names the target surface before editing.** On 2026-08-02 a scoped run landed genuinely cross-project tooling in one surface only, declared "Done", and took three human corrections to relocate it.
 
+### Browser isolation
+
+`/improve-harness` must not implicitly attach the external Chrome debugger. For public/vendor research and status checks, prefer web/search, CLI, or purpose-built connectors. For interactive sign-in, start with the in-app browser; in Codex select `agent.browsers.get("iab")` directly rather than `getForUrl()`, which may select external Chrome and trigger its debugger banner. Use external Chrome only when the user explicitly requests it or the task cannot proceed without existing Chrome profile, tab, session, or extension state; state that reason before attaching.
+
 ### 1. Launch the investigation — parallel dynamic Workflows
 
 Fan the read-only investigation out into **parallel background Workflows** so they run while you do nothing. Run **A, B, E and G every time**; add **C on a deeper/~quarterly pass** (the agent-stack landscape moves slowly), and **D whenever the period included a regression cluster, a prod incident, or an unstable-prod stretch** (the production-stability pass).
