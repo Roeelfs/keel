@@ -103,6 +103,16 @@ const FRAME_ANGLES = [
   { key: 'prior-art', prompt: 'Find prior art in-repo: has this been attempted? related code, PRs, similar handlers/flows. Cite file paths.' },
 ]
 
+// A rewrite / migration / cutover premise earns a fifth frame angle: the contract × representation
+// inventory. Coexistence has two shapes — the old path left beside the new, AND the new path shipping
+// one contract in N hand-mirrored copies (SQL twin / TS store / oracle / allow-list / list inside a
+// test). The second passes every "did you delete the old path" check; only counting copies sees it.
+const REWRITE_PREMISE = /\b(rewrit\w*|replac\w*|migrat\w*|cut[\s-]?over\w*|cuts?[\s-]over|consolidat\w*|deprecat\w*|retir\w*|supersed\w*|reimplement\w*|switch(?:ing|es)?[\s-]?over|dual[\s-]?write|shadow|v2|twin\w*|mirror\w*|parity|coexist\w*)\b/i.test(PREMISE)
+if (REWRITE_PREMISE) FRAME_ANGLES.push({
+  key: 'cutover-structure',
+  prompt: 'This premise rewrites, replaces, or migrates an existing capability. Build the Contract × Representation inventory: for every contract the change touches (schema/state shape, allow-list, enum, version counter, rule/oracle, migration or serial list, routing table, serving predicate), grep SQL, TS, tests, fixtures, docs and configs for EVERY hand-maintained encoding of it, and report one finding per contract: claim = "<contract>: N hand-maintained representations — <file:line, file:line, …>", with the count. Tripwires that mark a copy: twin, mirror, keep in sync, parity, shadow, plane, profile, rehearsal, _v1/_v2 siblings, "also update", a list pasted into a *.test.* file. Every path is a real citation, never a guess. Open questions = which single representation should OWN each contract, and what the other copies know that the owner does not yet (the migration ledger).',
+})
+
 const frames = (await parallel(FRAME_ANGLES.map(a => () =>
   agent('TASK TO GROUND:\n' + PREMISE + '\n\nANGLE: ' + a.prompt, { label: 'frame:' + a.key, phase: 'Frame', schema: FRAME_SCHEMA })
 ))).filter(Boolean)
@@ -125,7 +135,7 @@ const FRAME_OUT_SCHEMA = {
 }
 
 const PROBLEM_FRAME = await agent(
-  'Synthesize a Problem Frame from these internal findings + the task. Output the real constraints, the goal in one line, and exactly ' + N + ' SHARP external research questions specific to THIS task and its real stack.\n\nEach question is TAGGED with the source tier it should OPEN at, chosen by FIT: ' + TIER_NAMES.join(', ') + '. A version/deprecation question opens at currency_lifecycle; a "does a package/server/skill for X exist" question at agent_ecosystem or registries_health; an idioms/prior-art question at code_impl; a real-world-pain question at community; a definition/standard question at structured_knowledge; a NON-ENGINEERING question (market, regulatory, vendor sourcing, lodging, investor, GTM) at market_real_world. Questions must be MUTUALLY ORTHOGONAL — two lanes researching the same thing is the single most wasteful outcome.\n\nTASK:\n' + PREMISE + '\n\nFINDINGS:\n' + JSON.stringify(frames),
+  'Synthesize a Problem Frame from these internal findings + the task. Output the real constraints, the goal in one line, and exactly ' + N + ' SHARP external research questions specific to THIS task and its real stack.\n\nIf a cutover-structure finding is present, carry its contract inventory into constraints verbatim — one constraint per contract with its representation count and paths — and make at least one research question ask how the industry keeps that contract in ONE place across the runtimes involved (codegen, shared fixture, single owner), never how to keep copies in sync.\n\nEach question is TAGGED with the source tier it should OPEN at, chosen by FIT: ' + TIER_NAMES.join(', ') + '. A version/deprecation question opens at currency_lifecycle; a "does a package/server/skill for X exist" question at agent_ecosystem or registries_health; an idioms/prior-art question at code_impl; a real-world-pain question at community; a definition/standard question at structured_knowledge; a NON-ENGINEERING question (market, regulatory, vendor sourcing, lodging, investor, GTM) at market_real_world. Questions must be MUTUALLY ORTHOGONAL — two lanes researching the same thing is the single most wasteful outcome.\n\nTASK:\n' + PREMISE + '\n\nFINDINGS:\n' + JSON.stringify(frames),
   { label: 'frame:synthesize', phase: 'Frame', schema: FRAME_OUT_SCHEMA }
 )
 
@@ -275,7 +285,8 @@ const brief = await agent(
   '- Build industry_standard and elevation ONLY from LOAD-BEARING claims. Carry each one\'s verdict: a `primary_attested` point is rendered "(vendor-attested, not independently corroborated)". Never present it as an independent standard.\n' +
   '- UNTRUSTED claims are not fact. Drop them, or render them explicitly "(unverified)".\n' +
   '- Liveness-check every source_url you cite before citing it; drop or flag what 404s.\n' +
-  '- sources = deduped LIVE URLs + file:line.\n\n' +
+  '- sources = deduped LIVE URLs + file:line.\n' +
+  '- If the FRAME carries a contract inventory (a rewrite / migration / cutover premise), recommendations MUST name, per contract, the single OWNER representation, the copies to DELETE, what MIGRATES into the owner first, and the probe that prints the count afterwards. A recommendation that leaves a contract in two or more hand-maintained copies without a fail-closed parity check inside the mandatory local gate is not a recommendation — it is the defect; say so.\n\n' +
   'SAVING (do this before you return):\n' +
   '- Get the date with Bash: `date +%F`.\n' +
   '- If the premise is about THIS codebase: `mkdir -p docs/investigations` then write `docs/investigations/<YYYY-MM-DD>-' + SLUG + '.md`.\n' +

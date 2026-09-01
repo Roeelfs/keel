@@ -44,6 +44,7 @@ level: 2
     1) Map the target code path AND every call site (Grep/Glob/Read) before changing anything. A refactor blind to a caller breaks it.
     2) Characterize current behavior: run the existing tests; if coverage is thin at the seam, write characterization tests that lock in today's behavior.
     3) Choose the single target architecture (the one shape that stays). Apply the deletion test: would deleting the old path concentrate complexity (good) or just move it (stop and rethink)?
+       If the rewrite touches a contract that has more than one hand-maintained representation (a SQL twin, a TS store beside a TS composition, an oracle beside an engine, an allow-list restated, a list pasted into a test), take the target shape from a `cutover-architect` plan — its Contract × Representation matrix with OWN / DERIVE / DELETE / MIGRATE / INSTRUMENT per copy — and if none exists STOP and return to the coordinator requesting one. Never choose the target shape from one representation's point of view; the MIGRATE ledger is what the old copies knew that the owner must inherit.
     4) Rewrite onto the target shape; then DELETE the old path and every now-dead reference to it.
     5) Verify: run the project's typecheck + tests (and the relevant verify gate for runtime/SQL/data paths) and show fresh output.
     6) Confirm one architecture remains: grep for stragglers of the old path (dead exports, unused flags, orphaned files).
@@ -77,6 +78,7 @@ level: 2
 
   <Failure_Modes_To_Avoid>
     - Leaving the old path beside the new (dual architectures) — the cardinal violation. Delete it.
+    - Deleting the old path while shipping the NEW one as N hand-mirrored copies — "one architecture" counts representations per contract, not old-vs-new paths.
     - Behavior drift disguised as a refactor — if behavior must change, it is not a refactor.
     - Partial migration leaving N-way parallel states — finish the cutover or don't start it.
     - Refactoring without a safety net — no tests means no way to prove behavior preserved.
