@@ -414,7 +414,7 @@ cmd_check() {
   _c_green "✓ Chrome running"
 
   local g1; g1="$(_gate1)"
-  if printf '%s' "$g1" | grep -qi -E "not authorized|-1743|assistive|-600|isn.t running"; then
+  if printf '%s' "$g1" | grep -qiE -e "not authorized|-1743|assistive|-600|isn.t running"; then
     _c_red "✗ GATE 1 (AppleEvents automation) blocked:"
     echo "    $g1"
     echo "  → System Settings ▸ Privacy & Security ▸ Automation ▸ enable your terminal/Claude → \"${CHROME_APP}\"."
@@ -448,24 +448,50 @@ tell application "Google Chrome" to activate
 delay 0.5
 with timeout of 8 seconds
   tell application "System Events" to tell process "Google Chrome"
-    set devMenu to menu 1 of menu item "Developer" of menu 1 of menu bar item "View" of menu bar 1
-    set itm to menu item "Allow JavaScript from Apple Events" of devMenu
-    if (value of attribute "AXMenuItemMarkChar" of itm) is missing value then click itm
+    try
+      set devMenu to menu 1 of menu item "Developer" of menu 1 of menu bar item "View" of menu bar 1
+      set itm to menu item "Allow JavaScript from Apple Events" of devMenu
+      -- Report what was actually observed. The old version returned "clicked"
+      -- unconditionally, which turned every failure into a confusing
+      -- "Auto-toggle failed: clicked".
+      if (value of attribute "AXMenuItemMarkChar" of itm) is not missing value then return "already-checked"
+      if not (enabled of itm) then return "disabled"
+      click itm
+      delay 0.4
+      return "clicked"
+    on error e number n
+      return "ERROR " & n & ": " & e
+    end try
   end tell
 end timeout
-return "clicked"
 APPLESCRIPT
 )"
   if [ "$(_probe_js "1+1")" = "2" ]; then
     _c_green "✓ Auto-enabled GATE 2 via System Events. Page JS now works."
     return 0
   fi
-  if printf '%s' "$out" | grep -qi -E "-1719|assistive access"; then
+  if printf '%s' "$out" | grep -qiE -e "-1719|assistive access"; then
     _c_red "✗ Can't auto-toggle: this process lacks Accessibility (UI-scripting) permission."
     echo "  Pick ONE one-time action:"
     _c_yel "    (a) SIMPLEST — Chrome menu ▸ View ▸ Developer ▸ Allow JavaScript from Apple Events."
     _c_yel "    (b) Or grant Accessibility to your terminal/Claude (System Settings ▸ Privacy &"
     _c_yel "        Security ▸ Accessibility) so 'chrome.sh fix' can self-heal on its own."
+  elif [ "$out" = "already-checked" ] || [ "$out" = "clicked" ]; then
+    # The menu says the setting is ON, yet page JS is still refused. Telling the
+    # user to go and enable a thing that already shows a checkmark sends them in
+    # a circle, which is exactly what the old message did.
+    _c_red "✗ The menu shows \"Allow JavaScript from Apple Events\" as ENABLED, but Chrome still refuses page JS."
+    echo "    menu state: $out"
+    _c_yel "  This is Chrome not having committed the setting. In order of likelihood:"
+    _c_yel "    (a) Quit Chrome completely (Cmd-Q, not just closing windows) and reopen it."
+    _c_yel "    (b) The setting is per-profile — if several Chrome profiles are open, toggle it"
+    _c_yel "        in the profile window that chrome.sh actually drives."
+    _c_yel "    (c) Toggle it OFF and back ON with a normal browser window frontmost."
+    echo "  Then re-run: chrome.sh check"
+  elif [ "$out" = "disabled" ]; then
+    _c_red "✗ The menu item is greyed out, so it cannot be clicked right now."
+    _c_yel "  Bring a normal Chrome browser window to the front (not the App Switcher, a"
+    _c_yel "  profile picker, or a settings window) and re-run: chrome.sh fix"
   else
     _c_red "✗ Auto-toggle failed:"
     echo "    $out"
