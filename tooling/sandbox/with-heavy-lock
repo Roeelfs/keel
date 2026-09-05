@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# with-heavy-lock — run a CPU/RAM-heavy command under a machine-global BOUNDED
+# CONCURRENCY semaphore, so parallel agent sessions queue instead of exhausting
+# memory. Up to $KEEL_HEAVY_SLOTS heavy ops run at once; the rest wait their turn.
+#
+# WHY BOUNDED AND NOT A MUTEX: the original version of this wrapper held a single
+# machine-global mutex — one heavy op at a time, machine-wide. On a box running
+# ~16 agent sessions that serialized everything and was retired for throughput
+# (keel de407e3, 2026-08-28). Removing it reintroduced the failure it existed to
+# prevent: macOS "Your system has run out of application memory".
+#
+# THE NUMBER, derived by measurement on a 24 GB Apple Silicon machine
+# (2026-09-04, 16 live sessions):
+#   physical                                    24.0 GB
+#   - wired (OS, non-swappable)                  2.78 GB
+#   - agent CLI sessions (~0.22 GB x 16)         3.5  GB
+#   - desktop app + renderers                    1.0  GB
+#   - other user apps at the OOM moment          4.8  GB
+#   = floor                                     ~12.1 GB
+#   usable, leaving ~15% for cache/compressor   ~20.4 GB
+#   => heavy-op budget                           ~8.3 GB
+#   measured per heavy op (cdk synth / vitest): 0.44-1.43 GB (median 0.53)
+#   => 3 slots x 1.43 GB worst case              ~4.3 GB  <- fits, with headroom
+#      for the session count roughly doubling before the budget is threatened.
+# Raise KEEL_HEAVY_SLOTS knowingly: each extra slot costs up to ~1.5 GB of peak.
+#
+# A hook cannot do this job: it runs BEFORE the command and exits, so it can only
+# check-and-refuse, never HOLD a slot for the command's lifetime. This wrapper
+# holds its slot via an inherited fd for the whole command; the kernel releases it
+# the instant the process exits — including a runner that SIGSEGVs on teardown —
+# so a crash can never wedge a slot.
+#
+# Usage:   with-heavy-lock npx vitest run path/to.test.ts
+#          with-heavy-lock pnpm --filter @acme/backend build
+#          with-heavy-lock npx cdk synth
+#
+# Composable: nested heavy ops see KEEL_HEAVY_LOCK_HELD=1 and skip re-acquiring,
+# so wrapping a command that itself self-locks will not deadlock.
+#
+# CONFIG
+#   KEEL_HEAVY_SLOTS      concurrent slots (default 3)
+#   KEEL_HEAVY_LOCK_DIR   slot-file dir   (default ~/.keel/heavy.slots)
+#   KEEL_HEAVY_MAX_HEAP   per-op V8 heap ceiling in MB (default 2048; 0 disables).
+#                         Bounds the worst case so slots x heap is predictable.
+#                         2048 sits above the measured 1.43 GB peak, so nothing
+#                         that runs today starts OOM-crashing.
+set -uo pipefail
+
+[ $# -gt 0 ] || { echo "usage: with-heavy-lock <command> [args...]" >&2; exit 2; }
+
+# An ancestor already holds a slot -> just run (deadlock guard).
+if [ "${KEEL_HEAVY_LOCK_HELD:-}" = "1" ]; then
+  exec "$@"
+fi
+
+SLOTS="${KEEL_HEAVY_SLOTS:-3}"
+case "$SLOTS" in ''|*[!0-9]*) SLOTS=3 ;; esac
+[ "$SLOTS" -lt 1 ] && SLOTS=1
+
+LKDIR="${KEEL_HEAVY_LOCK_DIR:-$HOME/.keel/heavy.slots}"
+mkdir -p "$LKDIR" 2>/dev/null || true
+
+# Resolve flock: PATH first, then the common Homebrew location, since hook and
+# launchd environments routinely have a reduced PATH. FAIL OPEN if truly absent —
+# a missing flock must not block the user's command, but say so once, because a
+# silently no-op'd lock is exactly how the old version became invisible.
+FLOCK="$(command -v flock 2>/dev/null || true)"
+[ -z "$FLOCK" ] && [ -x /opt/homebrew/bin/flock ] && FLOCK=/opt/homebrew/bin/flock
+[ -z "$FLOCK" ] && [ -x /usr/local/bin/flock ]    && FLOCK=/usr/local/bin/flock
+if [ -z "$FLOCK" ]; then
+  echo "with-heavy-lock: flock not found — running UNSERIALIZED (install: brew install flock)" >&2
+  exec "$@"
+fi
+
+# --- Acquire one of $SLOTS slots. bash 3.2 (macOS): no {fd} allocation, so fds
+# --- are assigned explicitly via eval. Cycle all slots with a short per-slot
+# --- wait so waiters spread across whichever slot frees first, rather than all
+# --- piling onto slot 1.
+HELD=""
+announced=""
+while [ -z "$HELD" ]; do
+  i=1
+  while [ "$i" -le "$SLOTS" ]; do
+    fd=$((199 + i))
+    if eval "exec ${fd}>\"\$LKDIR/slot.\$i\"" 2>/dev/null; then
+      if "$FLOCK" -w 1 "$fd" 2>/dev/null; then
+        HELD="$fd"
+        break
+      fi
+      eval "exec ${fd}>&-" 2>/dev/null || true
+    fi
+    i=$((i + 1))
+  done
+  if [ -z "$HELD" ] && [ -z "$announced" ]; then
+    echo "⏳ All $SLOTS heavy-op slots busy — queued, waiting (this runs locally, it is not refused)..." >&2
+    announced=1
+  fi
+done
+
+# Bound each op's peak so slots x heap is a predictable ceiling. Appended, so an
+# explicit --max-old-space-size already in NODE_OPTIONS wins (last flag applies).
+if [ "${KEEL_HEAVY_MAX_HEAP:-2048}" != "0" ]; then
+  NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=${KEEL_HEAVY_MAX_HEAP:-2048}"
+  export NODE_OPTIONS
+fi
+
+# exec `env` so the marker is set AND the held fd is inherited by the real
+# command; the slot releases when that command finally exits.
+exec env KEEL_HEAVY_LOCK_HELD=1 "$@"

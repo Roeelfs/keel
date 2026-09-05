@@ -8,6 +8,52 @@ eight sessions each launching a full build at the same instant.
 `tooling/workflow/` is the coordination layer that makes parallelism safe. It is
 ~650 lines of dependency-light Bash (`git` + `jq` + `flock`) and ships with keel.
 
+## The machine-global heavy-op semaphore
+
+Parallel sessions are cheap until they all run `vitest`, `next build`, or
+`cdk synth` at once. `tooling/sandbox/with-heavy-lock` caps how many run
+concurrently and **queues** the rest:
+
+```bash
+with-heavy-lock pnpm test
+with-heavy-lock npx cdk synth
+```
+
+Default is **3 concurrent** (`KEEL_HEAVY_SLOTS`), sized from measurement on a
+24 GB machine running 16 sessions: floor ~12.1 GB (2.8 wired + 3.5 agent
+sessions + 1.0 desktop app + 4.8 other apps), leaving ~8.3 GB of heavy-op
+budget against a measured 0.44-1.43 GB per op. Three slots worst-case ~4.3 GB,
+with headroom for the session count to roughly double. Each extra slot costs
+up to ~1.5 GB of peak, so raise it knowingly.
+
+It holds its slot via an inherited fd for the *entire* lifetime of the wrapped
+command, and the kernel releases it the instant the process exits — even if a
+test runner segfaults on teardown, so a crash never wedges a slot. Nested heavy
+ops see `KEEL_HEAVY_LOCK_HELD=1` and skip re-acquiring, so wrapping a command
+that itself self-locks won't deadlock. `KEEL_HEAVY_MAX_HEAP` (default 2048 MB)
+bounds each op's V8 heap so `slots x heap` is a predictable ceiling.
+
+**Why bounded and not a mutex.** The first version held a single machine-global
+mutex — one heavy op machine-wide. On a ~16-session box that serialized
+everything and was retired for throughput (`de407e3`, 2026-08-28). Removing it
+reintroduced exactly the failure it prevented: macOS *"Your system has run out
+of application memory"*, with 8 concurrent cdk/vitest processes measured at
+0.44-1.43 GB each. Bounded slots keep both properties — parallelism and a
+memory ceiling.
+
+The `serialize-heavy-ops.sh` PreToolUse hook **enforces** it: it detects heavy
+commands (test runners, builds, installs, `cdk synth/deploy/diff/watch`) and, if
+`with-heavy-lock` is on PATH but the command isn't wrapped, refuses with a
+one-line fix. It does **not** suggest "push to CI" — that anti-pattern just
+moves the cost. Heavy ops queue and run *locally*.
+
+Detection lives in the sibling `serialize-heavy-ops.py`, not in `grep`, for one
+measured reason: `grep -Eq` tests input line by line, so the command-position
+`^` anchor also matched inside **heredoc bodies** — writing a runbook that
+merely mentioned `pnpm install` was DENIED. That was 56 of 85 fires across a
+4000-call real-transcript corpus. Heredoc bodies are stripped before matching,
+and the guard fails **open** on any parse error or missing wrapper.
+
 ## Path ownership
 
 Before an agent edits code, it claims its lane:
