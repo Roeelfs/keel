@@ -44,6 +44,27 @@
 #                         Bounds the worst case so slots x heap is predictable.
 #                         2048 sits above the measured 1.43 GB peak, so nothing
 #                         that runs today starts OOM-crashing.
+#   KEEL_HEAVY_WAIT_MAX   seconds to queue before offering the CI hand-off
+#                         (default 180; 0 = queue forever, the old behaviour).
+#   KEEL_CI_DEFER_BUDGET  CI hand-offs allowed per window, machine-wide
+#                         (default 3). Spent budget => queue instead.
+#   KEEL_CI_DEFER_WINDOW  rolling window for that budget in seconds (default 3600).
+#
+# THE CI HAND-OFF, AND WHY IT IS BOUNDED: queueing protects RAM but stalls the
+# session holding the queue -- with slots saturated, a session can sit idle for
+# minutes doing nothing else. So after KEEL_HEAVY_WAIT_MAX the wrapper stops
+# waiting and exits 75 (EX_TEMPFAIL) telling the caller to hand this run to CI
+# and get on with other work, which is what keeps parallel sessions moving.
+#
+# The predecessor deliberately refused to say "push to CI", calling it the
+# anti-pattern that just moves the cost -- and unbounded, it is. Hence a
+# machine-global ROLLING BUDGET (default 3 per hour, shared across every
+# session): enough to unstick a genuinely saturated machine, not enough to
+# relocate the whole test load onto CI. When the budget is spent the wrapper
+# goes back to queueing, so the ceiling is on CI spend, not just on RAM.
+#
+# The wrapper NEVER pushes anything itself. It grants permission and prints the
+# reason; committing and pushing stay the caller's explicit act.
 set -uo pipefail
 
 [ $# -gt 0 ] || { echo "usage: with-heavy-lock <command> [args...]" >&2; exit 2; }
@@ -78,6 +99,50 @@ fi
 # --- piling onto slot 1.
 HELD=""
 announced=""
+WAIT_MAX="${KEEL_HEAVY_WAIT_MAX:-180}"
+case "$WAIT_MAX" in ''|*[!0-9]*) WAIT_MAX=180 ;; esac
+started="$(date +%s)"
+
+# Rolling, machine-global CI hand-off budget. Consulted only on wait timeout.
+# Held under its own lock so concurrent sessions cannot double-spend one slot of
+# budget. Returns 0 (and records the spend) when a hand-off is allowed.
+ci_defer_allowed() {
+  local budget window ledger now cutoff kept
+  budget="${KEEL_CI_DEFER_BUDGET:-3}"
+  window="${KEEL_CI_DEFER_WINDOW:-3600}"
+  case "$budget" in ''|*[!0-9]*) budget=3 ;; esac
+  case "$window" in ''|*[!0-9]*) window=3600 ;; esac
+  [ "$budget" -eq 0 ] && return 1
+  ledger="$(dirname "$LKDIR")/ci-deferrals"
+  now="$(date +%s)"
+  cutoff=$((now - window))
+  # `exec 198>file` takes NO command word, so EVERY redirection on it applies to
+  # the shell PERMANENTLY -- appending `2>/dev/null` here silently sent this
+  # script's stderr to /dev/null for the rest of its life, so the hand-off
+  # instructions below were written into the void while the exit code still
+  # looked right. Pre-create the file quietly instead (the redirect on `:` is
+  # scoped to `:`), then open the fd with no redirections attached.
+  : > "${ledger}.lock" 2>/dev/null || true
+  exec 198>"${ledger}.lock" || return 1
+  "$FLOCK" 198 2>/dev/null || return 1
+  kept=""
+  if [ -f "$ledger" ]; then
+    # keep only timestamps still inside the window
+    kept="$(awk -v c="$cutoff" '$1+0 > c { print $1 }' "$ledger" 2>/dev/null || true)"
+  fi
+  spent=0
+  [ -n "$kept" ] && spent="$(printf '%s\n' "$kept" | grep -c . || true)"
+  if [ "$spent" -ge "$budget" ]; then
+    CI_DEFER_SPENT="$spent"; CI_DEFER_BUDGET="$budget"
+    exec 198>&-
+    return 1
+  fi
+  { [ -n "$kept" ] && printf '%s\n' "$kept"; echo "$now"; } > "$ledger" 2>/dev/null || true
+  CI_DEFER_SPENT=$((spent + 1)); CI_DEFER_BUDGET="$budget"
+  exec 198>&-
+  return 0
+}
+
 while [ -z "$HELD" ]; do
   i=1
   while [ "$i" -le "$SLOTS" ]; do
@@ -91,9 +156,35 @@ while [ -z "$HELD" ]; do
     fi
     i=$((i + 1))
   done
-  if [ -z "$HELD" ] && [ -z "$announced" ]; then
-    echo "⏳ All $SLOTS heavy-op slots busy — queued, waiting (this runs locally, it is not refused)..." >&2
+  [ -n "$HELD" ] && break
+
+  if [ -z "$announced" ]; then
+    if [ "$WAIT_MAX" -gt 0 ]; then
+      echo "⏳ All $SLOTS heavy-op slots busy — queued (up to ${WAIT_MAX}s, then a CI hand-off is offered)..." >&2
+    else
+      echo "⏳ All $SLOTS heavy-op slots busy — queued, waiting (this runs locally, it is not refused)..." >&2
+    fi
     announced=1
+  fi
+
+  if [ "$WAIT_MAX" -gt 0 ] && [ $(( $(date +%s) - started )) -ge "$WAIT_MAX" ]; then
+    if ci_defer_allowed; then
+      echo "" >&2
+      echo "🚚 Slots saturated for ${WAIT_MAX}s — HAND THIS RUN TO CI and move on." >&2
+      echo "   Do NOT keep waiting, and do NOT re-run it locally: the point is that" >&2
+      echo "   this session proceeds in parallel instead of stalling." >&2
+      echo "" >&2
+      echo "   Commit and push the branch; let CI run:  $*" >&2
+      echo "" >&2
+      echo "   CI hand-off budget: ${CI_DEFER_SPENT}/${CI_DEFER_BUDGET} used in the last" >&2
+      echo "   ${KEEL_CI_DEFER_WINDOW:-3600}s, machine-wide. Once spent, heavy ops queue" >&2
+      echo "   locally again — the cap is deliberate, so the test load does not just" >&2
+      echo "   relocate onto CI." >&2
+      exit 75
+    fi
+    # Budget spent -> queue locally after all. Say so once, then stop re-checking.
+    echo "⏳ CI hand-off budget spent (${CI_DEFER_SPENT:-?}/${CI_DEFER_BUDGET:-?} in the last ${KEEL_CI_DEFER_WINDOW:-3600}s) — queueing locally instead." >&2
+    WAIT_MAX=0
   fi
 done
 

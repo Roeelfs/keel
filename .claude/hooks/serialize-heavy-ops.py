@@ -152,8 +152,9 @@ def main():
     sys.stderr.write(
         "🚦 Heavy op (%s) must run under the machine-global heavy-op semaphore so "
         "parallel agent sessions don't exhaust RAM.\n"
-        "Up to %s run concurrently; beyond that it QUEUEs (wait-then-run locally), "
-        "never refused. Prefix it:\n\n"
+        "Up to %s run concurrently. Beyond that it QUEUEs locally for a bounded "
+        "wait, then offers a budgeted hand-off to CI so this session can proceed "
+        "in parallel instead of stalling (exit 75). Prefix it:\n\n"
         "    with-heavy-lock %s\n\n"
         "Light ops stay parallel and need no wrapper: reads, grep, edits, git/gh, "
         "typecheck, lint.\n" % (kind, slots, cmd)

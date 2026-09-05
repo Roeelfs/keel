@@ -41,6 +41,26 @@ of application memory"*, with 8 concurrent cdk/vitest processes measured at
 0.44-1.43 GB each. Bounded slots keep both properties — parallelism and a
 memory ceiling.
 
+### When slots are saturated: a budgeted CI hand-off
+
+Queueing protects RAM, but it stalls the session doing the waiting — with all
+slots busy, a session can sit idle for minutes. So after
+`KEEL_HEAVY_WAIT_MAX` (default 180s) the wrapper stops waiting and exits **75**
+(`EX_TEMPFAIL`), telling the caller to hand that run to CI and get on with other
+work. That is what keeps parallel sessions moving.
+
+The first version of this wrapper pointedly refused to say "push to CI",
+calling it the anti-pattern that just moves the cost — and unbounded, it is.
+So the hand-off is **rationed**: a machine-global rolling budget
+(`KEEL_CI_DEFER_BUDGET`, default 3 per `KEEL_CI_DEFER_WINDOW`, default 1 hour)
+shared across every session. Enough to unstick a genuinely saturated machine;
+not enough to relocate the test load onto CI. Once the budget is spent, heavy
+ops queue locally again, so the cap is on CI spend, not only on RAM.
+`KEEL_HEAVY_WAIT_MAX=0` restores unbounded queueing.
+
+The wrapper never pushes anything itself — it grants permission and prints the
+reason. Committing and pushing stay an explicit act.
+
 The `serialize-heavy-ops.sh` PreToolUse hook **enforces** it: it detects heavy
 commands (test runners, builds, installs, `cdk synth/deploy/diff/watch`) and, if
 `with-heavy-lock` is on PATH but the command isn't wrapped, refuses with a

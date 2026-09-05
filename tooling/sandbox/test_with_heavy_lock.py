@@ -120,6 +120,93 @@ class NestedNoDeadlock(unittest.TestCase):
             self.assertEqual(r.returncode, 0)
 
 
+class CiHandOff(unittest.TestCase):
+    """Bounded queueing, then a budgeted hand-off to CI.
+
+    Queueing alone protects RAM but stalls the waiting session; an unbounded CI
+    escape just relocates the cost. Both halves are pinned here, and the message
+    is asserted as TEXT: the first implementation returned exit 75 correctly while
+    printing nothing, because `exec 198>file 2>/dev/null` has no command word and
+    so redirected the script's stderr permanently. An exit code alone would have
+    passed that bug.
+    """
+
+    def _env(self, d, **over):
+        env = dict(os.environ)
+        env.update({
+            "KEEL_HEAVY_LOCK_DIR": os.path.join(d, "slots"),
+            "KEEL_HEAVY_SLOTS": "1",
+            "KEEL_HEAVY_WAIT_MAX": "2",
+            "KEEL_CI_DEFER_BUDGET": "2",
+            "KEEL_CI_DEFER_WINDOW": "3600",
+        })
+        env.update(over)
+        return env
+
+    def _hold(self, env):
+        p = subprocess.Popen([WRAPPER, "sleep", "30"], env=env,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(1.0)
+        return p
+
+    def test_times_out_and_prints_the_hand_off(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = self._env(d)
+            holder = self._hold(env)
+            try:
+                r = subprocess.run([WRAPPER, "pnpm", "test"], env=env,
+                                   capture_output=True, text=True, timeout=60)
+            finally:
+                holder.kill(); holder.wait(timeout=30)
+            self.assertEqual(r.returncode, 75, "must exit EX_TEMPFAIL, not run or hang")
+            self.assertIn("HAND THIS RUN TO CI", r.stderr,
+                          "guidance must be VISIBLE, not silently swallowed")
+            self.assertIn("budget", r.stderr)
+            self.assertIn("pnpm test", r.stderr, "must echo the command to hand off")
+
+    def test_budget_is_capped_then_falls_back_to_queueing(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = self._env(d)
+            holder = self._hold(env)
+            try:
+                for n in (1, 2):
+                    r = subprocess.run([WRAPPER, "pnpm", "test"], env=env,
+                                       capture_output=True, text=True, timeout=60)
+                    self.assertEqual(r.returncode, 75, "hand-off %d should be allowed" % n)
+                # Budget (2) now spent -> must NOT hand off; must queue instead.
+                r3 = subprocess.run([WRAPPER, "pnpm", "test"], env=env,
+                                    capture_output=True, text=True, timeout=8)
+                self.fail("3rd attempt returned %r instead of queueing" % r3.returncode)
+            except subprocess.TimeoutExpired as e:
+                err = (e.stderr or b"")
+                err = err.decode() if isinstance(err, bytes) else err
+                self.assertNotIn("HAND THIS RUN TO CI", err,
+                                 "budget was spent; it must queue, not hand off again")
+            finally:
+                holder.kill(); holder.wait(timeout=30)
+
+    def test_wait_max_zero_queues_forever(self):
+        """The old behaviour stays available."""
+        with tempfile.TemporaryDirectory() as d:
+            env = self._env(d, KEEL_HEAVY_WAIT_MAX="0")
+            holder = self._hold(env)
+            try:
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    subprocess.run([WRAPPER, "pnpm", "test"], env=env,
+                                   capture_output=True, text=True, timeout=6)
+            finally:
+                holder.kill(); holder.wait(timeout=30)
+
+    def test_free_slot_never_defers(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = self._env(d)
+            r = subprocess.run([WRAPPER, "echo", "ran"], env=env,
+                               capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 0)
+            self.assertIn("ran", r.stdout)
+            self.assertNotIn("HAND THIS RUN TO CI", r.stderr)
+
+
 class HeredocNotCommand(unittest.TestCase):
     """The measured false-positive class: doc bodies are data, not commands."""
 
