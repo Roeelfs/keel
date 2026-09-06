@@ -82,3 +82,28 @@ Hard-won traps, by phase. Read the relevant block before running that phase of s
 machine-global heavy-op semaphore ops (vitest/build/install/cdk). Run them directly.
 Heavy ops go through `with-heavy-lock` (default 3 concurrent); the
 `serialize-heavy-ops` hook enforces it.
+
+## Never edit a script while a background invocation of it is still running
+
+bash reads a script **incrementally**, by byte offset. Rewriting the file in place shifts every
+offset after the edit, and the running shell resumes at its old one — mid-token. Measured
+2026-09-06: `codex-dispatch.sh` was edited (a testability seam, 4 lines) while an in-flight Astra
+lane was still executing it. The lane itself completed normally — full judgment, 105,197 tokens —
+and then the wrapper died on
+
+```
+codex-dispatch.sh: line 214: syntax error near unexpected token `then'
+codex-dispatch.sh: line 214: `qi 'at capacity' "$SCRATCH/lane.log" 2>/dev/null; then'
+```
+
+`if grep -` had simply vanished from the middle of a line that is correct on disk. `bash -n` passes
+before and after, the file is intact, and nothing is reproducible afterwards — so this reads as a
+phantom corruption in the tool you just changed, and the real cost is that the wrapper never
+reached its artifact-copy step: a finished, expensive lane looked dead.
+
+**The rule:** step 4's execute phase and an in-flight dispatch are mutually exclusive for the same
+file. Either finish the lanes before editing the script they run, or edit a copy and move it into
+place atomically (`mv` replaces the inode; the running shell keeps reading the old one safely).
+Corollary for grading: when a lane's log shows a completed answer but the wrapper reports DEAD,
+salvage from the log before re-dispatching — re-running an astra lane costs ~1 point of the weekly
+window.

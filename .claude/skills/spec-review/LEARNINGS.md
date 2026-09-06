@@ -16,6 +16,9 @@ migrations, data pipelines). They are starting wisdom, not project-specific.
 
 ## What Worked
 
+- **2026-08-28 — Deterministic visual-motion specs need both a platform-specific raster identity and an explicit state carrier.** Pinning Playwright, Chromium, viewport, and DPR still leaves OS/architecture/font/raster drift; require one platform child-image digest, font checksums, locale/timezone/color profile, and the same runner for create/update/assert. For partial motion receipts, an environment flag is only an enablement gate: define a server-only validated fixture route that passes static `idle | active | settled` props to the production owners, returns 404 otherwise, and never samples observer timing or elapsed animation.
+- **2026-08-27 — Visual interaction receipts must name changed regions and timed states, not merely require a non-zero screenshot diff.** A local card lift can false-green a required shared-network response, and a final screenshot can hide an early viewport trigger. Require baseline/hover changes in each affected bound plus pre-trigger, partial, and settled captures for staged motion.
+
 ### Pre-injecting adversarial focus concerns
 - **Before dispatching Codex Adversarial, scan the spec for 3-6 specific risk concerns and inject them into the prompt's focus block.** Across many runs this reliably produces an ~85%+ confirm rate with grounded, URL-cited findings — versus generic output when no concerns are injected. Derive the concerns from the spec's own risk vocabulary (the things it claims are safe, the third-party APIs it leans on, the money/auth/data paths it touches). When a fix re-routes a flow onto a path the new hardening doesn't cover, the spec's "it's now protected" acceptance claim is the first thing to attack.
 

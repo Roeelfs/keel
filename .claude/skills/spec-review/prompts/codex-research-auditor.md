@@ -1,6 +1,6 @@
 # Codex Industry Research Auditor (file-review mode)
 
-Researches a SPEC FILE against real-world implementations, OSS libraries, and big-company engineering practice. Uses raw `codex exec` with **network access enabled** so Codex can actually search the web and GitHub.
+Researches a SPEC FILE against real-world implementations, OSS libraries, and big-company engineering practice. Dispatched through `codex-dispatch.sh` with **network access enabled** (`CODEX_NETWORK=1`).
 
 This reviewer does NOT look for defects — that's what the Standard and Adversarial reviewers do. Its job is to **elevate** the spec by grounding it in proven public implementations.
 
@@ -9,13 +9,9 @@ This reviewer does NOT look for defects — that's what the Standard and Adversa
 Use Bash with `run_in_background: true` (no trailing `&`). You'll be notified when it completes.
 
 ```bash
-cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
-  -m gpt-5.6-sol \
-  --config model_reasoning_effort="high" \
-  --config service_tier="fast" \
-  --sandbox workspace-write \
-  --config sandbox_workspace_write.network_access=true \
-  "Industry-research audit of the spec at <RELATIVE_SPEC_PATH>. Your job is to elevate this spec by grounding it in real-world implementations — NOT to find defects.
+S=/tmp/spec-review-$$; mkdir -p "$S"
+cat > "$S/codex-spec-research.md" <<'PROMPT'
+Industry-research audit of the spec at <RELATIVE_SPEC_PATH>. Your job is to elevate this spec by grounding it in real-world implementations — NOT to find defects.
 
 Do this in order:
 1. Read the spec and identify 3-6 core themes, primitives, or design patterns it introduces.
@@ -36,15 +32,24 @@ Rules:
 - Cite URLs for every claim. No citation = drop the claim.
 - Prefer primary sources (official docs, engineering blogs, RFCs) over secondary (Medium posts, random tutorials).
 - Do not repeat findings that are already obvious defects — that's other reviewers' job. Focus on elevation, not defect-hunting.
-- No style feedback. No generic 'consider using a linter.' Only material, sourced suggestions." \
-  2>&1 | tee /tmp/codex-spec-research-$$.txt
+- No style feedback. No generic 'consider using a linter.' Only material, sourced suggestions.
+PROMPT
+CODEX_NETWORK=1 CODEX_SERVICE_TIER=fast \
+  ~/.claude/scripts/codex-dispatch.sh research "$S/codex-spec-research.md" "$S/codex-spec-research.out.md" <PROJECT_ROOT>
 ```
+
+**Why the wrapper and never a raw `codex exec`.** It resolves the REAL node + `codex.js` instead of
+the `codex` PATH shim — a shim resolves its runtime through `$HOME`/`.tool-versions` and exits
+rc=126/127 from any directory pinning a different node, which is how a whole lane wave dies at once
+with nothing in the outfile. It also strips ~30% of the billed input, asks `codex-headroom.sh` for
+the model (class **`research`** here), mounts `<PROJECT_ROOT>` **read-only** — reads and git work, the
+sandbox denies writes — grants shell network for the web cross-referencing, and preserves the lane
+log at `"$S/codex-spec-research.out.md.log"` so a dead lane can be graded. The prompt goes in via a heredoc file,
+never as an inline quoted argument.
 
 ## Rules
 
-- `echo '' |` — prevents stdin hang
 - `run_in_background: true` on the Bash tool — **no trailing `&`**
-- `2>&1 | tee FILE` — captures output
 - `--sandbox workspace-write` + `sandbox_workspace_write.network_access=true` + `service_tier="fast"` — **network access is required**. Research without web access is just the model's training data, which defeats the purpose.
 - Relative spec path
 - **No JSON templates, no output format examples, no markers in the prompt.** Codex echoes prompts — templates become fake output.

@@ -13,29 +13,54 @@ In the same window **20 of 52 completed with full content** — so a failing lan
 evidence the runtime is down, and "Codex is broken" is a conclusion that needs its own
 proof. An ungraded lane is counted as a reviewer that never reviewed.
 
-## Invocation
+## Invocation — always the wrapper, never a bare `codex`
 
 ```bash
-codex exec --skip-git-repo-check --ignore-rules \
-  -m gpt-5.6-sol -c model_reasoning_effort=high \
-  -s <sandbox-tier> -o <outfile> - < <promptfile>
+S=/tmp/<lane>-$$; mkdir -p "$S"
+cat > "$S/task.md" <<'PROMPT'
+<the task; repo-relative paths are fine>
+PROMPT
+CODEX_NETWORK=1 CODEX_SERVICE_TIER=fast \
+  ~/.claude/scripts/codex-dispatch.sh <class> "$S/task.md" "$S/task.out.md" <PROJECT_ROOT>
 ```
 
-- **Prompt via stdin from a FILE** (`- < <promptfile>`). Passing it as an inline quoted
-  argument is a known failure mode — escaping breaks and the lane receives a mangled task.
-- **`--ignore-rules`** stops the lane spending its run loading instruction files.
-  *It is not an authentication fix* — a 401 from a globally-configured MCP server in the
+- **`codex` on `PATH` is an asdf/rbenv SHIM, and a shim is not a runtime.** It resolves node
+  through `$HOME` and the nearest `.tool-versions`, so it exits **rc=126/127** from any
+  directory pinning a version that lacks the CLI — a whole lane wave dies at once with empty
+  outfiles and no error in the artifact. The wrapper resolves the real `node` + `codex.js`
+  directly. This is the single reason the invocation is not a bare `codex exec`.
+- **`<class>`** picks the model through `codex-headroom.sh`, which is also the capacity gate:
+  `frontier` → astra (the final-gate judgment) · `falsifier|verify|judge|security` → sol, and
+  this class never pace-degrades · `review|research|synthesis` → terra · `mining|census|
+  trivial` → luna. Never hardcode a model; never invent a class to get a better one.
+- **The repo is READ-ONLY to the lane.** Measured on codex 0.153.4: with cwd in a scratch dir
+  the lane reads any path and runs git in the repo, while a write there returns `Operation not
+  permitted`. Writes go to its scratch dir. Do **not** "fix" a path problem by pointing `-C` at
+  the repo — under `workspace-write` the working root *is* the writable root.
+- **Repo-relative paths resolve.** The wrapper prepends a `REPO:` header with the absolute root
+  and symlinks it as `repo`. Without that the lane sits in an empty temp dir and reports it
+  cannot see the repo (2026-09-06: two lanes died exactly this way).
+- **Prompt via a heredoc FILE**, never an inline quoted argument — escaping breaks and the lane
+  receives a mangled task. The wrapper handles stdin and `-o` itself.
+- **`CODEX_NETWORK=1`** for a lane that must reach the web (CVEs, RFCs, vendor docs); omit it
+  otherwise. **`CODEX_SERVICE_TIER=fast`** for a lane a caller is actively waiting on.
+- **Read a *slice* of the outfile** afterward. Never let a lane's full output land in the
+  caller's context. The lane log is preserved at `<outfile>.log` — that is the grading input.
+- Launch with the Bash tool's `run_in_background: true`. **No trailing `&` and no `nohup`** —
+  the harness reaps the process group and the lane dies with its EXIT trap unfired.
+- `--ignore-rules` (passed by the wrapper) stops the lane spending its run loading instruction
+  files. *It is not an authentication fix* — a 401 from a globally-configured MCP server in the
   Codex config is independent of it, and no flag makes a quota wall go away.
-- **`-o <outfile>`**, and read a **slice** of the outfile afterward. Never let the lane's
-  full output land in the caller's context.
-- Launch with the Bash tool's `run_in_background: true`. No trailing `&`.
-- Sandbox tier is the caller's choice: `read-only` for review/research, wider only when
-  the lane must write, and only inside a worktree it owns.
+- **One raw exception: `codex exec resume --last`.** The wrapper always opens a fresh thread, so
+  a follow-up/debate turn calls the CLI directly — and must export
+  `CODEX_HOME="$HOME/.codex-lean"`, because that is the profile the lane ran under. Resuming
+  from the default profile finds the wrong thread or none, which reads as a silent concession.
 
 ## Grading — run this before counting the lane
 
 ```bash
 wc -l <outfile>
+grep -ciE "hit your usage limit|try again at" <outfile>.log     # the wrapper's preserved log
 grep -ciE 'severity|critical|high|medium' <outfile>      # for a review lane
 grep -ciE "hit your usage limit|try again at" <outfile>  # quota wall
 ```

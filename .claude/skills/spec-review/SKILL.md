@@ -179,7 +179,7 @@ Read the spec with fresh eyes. Then dispatch ALL 13 primary reviewers simultaneo
 - **Job:** Search the whole local project scope, not just the current worktree: recent pushed refs, dirty worktrees, architecture docs, feature surfaces, sibling specs, review files, and test plans. Produces evidence-backed drift candidates and a narrow investigator dispatch plan. This is a scout pass — it does not edit files or deep-read every candidate.
 
 **Agent 7 — Codex Adversarial Review:**
-- **Execution:** `codex exec` via Bash with `run_in_background: true`
+- **Execution:** `~/.claude/scripts/codex-dispatch.sh` via Bash with `run_in_background: true` (never a raw `codex exec` — that goes through the PATH shim)
 
 > **Grade this lane by its ARTIFACT before counting it** — exit 0 is not evidence. Invocation flags, the `wc -l` / severity-grep check, and the DEAD vs **BLOCKED-ON-QUOTA** vs REAL classification live in [`docs/codex-lane-contract.md`](../../../docs/codex-lane-contract.md). Measured 2026-08-02/03: 18 of 52 rollouts hit a quota wall while exiting normally; 20 of 52 completed fine, so a dead lane is never proof the runtime is down.
 - **Model:** GPT-5.6-sol, high reasoning effort
@@ -187,20 +187,20 @@ Read the spec with fresh eyes. Then dispatch ALL 13 primary reviewers simultaneo
 - **Job:** Attack surface analysis. Auth/permissions, data loss, rollback safety, race conditions, version skew, observability gaps, architectural fit, simplicity.
 
 **Agent 8 — Codex Standard Review:**
-- **Execution:** `codex exec` via Bash with `run_in_background: true`
+- **Execution:** `~/.claude/scripts/codex-dispatch.sh` via Bash with `run_in_background: true` (never a raw `codex exec` — that goes through the PATH shim)
 - **Model:** GPT-5.6-sol, high reasoning effort
 - **Input:** The SPEC FILE content (NOT git diff)
 - **Job:** Completeness, correctness, feasibility, type safety, implementation gaps, stale code detection. **Web access enabled** — Codex cross-references API/library/standard claims against authoritative sources.
 
 **Agent 9 — Codex Industry Research Auditor:**
-- **Execution:** `codex exec` via Bash with `run_in_background: true`
+- **Execution:** `~/.claude/scripts/codex-dispatch.sh` via Bash with `run_in_background: true` (never a raw `codex exec` — that goes through the PATH shim)
 - **Model:** GPT-5.6-sol, high reasoning effort
 - **Input:** The SPEC FILE content (NOT git diff)
 - **Job:** **Elevation, not defect-hunting.** Pick 3-6 core themes from the spec. For each, research the web + GitHub for (a) maintained OSS libraries that already solve it, (b) public engineering writeups from big companies (Stripe/Netflix/Google/Meta/Airbnb/etc.) showing how they shipped it at scale, (c) production gotchas those companies hit. Output grounded, URL-cited refactor suggestions. Two soft severities: **ELEVATE** (proven public pattern worth adopting) and **CAUTION** (spec contradicts established best practice).
 
 **Agent 10 — Codex Frontier Judgment (Astra)** (`prompts/codex-frontier-judge.md`) — **non-droppable in every profile**:
-- **Execution:** `codex exec` via Bash with `run_in_background: true`; model from `~/.claude/scripts/codex-headroom.sh --model frontier` (`gpt-6-astra`; `CLAUDE` only at the refuse threshold → substitute one Fable-pinned `critic` and say so)
-- **Model:** GPT-6-astra, high reasoning effort (never `ultra`)
+- **Execution:** `~/.claude/scripts/codex-dispatch.sh frontier` via Bash with `run_in_background: true` (the wrapper asks `codex-headroom.sh --model frontier` itself) (`gpt-6-astra`; `CLAUDE` only at the refuse threshold → substitute one Fable-pinned `critic` and say so)
+- **Model:** GPT-6-astra, high reasoning effort (never `ultra` — on astra that is task delegation, not a quality dial); gate class `frontier`
 - **Input:** The SPEC FILE content (NOT git diff) + the adversarial lane's FOCUS concerns + the spec's non-goals
 - **Job:** The HIGHER judgment rung beside sol, not instead of it (founder directive 2026-09-06). Rules on whether this is the right thing to build: the one decision most likely to be wrong (with codebase evidence), the three cross-cutting risks the narrow lanes miss, what a best-in-class team would do differently for THIS codebase, and a verdict approve / approve-with-changes / redesign. One lane per review — never fanned out.
 
@@ -211,14 +211,15 @@ Read the spec with fresh eyes. Then dispatch ALL 13 primary reviewers simultaneo
 **All 13 primary reviewers dispatch at the same time.** The 9 Claude agents via the Agent tool, all 4 Codex reviews via separate Bash calls.
 
 **Dispatch invariants** (all mandatory):
-- `run_in_background: true` on the Bash tool — **no trailing `&`** in the command. Four separate Bash calls = parallel execution with completion notifications.
-- `echo '' |` prefix — prevents stdin hang
-- `$$` in output path — prevents collisions (four distinct output files: `codex-spec-std-$$.txt`, `codex-spec-adv-$$.txt`, `codex-spec-research-$$.txt`, `codex-spec-frontier-$$.txt`)
+- **Every Codex lane dispatches through `~/.claude/scripts/codex-dispatch.sh`, never a raw `codex exec`.** The wrapper resolves the REAL node + `codex.js`; a bare `codex` is an asdf/rbenv PATH shim that resolves its runtime through `$HOME`/`.tool-versions` and exits rc=126/127 from a directory pinning a different node — that is how four lanes die at once with empty outfiles (2026-09-06). It also strips ~30% of billed input, asks the headroom gate for the model, mounts the repo read-only, and preserves each lane log at `<outfile>.log` for grading.
+- `run_in_background: true` on the Bash tool — **no trailing `&`** in the command. Four separate Bash calls = parallel execution with completion notifications. Never background the wrapper with shell `&`/`nohup` — the harness reaps the process group and the lane dies silently.
+- `$$` in the scratch dir — prevents collisions (four distinct output files under `/tmp/spec-review-$$/`: `codex-spec-std.out.md`, `codex-spec-adv.out.md`, `codex-spec-research.out.md`, `codex-spec-frontier.out.md`)
 - `2>&1 | tee FILE` — captures output (no `&`)
-- **All four Codex calls use `--sandbox workspace-write` + `--config sandbox_workspace_write.network_access=true`** — web access is required for all of them, not just research
+- **All four Codex calls pass `CODEX_NETWORK=1 CODEX_SERVICE_TIER=fast`** — web access is required for all of them, not just research. The repo itself is mounted read-only; measured 2026-09-06 on codex 0.153.4, a lane reads any path and git-queries the repo while a write to it returns `Operation not permitted`
 - RELATIVE spec path (not absolute)
 - **No JSON templates, no markers, no output format examples in the prompt** — Codex echoes them back as fake output
 - **Never use `companion review` or `companion adversarial-review`** — those review git diffs, not spec files
+- **The spec path stays RELATIVE.** The wrapper prepends a `REPO:` header naming the absolute root and symlinks it as `repo`, so a relative path resolves. (Before that fix the lane sat in an empty temp dir and reported it could not see the repo — the shape that killed two lanes on 2026-09-06.)
 
 **Agent 11 (same parallel wave) — Investigation Workflow (elevation grounding).** In the same wave as the 13 reviewers, launch the **investigation skill** on the spec's core themes — this is the deepened elevation lane (see Step 5c). It runs as a background dynamic Workflow, so launch it now and collect it in Step 4c alongside Codex.
 
@@ -263,7 +264,7 @@ The 9 Claude agents return first (2-6 min; Drift Scout may take longer on projec
 
 **If a Codex run seems stuck** (no notification after 15+ min for std/adv, 40+ min for research), check if the process is alive:
 ```bash
-pgrep -f "codex exec" && echo "still running" || echo "exited"
+pgrep -f 'codex(\.js)? exec' && echo "still running" || echo "exited"
 ```
 If exited, read the file. If still running, let it finish — Codex legitimately runs 20-40 min on complex specs, and research can run longer.
 
@@ -358,8 +359,16 @@ Our codebase verifier found: <EVIDENCE_FROM_CODEBASE>
 
 Specific question: <TARGETED_QUESTION>
 
-Do you still hold your position? If so, what specific evidence would change your mind?" | codex exec --skip-git-repo-check resume --last 2>/dev/null
+Do you still hold your position? If so, what specific evidence would change your mind?" \
+  | CODEX_HOME="$HOME/.codex-lean" codex exec --skip-git-repo-check resume --last 2>/dev/null
 ```
+
+**`CODEX_HOME` is load-bearing here, and this is the one lane that stays raw.** The wrapper has no
+resume mode — it always opens a fresh thread — so this follow-up calls the CLI directly. But the
+lanes it is resuming ran under the wrapper's lean profile, so a resume from the default profile
+finds the wrong thread or none at all and reads as "Codex declined to answer". If the CLI cannot be
+reached here at all (shim rc=126/127), skip the debate and record it as unavailable in the report
+rather than treating silence as a concession.
 
 3. **Evaluate Codex's response.** If Codex:
    - **Concedes** → note as resolved, move on
@@ -596,16 +605,16 @@ review synthesis.
    - **List specific files to check** (from the codebase verifier's findings) — don't say "explore the codebase"
    - Include acknowledged divergences as "known intentional — do not re-flag"
    - Keep the prompt under ~50 lines. Plain language, no XML blocks, no JSON templates.
-5. Dispatch via `codex exec` with `run_in_background: true` (no `&`):
+5. Dispatch via the wrapper with `run_in_background: true` (no `&`):
    ```bash
-   TASK_TAG="alignment-$$"
-   cd <PROJECT_ROOT> && echo '' | codex exec --skip-git-repo-check \
-     -m gpt-5.6-sol \
-     --config model_reasoning_effort="high" \
-     --sandbox read-only \
-     "Check if the following spec claims match reality in the codebase. <INLINE SPEC KEY CLAIMS>. Check these specific files: <LIST 5-10 FILES FROM CODEBASE VERIFIER>. For each claim that doesn't match, state: what the spec says, what the code does, which file:line, and severity. Do NOT read files beyond the ones listed." \
-     2>&1 | tee /tmp/alignment-${TASK_TAG}.txt
+   S=/tmp/alignment-$$; mkdir -p "$S"
+   cat > "$S/alignment.md" <<'PROMPT'
+Check if the following spec claims match reality in the codebase. <INLINE SPEC KEY CLAIMS>. Check these specific files: <LIST 5-10 FILES FROM CODEBASE VERIFIER>. For each claim that doesn't match, state: what the spec says, what the code does, which file:line, and severity. Do NOT read files beyond the ones listed.
+PROMPT
+   CODEX_SERVICE_TIER=fast \
+     ~/.claude/scripts/codex-dispatch.sh verify "$S/alignment.md" "$S/alignment.out.md" <PROJECT_ROOT>
    ```
+   No `CODEX_NETWORK` — this lane checks the local codebase and needs no internet.
 
 **CRITICAL: Do NOT tell Codex to "explore the codebase" or "investigate drift."** That causes it to read every file it can find until budget exhaustion with zero synthesis. Give it specific claims to verify against specific files.
 
@@ -729,12 +738,12 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 | 5c | **Live-Evidence Premise Auditor** | `prompts/live-evidence-auditor.md` | general-purpose | opus | **First-wave, gated to specs touching a live surface. Extracts load-bearing premises and falsifies each against LIVE evidence: deployed flag/config values, live schema/signatures/rows (provenance, duplicate keys, dedup dry-runs, row-size × page-size × channel-cap arithmetic), upstream-trigger liveness (a dead pipeline = bake theatre), DNS/infra reads, budget traceability (every number → a measurement or a named constant). Read-only, every verdict cites the exact command + observed value.** |
 | 6 | **Spec Drift Scout** | `prompts/spec-drift-scout.md` | general-purpose | sonnet | **Cross-worktree/project-scope drift: recent pushed refs, dirty worktrees, sibling specs, architecture changes, feature overlap, missing spec updates** |
 | 6b | **Spec Drift Investigator** | `prompts/spec-drift-investigator.md` | general-purpose | opus | **Second-wave deep dive on one drift candidate: update current/other spec, combine, move, split, create missing spec, or mark intentional** |
-| 7 | **Codex Adversarial** | `prompts/codex-adversarial-reviewer.md` | **codex exec (web)** | **GPT-5.6-sol** | **Attack surface, risks — cross-referenced against public CVEs/post-mortems** |
-| 8 | **Codex Standard** | `prompts/codex-standard-reviewer.md` | **codex exec (web)** | **GPT-5.6-sol** | **Completeness, feasibility — API/library claims verified against primary sources** |
-| 9 | **Codex Industry Research** | `prompts/codex-research-auditor.md` | **codex exec (web)** | **GPT-5.6-sol** | **Elevation: OSS libraries, big-company patterns, production gotchas with URL citations** |
-| 10 | **Codex Frontier Judgment** | `prompts/codex-frontier-judge.md` | **codex exec (web)** | **GPT-6-astra** (gate class `frontier`) | **The higher judgment rung beside sol, EVERY profile: wrong-decision hunt, cross-cutting risks the narrow lanes miss, best-in-class delta, approve / approve-with-changes / redesign** |
+| 7 | **Codex Adversarial** | `prompts/codex-adversarial-reviewer.md` | **codex-dispatch.sh (web)**, class `falsifier` | **GPT-5.6-sol** | **Attack surface, risks — cross-referenced against public CVEs/post-mortems** |
+| 8 | **Codex Standard** | `prompts/codex-standard-reviewer.md` | **codex-dispatch.sh (web)**, class `verify` | **GPT-5.6-sol** | **Completeness, feasibility — API/library claims verified against primary sources** |
+| 9 | **Codex Industry Research** | `prompts/codex-research-auditor.md` | **codex-dispatch.sh (web)**, class `research` | **GPT-5.6-terra** | **Elevation: OSS libraries, big-company patterns, production gotchas with URL citations** |
+| 10 | **Codex Frontier Judgment** | `prompts/codex-frontier-judge.md` | **codex-dispatch.sh (web)**, class `frontier` | **GPT-6-astra** | **The higher judgment rung beside sol, EVERY profile: wrong-decision hunt, cross-cutting risks the narrow lanes miss, best-in-class delta, approve / approve-with-changes / redesign** |
 | 11 | **Investigation Workflow** | `investigation` skill (`DEEP-WORKFLOW.md`) | **dynamic Workflow** | **multi-agent** | **Elevation grounding: spec themes framed against THIS codebase, fanned out across sources, adversarially verified in code → industry-standard + best-in-class elevation evidence (Claude Code-only)** |
-| 12 | **Alignment Investigator** | (coordinator-composed prompt) | **codex exec** | **GPT-5.6-sol** | **Decision-reality drift** |
+| 12 | **Alignment Investigator** | (coordinator-composed prompt) | **codex-dispatch.sh**, class `verify` | **GPT-5.6-sol** | **Decision-reality drift** |
 | 13 | **Finding Falsifiers** (one per CRITICAL/MAJOR) | `prompts/finding-falsifier.md` | general-purpose | sonnet | **Post-wave disprove-step: refute each finding against code/spec/evidence; verify every citation a reviewer or fix introduces; resolve Claude↔Codex repo-fact splits by reading the seam; guard severity downgrades (an unrefuted CRITICAL keeps its severity)** |
 
 ## Process Gates (bind the coordinator, not just the reviewers)
