@@ -1,7 +1,7 @@
 ---
 license: MIT
 name: spec-review
-description: Multi-model spec verification pipeline. Linear flow (no compaction) — mines session design decisions PLUS the spec's full context lineage (ticket, cited ADRs, prior sessions, memory, known-error ledger) into generated review questions, dispatches 12 parallel reviewers (9 Claude including provider-fit, edge-case, security, observability, live-evidence premise auditor, and cross-worktree drift scout + 3 Codex including industry research) plus the investigation skill's dynamic Workflow grounding the elevation lane, then runs a per-finding falsifier wave (a disprove-step on every CRITICAL/MAJOR before it reaches the report) and fixes only real design defects in the spec prose. Never injects review scaffolding (matrices/EC/Sec/Obs/Drift tables) into the spec.
+description: Multi-model spec verification pipeline. Linear flow (no compaction) — mines session design decisions PLUS the spec's full context lineage (ticket, cited ADRs, prior sessions, memory, known-error ledger) into generated review questions, dispatches 13 parallel reviewers (9 Claude including provider-fit, edge-case, security, observability, live-evidence premise auditor, and cross-worktree drift scout + 4 Codex: standard, adversarial, industry research, and the Astra frontier judgment that runs in every profile) plus the investigation skill's dynamic Workflow grounding the elevation lane, then runs a per-finding falsifier wave (a disprove-step on every CRITICAL/MAJOR before it reaches the report) and fixes only real design defects in the spec prose. Never injects review scaffolding (matrices/EC/Sec/Obs/Drift tables) into the spec.
 ---
 
 # Spec Review — Multi-Agent Verification Pipeline
@@ -114,7 +114,7 @@ If decision-mining fails or there's no session to mine (e.g. the spec arrived fr
 **2d. Mechanical pre-filter (coordinator, inline, cheap).** Before spending reviewer tokens, resolve every deterministically-checkable claim yourself: `git fetch origin` + pin the merge-base; grep symbols the spec names; check the live-schema snapshot for named tables/columns; run any existing parity/allowlist test the spec touches; `gh pr list --state open` for surface overlap. Facts resolved here go into the dossier as ground truth — a claim answerable by a query never goes to an LLM lane.
 
 **2e. Pick the review profile — sanctioned, logged, never silent.** Right-sizing is allowed ONLY as a named profile, and the report must state which profile ran and which lanes were dropped:
-- **full** (default for any spec doc): all 12 reviewers + investigation.
+- **full** (default for any spec doc): all 13 reviewers + investigation. **Codex Frontier (Agent 10, Astra) runs in EVERY profile — it is never a dropped lane.**
 - **focused** (surgical single-seam change): codebase-verifier + edge-case miner + live-evidence (if a live surface) + ONE Codex adversarial + the falsifier wave. Dossier miner still runs.
 - **hotfix** (prod-down, minutes matter): codebase-verifier + one Fable `critic` seeded with the dossier's generated questions.
 Rules: (a) **domain-triggered lanes are non-droppable** — a spec adding a credential/table/authz surface always gets the security miner, a spec touching a live runtime always gets live-evidence, and a spec matching the 3c gate (rewrites / replaces / migrates / cuts over an existing capability, adds a plane/profile/twin, or edits one representation of a contract that has others) always gets `cutover-architect`, whatever the profile; (b) **line-count is not the risk axis, blast-radius is** — a 47-line spec touching a core reducer gets `full`; (c) **lane-manifest assertion**: before reporting, verify every announced lane actually produced output (list the output files/agent returns) — announced-but-never-dispatched lanes have happened twice; (d) the report's reviewer line lists dropped lanes as `SKIPPED (<profile>)`, never silently.
@@ -127,9 +127,9 @@ Dispatch the **Design Decisions Extractor** agent using `prompts/design-decision
 
 The agent reads the structured JSON (user-turn windows, files-edited, commits, tool distribution) and returns a dossier: key decisions, rejected alternatives, user corrections, scope, concerns, requirement quotes, gaps & ambiguities. **You do NOT read the JSON yourself.** (Skip this step if 2b was skipped.)
 
-### Step 4: Dispatch 12 Reviewers in Parallel
+### Step 4: Dispatch 13 Reviewers in Parallel
 
-Read the spec with fresh eyes. Then dispatch ALL 12 primary reviewers simultaneously — they are independent. Append the Context Dossier (Step 2c) + that lane's generated questions to every prompt. **Keep lanes independent — no shared scratchpad, no lane sees another lane's output** (shared-context debate amplifies correlated bias; independence keeps errors uncorrelated for the falsifier + synthesis).
+Read the spec with fresh eyes. Then dispatch ALL 13 primary reviewers simultaneously — they are independent. Append the Context Dossier (Step 2c) + that lane's generated questions to every prompt. **Keep lanes independent — no shared scratchpad, no lane sees another lane's output** (shared-context debate amplifies correlated bias; independence keeps errors uncorrelated for the falsifier + synthesis).
 
 **Agent 1 — Completeness & Alignment** (`prompts/completeness-reviewer.md`):
 - **Type:** `general-purpose` | **Model:** `opus`
@@ -198,23 +198,29 @@ Read the spec with fresh eyes. Then dispatch ALL 12 primary reviewers simultaneo
 - **Input:** The SPEC FILE content (NOT git diff)
 - **Job:** **Elevation, not defect-hunting.** Pick 3-6 core themes from the spec. For each, research the web + GitHub for (a) maintained OSS libraries that already solve it, (b) public engineering writeups from big companies (Stripe/Netflix/Google/Meta/Airbnb/etc.) showing how they shipped it at scale, (c) production gotchas those companies hit. Output grounded, URL-cited refactor suggestions. Two soft severities: **ELEVATE** (proven public pattern worth adopting) and **CAUTION** (spec contradicts established best practice).
 
+**Agent 10 — Codex Frontier Judgment (Astra)** (`prompts/codex-frontier-judge.md`) — **non-droppable in every profile**:
+- **Execution:** `codex exec` via Bash with `run_in_background: true`; model from `~/.claude/scripts/codex-headroom.sh --model frontier` (`gpt-6-astra`; `CLAUDE` only at the refuse threshold → substitute one Fable-pinned `critic` and say so)
+- **Model:** GPT-6-astra, high reasoning effort (never `ultra`)
+- **Input:** The SPEC FILE content (NOT git diff) + the adversarial lane's FOCUS concerns + the spec's non-goals
+- **Job:** The HIGHER judgment rung beside sol, not instead of it (founder directive 2026-09-06). Rules on whether this is the right thing to build: the one decision most likely to be wrong (with codebase evidence), the three cross-cutting risks the narrow lanes miss, what a best-in-class team would do differently for THIS codebase, and a verdict approve / approve-with-changes / redesign. One lane per review — never fanned out.
+
 **IMPORTANT: Do NOT use the companion script's `review` or `adversarial-review` commands.** Those commands review git working tree diffs — they feed Codex the code changes, NOT the spec file. For spec review, Codex must read and review the SPEC document.
 
-**Composing the Codex prompts:** Use the exact dispatch patterns from `prompts/codex-standard-reviewer.md`, `prompts/codex-adversarial-reviewer.md`, and `prompts/codex-research-auditor.md`. Before dispatching, scan the spec for 3-6 specific risk concerns to inject into the adversarial prompt's `<FOCUS_TEXT_FROM_COORDINATOR_IF_ANY>`.
+**Composing the Codex prompts:** Use the exact dispatch patterns from `prompts/codex-standard-reviewer.md`, `prompts/codex-adversarial-reviewer.md`, `prompts/codex-research-auditor.md`, and `prompts/codex-frontier-judge.md`. Before dispatching, scan the spec for 3-6 specific risk concerns to inject into the adversarial prompt's `<FOCUS_TEXT_FROM_COORDINATOR_IF_ANY>`.
 
-**All 12 primary reviewers dispatch at the same time.** The 9 Claude agents via the Agent tool, all 3 Codex reviews via separate Bash calls.
+**All 13 primary reviewers dispatch at the same time.** The 9 Claude agents via the Agent tool, all 4 Codex reviews via separate Bash calls.
 
 **Dispatch invariants** (all mandatory):
-- `run_in_background: true` on the Bash tool — **no trailing `&`** in the command. Three separate Bash calls = parallel execution with completion notifications.
+- `run_in_background: true` on the Bash tool — **no trailing `&`** in the command. Four separate Bash calls = parallel execution with completion notifications.
 - `echo '' |` prefix — prevents stdin hang
-- `$$` in output path — prevents collisions (three distinct output files: `codex-spec-std-$$.txt`, `codex-spec-adv-$$.txt`, `codex-spec-research-$$.txt`)
+- `$$` in output path — prevents collisions (four distinct output files: `codex-spec-std-$$.txt`, `codex-spec-adv-$$.txt`, `codex-spec-research-$$.txt`, `codex-spec-frontier-$$.txt`)
 - `2>&1 | tee FILE` — captures output (no `&`)
-- **All three Codex calls use `--sandbox workspace-write` + `--config sandbox_workspace_write.network_access=true`** — web access is required for all of them, not just research
+- **All four Codex calls use `--sandbox workspace-write` + `--config sandbox_workspace_write.network_access=true`** — web access is required for all of them, not just research
 - RELATIVE spec path (not absolute)
 - **No JSON templates, no markers, no output format examples in the prompt** — Codex echoes them back as fake output
 - **Never use `companion review` or `companion adversarial-review`** — those review git diffs, not spec files
 
-**Agent 11 (same parallel wave) — Investigation Workflow (elevation grounding).** In the same wave as the 12 reviewers, launch the **investigation skill** on the spec's core themes — this is the deepened elevation lane (see Step 5c). It runs as a background dynamic Workflow, so launch it now and collect it in Step 4c alongside Codex.
+**Agent 11 (same parallel wave) — Investigation Workflow (elevation grounding).** In the same wave as the 13 reviewers, launch the **investigation skill** on the spec's core themes — this is the deepened elevation lane (see Step 5c). It runs as a background dynamic Workflow, so launch it now and collect it in Step 4c alongside Codex.
 
 1. Scan the spec for its **3–6 core themes** — reuse the same scan that seeds the Codex Research Auditor (Agent 9).
 2. Invoke the investigation skill (it **always** runs as a dynamic Workflow — frame → research → adversarial-verify → synthesize) with a premise like:
@@ -267,11 +273,11 @@ If exited, read the file. If still running, let it finish — Codex legitimately
 3. **Report honestly:** the Final Report's verdict lines say `timed-out/usage-limit — backfilled by <substitute>`; cross-examination (Step 5b) is recorded as unavailable for those lanes.
 The same degraded-mode principle applies to a Claude-model/classifier outage: run the lanes on an available model tier rather than zeroing the pipeline, and log the substitution.
 
-Wait for all 12 primary reviewers, the Investigation Workflow (Agent 11), and any second-wave drift investigators to complete before starting Step 5.
+Wait for all 13 primary reviewers, the Investigation Workflow (Agent 11), and any second-wave drift investigators to complete before starting Step 5.
 
 ### Step 5: Merge & Classify
 
-Collect all 12 primary reports (9 Claude markdown + 3 Codex text/JSON) plus any second-wave drift investigator reports and the Investigation Workflow brief. The Live-Evidence Premise Auditor's LE-N table gets its own report section (like Edge-Case/Security/Obs); its CRITICAL/MAJOR REFUTED-premise rows are auto-applied as prose fixes when in scope. The Research Auditor findings **and the Investigation Workflow brief** are handled separately — they go into the Industry Insights section (see Step 5c) and do NOT feed the defect-classification pipeline below. The Edge-Case Miner, Security Miner, Observability Auditor, and Spec Drift Scout/Investigators are also handled in their own sections (see Step 5c) — CRITICAL/MAJOR Edge-Case rows with `Spec Coverage: MISSING`, CRITICAL/MAJOR Security rows, CRITICAL/MAJOR Observability rows, and CRITICAL/MAJOR drift findings with `update-current-spec` action are auto-applied like other consensus issues when scoped to the target spec, but they don't get cross-examined since they do not have a direct Codex peer in this skill. Classify each **defect** finding from the other reviewers (completeness, codebase, architecture, cutover-architect when dispatched — classified, never cross-examined, no Codex peer — provider-fit, codex-standard, codex-adversarial):
+Collect all 13 primary reports (9 Claude markdown + 4 Codex text/JSON) plus any second-wave drift investigator reports and the Investigation Workflow brief. The Live-Evidence Premise Auditor's LE-N table gets its own report section (like Edge-Case/Security/Obs); its CRITICAL/MAJOR REFUTED-premise rows are auto-applied as prose fixes when in scope. The Research Auditor findings **and the Investigation Workflow brief** are handled separately — they go into the Industry Insights section (see Step 5c) and do NOT feed the defect-classification pipeline below. The Edge-Case Miner, Security Miner, Observability Auditor, and Spec Drift Scout/Investigators are also handled in their own sections (see Step 5c) — CRITICAL/MAJOR Edge-Case rows with `Spec Coverage: MISSING`, CRITICAL/MAJOR Security rows, CRITICAL/MAJOR Observability rows, and CRITICAL/MAJOR drift findings with `update-current-spec` action are auto-applied like other consensus issues when scoped to the target spec, but they don't get cross-examined since they do not have a direct Codex peer in this skill. Classify each **defect** finding from the other reviewers (completeness, codebase, architecture, cutover-architect when dispatched — classified, never cross-examined, no Codex peer — provider-fit, codex-standard, codex-adversarial):
 
 | Codex severity | Claude severity | Unified |
 |---|---|---|
@@ -327,6 +333,7 @@ For any MAJOR+ finding where Claude and Codex disagree, run an iterative debate 
 - Claude agents (2+) flag something MAJOR+ that Codex approved
 - Claude and Codex propose **conflicting fixes** for the same issue
 - Codex adversarial flags a risk that Claude architecture agent explicitly called safe
+- **Codex Frontier (Astra) rules `redesign`, or names a wrong decision that no Claude lane flagged** — always cross-examined, never silently downgraded
 
 **How it works:**
 
@@ -393,6 +400,7 @@ After cross-examination resolves (or goes to user), compile the full report:
 ### Codex Standard Verdict: <approve|needs-attention|timed-out>
 ### Codex Adversarial Verdict: <approve|needs-attention|timed-out>
 ### Codex Research Verdict: <N elevate suggestions / M cautions / timed-out>
+### Codex Frontier (Astra) Verdict: <approve|approve-with-changes|redesign|timed-out — backfilled by critic (fable)>
 ### Investigation Verdict: <N verified elevations / M cautions / brief path / skipped (non-Claude runtime) / timed-out>
 ### Spec Drift Verdict: <clean|N candidates|N investigators|timed-out>
 
@@ -692,7 +700,7 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 | 4 | **12 Reviewers + Investigation Workflow** | Completeness + Codebase + Architecture + **Cutover Architect (gated)** + **Provider-Fit** + Edge-Case Miner + Security Miner + **Observability Auditor** + **Live-Evidence Premise Auditor (gated)** + Spec Drift Scout + Codex Standard + Codex Adversarial + Codex Industry Research + **Investigation Workflow (elevation grounding)** | **ALL PARALLEL** |
 | 4b | Coordinator + optional agents | Progressive drift investigation from Scout candidates | Parallel when needed |
 | 4c | Coordinator | Wait for Codex reviews (Codex-down → Fable-critic substitute), the Investigation Workflow, and drift investigators | — |
-| 5 | Coordinator | Merge 12 primary reports plus drift investigations, classify findings | — |
+| 5 | Coordinator | Merge 13 primary reports plus drift investigations, classify findings | — |
 | 5a | **Agents (sonnet)** | **Per-Finding Falsifier wave — refute every CRITICAL/MAJOR; citation verification; factual-split resolution; downgrade guard** | **ALL PARALLEL** |
 | 5b | Coordinator + Codex | Cross-examine MAJOR+ judgment disagreements (Claude vs Codex debate) | Sequential |
 | 5c | Coordinator + User | Final report, user decides on contested issues | — |
@@ -704,7 +712,7 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 
 ## Agent Summary
 
-> Numbering: the **12 primary reviewers** are agents 1–9 **+ Provider-Fit (3b) + Observability Auditor (5b) + Live-Evidence (5c)** (the `Nx` suffix groups a reviewer with its sibling — 3b/3c with Architecture #3, 5b/5c with Security Miner #5, 6b with Drift Scout #6; 3c is a gated thirteenth reviewer when dispatched, non-droppable across profiles). Agents **11–12** are the non-reviewer lanes (Investigation Workflow, Alignment Investigator), so **no agent bears the number 10 by design** — it is not a gap. Agent 0b (Context Dossier Miner) and agent 13 (Finding Falsifiers) are the pre- and post-wave stages.
+> Numbering: the **13 primary reviewers** are agents 1–10 **+ Provider-Fit (3b) + Observability Auditor (5b) + Live-Evidence (5c)** (the `Nx` suffix groups a reviewer with its sibling — 3b/3c with Architecture #3, 5b/5c with Security Miner #5, 6b with Drift Scout #6; 3c is a gated thirteenth reviewer when dispatched, non-droppable across profiles). Agents **11–12** are the non-reviewer lanes (Investigation Workflow, Alignment Investigator), so **no agent bears the number 10 by design** — it is not a gap. Agent 0b (Context Dossier Miner) and agent 13 (Finding Falsifiers) are the pre- and post-wave stages.
 
 | # | Agent | Prompt File | Type | Model | Focus |
 |---|-------|------------|------|-------|-------|
@@ -724,6 +732,7 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 | 7 | **Codex Adversarial** | `prompts/codex-adversarial-reviewer.md` | **codex exec (web)** | **GPT-5.6-sol** | **Attack surface, risks — cross-referenced against public CVEs/post-mortems** |
 | 8 | **Codex Standard** | `prompts/codex-standard-reviewer.md` | **codex exec (web)** | **GPT-5.6-sol** | **Completeness, feasibility — API/library claims verified against primary sources** |
 | 9 | **Codex Industry Research** | `prompts/codex-research-auditor.md` | **codex exec (web)** | **GPT-5.6-sol** | **Elevation: OSS libraries, big-company patterns, production gotchas with URL citations** |
+| 10 | **Codex Frontier Judgment** | `prompts/codex-frontier-judge.md` | **codex exec (web)** | **GPT-6-astra** (gate class `frontier`) | **The higher judgment rung beside sol, EVERY profile: wrong-decision hunt, cross-cutting risks the narrow lanes miss, best-in-class delta, approve / approve-with-changes / redesign** |
 | 11 | **Investigation Workflow** | `investigation` skill (`DEEP-WORKFLOW.md`) | **dynamic Workflow** | **multi-agent** | **Elevation grounding: spec themes framed against THIS codebase, fanned out across sources, adversarially verified in code → industry-standard + best-in-class elevation evidence (Claude Code-only)** |
 | 12 | **Alignment Investigator** | (coordinator-composed prompt) | **codex exec** | **GPT-5.6-sol** | **Decision-reality drift** |
 | 13 | **Finding Falsifiers** (one per CRITICAL/MAJOR) | `prompts/finding-falsifier.md` | general-purpose | sonnet | **Post-wave disprove-step: refute each finding against code/spec/evidence; verify every citation a reviewer or fix introduces; resolve Claude↔Codex repo-fact splits by reading the seam; guard severity downgrades (an unrefuted CRITICAL keeps its severity)** |
