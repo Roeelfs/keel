@@ -30,9 +30,18 @@ CODEX_NETWORK=1 CODEX_SERVICE_TIER=fast \
   outfiles and no error in the artifact. The wrapper resolves the real `node` + `codex.js`
   directly. This is the single reason the invocation is not a bare `codex exec`.
 - **`<class>`** picks the model through `codex-headroom.sh`, which is also the capacity gate:
-  `frontier` → astra (the final-gate judgment) · `falsifier|verify|judge|security` → sol, and
-  this class never pace-degrades · `review|research|synthesis` → terra · `mining|census|
-  trivial` → luna. Never hardcode a model; never invent a class to get a better one.
+  `frontier` → astra (the final-gate judgment) · `falsifier|verify|judge|security` → sol ·
+  `review|research|synthesis` → terra · `mining|census|trivial` → luna. Never hardcode a model;
+  never invent a class to get a better one — the class IS the model decision.
+- **The cap level decides dispatch-or-refuse, and nothing else** (2026-09-06). Every class answers
+  its ideal model at every level below 99%; at 99% the gate refuses outright and the caller routes
+  to Claude. There is no middle band: the gate used to degrade a tier or two as the window filled,
+  which meant `review`/`research` silently became `luna` above 90% used — output a review lane
+  cannot act on, arriving with a healthy-looking verdict. What guards the window instead is the
+  refuse threshold plus the **fan-out cap of 5** (8 concurrent dispatches once took a window from
+  24% to 100% in under eight minutes — the shape that saturates a cap is lane COUNT, not per-lane
+  model choice). Pace is still measured and logged in `analytics/codex-dispatch.jsonl`; it no
+  longer routes.
 - **The repo is READ-ONLY to the lane.** Measured on codex 0.153.4: with cwd in a scratch dir
   the lane reads any path and runs git in the repo, while a write there returns `Operation not
   permitted`. Writes go to its scratch dir. Do **not** "fix" a path problem by pointing `-C` at
