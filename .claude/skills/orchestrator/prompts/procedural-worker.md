@@ -31,6 +31,18 @@ Write one structured summary JSON artifact no larger than 65,536 UTF-8 bytes. It
 {"schema":"procedural-worker/v1","pass_id":"<id>","status":"pass|fail|blocked","head_sha":"<sha>","artifact":"<absolute summary.json path>","unexpected_writes":[]}
 ```
 
+Copy this `summary.json` skeleton exactly — the validator rejects any other key set (measured: 9 refusals across 2026-09-01..05, each costing the root a read of the validator source):
+
+```json
+{"schema":"procedural-summary/v1","pass_id":"<id>","status":"pass|fail|blocked","head_sha":"<sha>",
+ "tracked_diff_sha256_before":"<64 hex>","tracked_diff_sha256_after":"<same 64 hex>",
+ "command_results":[{"id":"<cmd id>","status":"pass|fail|blocked","exit_code":0,"log":"<absolute path INSIDE artifact_dir>","decisive_excerpt":"<≤2048 bytes>"}],
+ "environment":"<nonempty string, never an object>",
+ "blocker":null}
+```
+
+Coupling rules the validator enforces: `status:pass` needs ≥1 command, every command `pass`, and `blocker:null`; `status:fail` needs ≥1 command `fail` and `blocker:null`; `status:blocked` needs `blocker:{"reason":"…","resume_key":"…"}` (both nonempty strings). Per command: `pass` ⇒ `exit_code:0`; `fail` ⇒ a nonzero integer; `blocked` ⇒ `exit_code:null`. The whole file is capped at 65,536 bytes. `unexpected_writes` in the pointer must be `[]` for a pass.
+
 The root validates the final pointer with:
 
 ```bash
