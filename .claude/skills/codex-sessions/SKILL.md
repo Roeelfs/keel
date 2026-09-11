@@ -67,6 +67,21 @@ The walker maps Codex's event schema onto the shared contract:
   session's own cwd (Codex stamps the rollout id as the `Session-Id` trailer).
 
 ## Notes
+- For an explicit session, `survey --sid <id> --json` reports the durable
+  `latest_turn_id`, `last_tool_event`, `last_wait`, and a read-only `native_history`
+  comparison. `updated_at` is the latest parsed event time, not the last user input.
+- `status` is the latest turn's lifecycle. Completed/interrupted turns stay terminal
+  even when their file is fresh; `active` alone does not prove useful progress.
+- If `native_history.status` is `behind`, native history/cursors may omit live work
+  or completion. A single lagging snapshot may be transient: corroborate with the
+  durable turn, tool completions, and owned artifacts. Do not restart from an old
+  projected `active` flag or keep waiting on a cursor already proven stale.
+- `last_wait.unchanged_count` counts repeated unchanged snapshots, including when
+  diagnostic reads occur between waits. Repeated waits are not proof of progress.
+  Resolve the exact dependency's durable terminal state or request its owner's
+  concrete handoff. Preserve each workstream's scope and its existing gate owner.
+- These diagnostics never repair the native database, restart sessions, or launch
+  work. An unavailable index comparison must not be interpreted as healthy.
 - The script is designed to tolerate partial/missing event fields in transcripts.
 - Transcript discovery covers both `~/.codex/sessions` and
   `~/.codex/archived_sessions`; archival state does not imply who archived the task.

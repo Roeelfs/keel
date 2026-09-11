@@ -7,10 +7,12 @@ import json
 import os
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from session_activity import Activity, activity_fields, native_history, observe
 
 INDEX_PATH = Path.home() / ".codex/session_index.jsonl"
 SESSIONS_ROOT = Path.home() / ".codex/sessions"
@@ -84,6 +86,10 @@ class SessionRecord:
     commits: List[Dict[str, str]] = field(default_factory=list)
     mention_files: List[str] = field(default_factory=list)
     open_turns: int = 0
+    latest_turn_id: Optional[str] = None
+    last_tool_event: Optional[Dict[str, Any]] = None
+    last_wait: Optional[Dict[str, Any]] = None
+    native_history: Optional[Dict[str, Any]] = None
 
     def to_summary(self, json_mode: bool = False) -> Dict[str, Any]:
         return {
@@ -96,6 +102,10 @@ class SessionRecord:
             "path": str(self.path) if self.path else None,
             "line_count": self.line_count,
             "open_turns": self.open_turns,
+            "latest_turn_id": self.latest_turn_id,
+            "last_tool_event": self.last_tool_event,
+            "last_wait": self.last_wait,
+            "native_history": self.native_history,
             "context_remaining_percent": self.context_remaining_percent,
             "context_used": self.context_used,
             "context_total": self.context_total,
@@ -310,6 +320,7 @@ def parse_transcript(path: Path, sid: str) -> SessionRecord:
     line_count = 0
     now = utcnow()
     timer_stack = []
+    activity = Activity()
     try:
         stat = path.stat()
         record.mtime = stat.st_mtime
@@ -331,6 +342,7 @@ def parse_transcript(path: Path, sid: str) -> SessionRecord:
                 etype = obj.get("type")
                 payload = obj.get("payload", {})
                 when = ts_from_iso(str(obj.get("timestamp") or payload.get("timestamp") or ""))
+                activity = observe(activity, obj, when)
 
                 if etype == "session_meta":
                     sid_value = safe_get(payload, "id")
@@ -468,6 +480,12 @@ def parse_transcript(path: Path, sid: str) -> SessionRecord:
                         "kind": safe_get(payload, "type", default=""),
                         "text": safe_get(payload, "text", default="") or safe_get(payload, "name", default=""),
                     }
+                    if (safe_get(payload, "type") == "item_completed" and
+                            activity.last_tool and activity.last_tool.id == safe_get(payload, "item", "id")):
+                        timeline_payload = {**timeline_payload, "text": (
+                            f"{activity.last_tool.name} {activity.last_tool.status}: "
+                            f"{activity.last_tool.command}"
+                        ).strip()}
                     record.timeline_tail.append(timeline_payload)
 
                 if etype == "session_meta" and safe_get(payload, "thread_name"):
@@ -478,6 +496,8 @@ def parse_transcript(path: Path, sid: str) -> SessionRecord:
         pass
 
     record.line_count = line_count
+    record = replace(record, updated_at=activity.updated_at or record.updated_at,
+                     **activity_fields(activity))
 
     if record.updated_at is None:
         record.updated_at = record.last_user_ts or record.mtime
@@ -491,7 +511,10 @@ def parse_transcript(path: Path, sid: str) -> SessionRecord:
 
     # infer status
     age = now - (record.mtime or 0)
-    if record.open_turns > 0:
+    if activity.turn_status is not None:
+        record.status = activity.turn_status
+        record.open_turns = int(activity.turn_status == "active")
+    elif record.open_turns > 0:
         record.status = "active"
     elif age < 120:
         record.status = "active"
@@ -655,6 +678,9 @@ def collect_session_by_sid(sid: str) -> List[SessionRecord]:
     record.path = path
     if not record.sid.startswith(sid):
         return []
+    record.native_history = native_history(
+        SESSIONS_ROOT.parent, record.sid, record.latest_turn_id, record.last_tool_event, record.status
+    )
     return [record]
 
 

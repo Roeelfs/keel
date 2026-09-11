@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "sessions.py"
+sys.path.insert(0, str(SCRIPT.parent))
 SPEC = importlib.util.spec_from_file_location("codex_sessions", SCRIPT)
 assert SPEC and SPEC.loader
 SESSIONS = importlib.util.module_from_spec(SPEC)
