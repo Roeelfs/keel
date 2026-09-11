@@ -108,10 +108,9 @@ fi
 # 2. Optional: put the verification receipt helper on PATH
 # ---------------------------------------------------------------------------
 echo ""
-echo "Optional: put 'with-heavy-lock' on your PATH so the serialize-heavy-ops hook"
-echo "can enforce the machine-global heavy-op semaphore (default 3 concurrent):"
-echo "    sudo cp \"$TARGET/tooling/sandbox/with-heavy-lock\" /usr/local/bin/ && sudo chmod +x /usr/local/bin/with-heavy-lock"
-echo "  (no sudo? ~/.local/bin works if it is on your PATH)"
+echo "Optional: install the shared resource runner and Claude/Codex hooks (one job, two workers):"
+echo "    python3 \"$TARGET/tooling/sandbox/install-resource-hooks.py\" --apply"
+echo "  Then review and trust the new Codex hook in /hooks."
 echo ""
 echo "Optional: install the verification receipt helper on PATH:"
 echo "    sudo cp \"$TARGET/tooling/sandbox/with-verification-receipt\" /usr/local/bin/ && sudo chmod +x /usr/local/bin/with-verification-receipt"

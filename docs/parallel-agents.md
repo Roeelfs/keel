@@ -8,71 +8,83 @@ eight sessions each launching a full build at the same instant.
 `tooling/workflow/` is the coordination layer that makes parallelism safe. It is
 ~650 lines of dependency-light Bash (`git` + `jq` + `flock`) and ships with keel.
 
-## The machine-global heavy-op semaphore
+## The shared heavy-job resource budget
 
-Parallel sessions are cheap until they all run `vitest`, `next build`, or
-`cdk synth` at once. `tooling/sandbox/with-heavy-lock` caps how many run
-concurrently and **queues** the rest:
+`tooling/sandbox/with-heavy-lock` supervises **one heavy job per user account**
+across repositories, worktrees, Claude Code, and Codex. It uses Python's kernel
+file lock; a missing external `flock` executable cannot silently disable it.
 
 ```bash
 with-heavy-lock pnpm test
 with-heavy-lock npx cdk synth
+with-heavy-lock --status
 ```
 
-Default is **3 concurrent** (`KEEL_HEAVY_SLOTS`), sized from measurement on a
-24 GB machine running 16 sessions: floor ~12.1 GB (2.8 wired + 3.5 agent
-sessions + 1.0 desktop app + 4.8 other apps), leaving ~8.3 GB of heavy-op
-budget against a measured 0.44-1.43 GB per op. Three slots worst-case ~4.3 GB,
-with headroom for the session count to roughly double. Each extra slot costs
-up to ~1.5 GB of peak, so raise it knowingly.
+Defaults are one job, at most two Vitest/Jest workers, a 6 GiB aggregate resident
+memory budget, a 20% available-memory admission threshold, and a two-hour job
+limit. Vitest uses `forks`. Turbo's Node launcher receives concurrency one.
+The 2 GiB V8 heap setting is a per-process aid; aggregate RSS is measured across
+the job's process group every 0.5 seconds. On excess, only that group is stopped.
+A small startup gate publishes ownership before the command can execute.
 
-It holds its slot via an inherited fd for the *entire* lifetime of the wrapped
-command, and the kernel releases it the instant the process exits — even if a
-test runner segfaults on teardown, so a crash never wedges a slot. Nested heavy
-ops see `KEEL_HEAVY_LOCK_HELD=1` and skip re-acquiring, so wrapping a command
-that itself self-locks won't deadlock. `KEEL_HEAVY_MAX_HEAP` (default 2048 MB)
-bounds each op's V8 heap so `slots x heap` is a predictable ceiling.
+The host policy is `~/.keel/resource-policy.json`. Runtime environment can tighten
+worker, RSS, sample, wall-time and admission budgets; it cannot increase them.
+`KEEL_HEAVY_SLOTS`, `KEEL_HEAVY_LOCK_DIR` and an overridden `HOME` no longer change
+admission. The account database determines the home for both policy and state.
+State is always `~/.keel/heavy.slots`, including an atomic lease and `events.jsonl` with
+job ids, terminal reasons and observed peak RSS. Nested calls verify a live
+supervisor ancestor, process identity, job id and held lock. An ambient
+`KEEL_HEAVY_LOCK_HELD=1` flag alone grants no access. If the supervisor dies,
+the inherited lock and recorded process group keep a surviving job excluded
+until it drains. Termination and normal cleanup target only the owned group.
 
-**Why bounded and not a mutex.** The first version held a single machine-global
-mutex — one heavy op machine-wide. On a ~16-session box that serialized
-everything and was retired for throughput (`de407e3`, 2026-08-28). Removing it
-reintroduced exactly the failure it prevented: macOS *"Your system has run out
-of application memory"*, with 8 concurrent cdk/vitest processes measured at
-0.44-1.43 GB each. Bounded slots keep both properties — parallelism and a
-memory ceiling.
+This is a native process supervisor, **not a hard memory sandbox**. Sampling can
+overshoot; detached processes can leave a process group; a SIGKILLed supervisor
+cannot continue measuring memory. Use a separately bounded Linux VM/container
+for workloads that require kernel-enforced CPU and memory ceilings. This change
+does not start, resize or restart a VM, or wrap already-running processes.
 
-### When slots are saturated: a budgeted CI hand-off
+### Bounded admission and results
 
-Queueing protects RAM, but it stalls the session doing the waiting — with all
-slots busy, a session can sit idle for minutes. So after
-`KEEL_HEAVY_WAIT_MAX` (default 180s) the wrapper stops waiting and exits **75**
-(`EX_TEMPFAIL`), telling the caller to hand that run to CI and get on with other
-work. That is what keeps parallel sessions moving.
+A busy host waits at most 15 seconds, then returns **75 / DEFERRED** without
+starting a command. `KEEL_HEAVY_WAIT_MAX=0` means immediate admission or deferral,
+not an infinite wait. Deferred work is incomplete: continue other useful work,
+and only retry after the resource state changes. Deferral grants no permission
+to push, deploy or move the run to CI. The old CI budget/infinite-wait fallback
+has been removed. Exit 137 means a resource/wall-time stop; exit 69 means the
+resource controller could not safely operate. A normal command preserves its
+exit status. Neither deferral nor interruption counts as a passing test.
 
-The first version of this wrapper pointedly refused to say "push to CI",
-calling it the anti-pattern that just moves the cost — and unbounded, it is.
-So the hand-off is **rationed**: a machine-global rolling budget
-(`KEEL_CI_DEFER_BUDGET`, default 3 per `KEEL_CI_DEFER_WINDOW`, default 1 hour)
-shared across every session. Enough to unstick a genuinely saturated machine;
-not enough to relocate the test load onto CI. Once the budget is spent, heavy
-ops queue locally again, so the cap is on CI spend, not only on RAM.
-`KEEL_HEAVY_WAIT_MAX=0` restores unbounded queueing.
+### Install enforcement in both runtimes
 
-The wrapper never pushes anything itself — it grants permission and prints the
-reason. Committing and pushing stay an explicit act.
+```bash
+python3 tooling/sandbox/install-resource-hooks.py --check
+python3 tooling/sandbox/install-resource-hooks.py --apply
+```
 
-The `serialize-heavy-ops.sh` PreToolUse hook **enforces** it: it detects heavy
-commands (test runners, builds, installs, `cdk synth/deploy/diff/watch`) and, if
-`with-heavy-lock` is on PATH but the command isn't wrapped, refuses with a
-one-line fix. It does **not** suggest "push to CI" — that anti-pattern just
-moves the cost. Heavy ops queue and run *locally*.
+The opt-in installer backs up changed files, preserves unrelated settings, and
+registers the shared `serialize-heavy-ops.py` hook for Claude's Bash tool and
+Codex's native `PreToolUse` / `^Bash$` event (which covers unified exec). Codex
+requires the exact new definition to be reviewed and trusted in `/hooks` before
+it runs. Verify activation in each runtime; registration alone is not evidence
+that a running session has loaded the new hook. The installer does not change
+security approvals or fabricate trust. Other machines need their own install.
 
-Detection lives in the sibling `serialize-heavy-ops.py`, not in `grep`, for one
-measured reason: `grep -Eq` tests input line by line, so the command-position
-`^` anchor also matched inside **heredoc bodies** — writing a runbook that
-merely mentioned `pnpm install` was DENIED. That was 56 of 85 fires across a
-4000-call real-transcript corpus. Heredoc bodies are stripped before matching,
-and the guard fails **open** on any parse error or missing wrapper.
+The hook refuses recognized unwrapped test/build/install/CDK commands, including
+shell command segments after a wrapped invocation. Missing runner or an invalid
+command/rule parse fails closed. Quoted documentation and heredoc bodies are
+excluded from classification. Repository-specific entry points can be added in
+`~/.keel/resource-commands.json`, for example `{"project-verify": ["*"]}`.
+This shell classifier prevents common accidental bypasses; it cannot prove what
+arbitrary scripts or interactive terminal input will execute.
+
+Regression checks use small test-owned process groups and temporary homes:
+
+```bash
+python3 tooling/sandbox/test_with_heavy_lock.py
+python3 tooling/sandbox/test_resource_budget.py
+python3 -m unittest tooling/sandbox/test_install_resource_hooks.py
+```
 
 ## Path ownership
 
@@ -140,6 +152,6 @@ silent and never blocks a session.
   heartbeat is >24h old, or >4h old with a worktree that no longer exists. So a
   session killed by closing the terminal doesn't leave a stale claim forever.
 
-Every piece here is fail-open: a broken hook, a missing tool, a non-git directory —
+The path-coordination hooks are fail-open: a broken hook, a missing tool, a non-git directory —
 none of it ever blocks your session. Coordination should be invisible until the
 moment it saves you from a collision.
