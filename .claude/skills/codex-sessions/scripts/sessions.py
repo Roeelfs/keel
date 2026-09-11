@@ -357,6 +357,7 @@ def parse_transcript(path: Path, sid: str) -> SessionRecord:
                         "cli_version": safe_get(payload, "cli_version"),
                         "source": safe_get(payload, "source"),
                         "model_provider": safe_get(payload, "model_provider"),
+                        "history_mode": safe_get(payload, "history_mode"),
                         "base_instructions": safe_get(payload, "base_instructions", "text"),
                     }
 
@@ -679,7 +680,9 @@ def collect_session_by_sid(sid: str) -> List[SessionRecord]:
     if not record.sid.startswith(sid):
         return []
     record.native_history = native_history(
-        SESSIONS_ROOT.parent, record.sid, record.latest_turn_id, record.last_tool_event, record.status
+        SESSIONS_ROOT.parent, record.sid, record.latest_turn_id, record.last_tool_event, record.status,
+        rollout_path=path,
+        history_mode=record.meta.get("history_mode"),
     )
     return [record]
 

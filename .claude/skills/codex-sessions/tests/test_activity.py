@@ -20,6 +20,7 @@ SPEC.loader.exec_module(SESSIONS)
 
 BASE = "2026-09-01T12:"
 SID = "11111111-1111-7111-8111-111111111111"
+ALIAS = "22222222-2222-7222-8222-222222222222"
 
 
 def event(time, kind, **payload):
@@ -60,21 +61,27 @@ class ActivityTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def write(self, *events):
+    def write(self, *events, history_mode=None, history_base=None, alias=None):
+        if alias:
+            self.path = self.live / (
+                "rollout-2026-09-01T12-00-00-" + SID + "_" + alias + ".jsonl"
+            )
         header = {"timestamp": BASE + "00:00Z", "type": "session_meta",
                   "payload": {"id": SID, "thread_name": "Example task",
-                              "timestamp": BASE + "00:00Z", "source": "vscode"}}
+                              "timestamp": BASE + "00:00Z", "source": "vscode",
+                              "history_mode": history_mode,
+                              "history_base": history_base}}
         self.path.write_text("\n".join(json.dumps(x) for x in [header, *events]) + "\n")
         return SESSIONS.parse_transcript(self.path, SID).to_summary()
 
-    def native_db(self, turn="old-turn", item=None):
+    def native_db(self, turn="old-turn", item=None, thread_id=SID):
         db = self.root / "thread_history_1.sqlite"
         with closing(sqlite3.connect(db)) as c, c:
-            c.execute("CREATE TABLE thread_turns(thread_id TEXT, turn_id TEXT, rollout_ordinal INTEGER, status TEXT)")
-            c.execute("CREATE TABLE thread_items(thread_id TEXT, item_id TEXT)")
-            c.execute("INSERT INTO thread_turns VALUES(?,?,1,'inProgress')", (SID, turn))
+            c.execute("CREATE TABLE IF NOT EXISTS thread_turns(thread_id TEXT, turn_id TEXT, rollout_ordinal INTEGER, status TEXT)")
+            c.execute("CREATE TABLE IF NOT EXISTS thread_items(thread_id TEXT, item_id TEXT)")
+            c.execute("INSERT INTO thread_turns VALUES(?,?,1,'inProgress')", (thread_id, turn))
             if item:
-                c.execute("INSERT INTO thread_items VALUES(?,?)", (SID, item))
+                c.execute("INSERT INTO thread_items VALUES(?,?)", (thread_id, item))
         return db
 
     def survey(self):
@@ -142,6 +149,34 @@ class ActivityTest(unittest.TestCase):
         self.write(event("01:00", "task_started", turn_id="current"), command())
         self.native_db(turn="current", item="cmd-1")
         self.assertEqual(self.survey()["native_history"]["status"], "current")
+
+    def test_paginated_alias_uses_current_rollout_projection_not_frozen_thread_history(self):
+        self.write(event("01:00", "task_started", turn_id="current"), command(),
+                   history_mode="paginated", history_base={"thread_id": SID}, alias=ALIAS)
+        self.native_db(turn="old-turn", item="cmd-1")
+        self.native_db(turn="current", item="cmd-1", thread_id=ALIAS)
+        history = self.survey()["native_history"]
+        self.assertEqual(history["status"], "current")
+        self.assertEqual(history["indexed_rollout_id"], ALIAS)
+
+    def test_paginated_single_uuid_filename_with_history_base_uses_logical_projection(self):
+        self.write(event("01:00", "task_started", turn_id="current"),
+                   history_mode="paginated", history_base={"thread_id": SID})
+        self.native_db(turn="current")
+        history = self.survey()["native_history"]
+        self.assertEqual(history["status"], "current")
+        self.assertEqual(history["indexed_rollout_id"], SID)
+
+    def test_paginated_malformed_underscore_alias_is_unavailable(self):
+        self.path = self.live / (
+            "rollout-2026-09-01T12-00-00-" + SID + "_not-a-rollout-id.jsonl"
+        )
+        self.write(event("01:00", "task_started", turn_id="current"),
+                   history_mode="paginated", history_base={"thread_id": SID})
+        self.native_db(turn="current", thread_id=ALIAS)
+        history = self.survey()["native_history"]
+        self.assertEqual(history["status"], "unavailable")
+        self.assertEqual(history["reason"], "Malformed paginated rollout identity")
 
     def test_partial_tail_and_missing_index_do_not_hide_completed_turn(self):
         self.write(event("01:00", "task_started", turn_id="current"),

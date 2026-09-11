@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import closing
 from dataclasses import asdict, dataclass, replace
@@ -125,22 +126,50 @@ def activity_fields(activity: Activity) -> dict[str, Any]:
     }
 
 
+ROLLOUT_FILENAME = re.compile(
+    r"^rollout-.+-(?P<thread>[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})"
+    r"(?:_(?P<rollout>[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}))?$",
+    re.IGNORECASE,
+)
+
+
+def indexed_rollout_identity(path: Path, sid: str, history_mode: str | None) -> str | None:
+    """Resolve the immutable rollout identity selected by a paginated filename.
+
+    Codex keeps a thread id stable across a revert, while the selected rollout file
+    gains a second UUID after an underscore.  The history projection is keyed by
+    that concrete rollout, not the original logical thread.  Legacy files retain
+    the logical thread identity.  Refuse malformed paginated aliases instead of
+    claiming an unrelated historical checkpoint is current.
+    """
+    if history_mode != "paginated":
+        return sid
+    match = ROLLOUT_FILENAME.match(path.stem)
+    if not match or match.group("thread") != sid:
+        return None
+    return match.group("rollout") or sid
+
+
 def native_history(root: Path, sid: str, turn_id: str | None,
-                   last_tool: dict[str, Any] | None, status: str) -> dict[str, Any]:
+                   last_tool: dict[str, Any] | None, status: str, *,
+                   rollout_path: Path, history_mode: str | None) -> dict[str, Any]:
     """Compare a scoped snapshot only. 'behind' may include normal indexing lag."""
     db = root / "thread_history_1.sqlite"
     if not db.exists() or not turn_id:
         return {"status": "unavailable", "reason": "No comparable native history snapshot"}
+    indexed_id = indexed_rollout_identity(rollout_path, sid, history_mode)
+    if not indexed_id:
+        return {"status": "unavailable", "reason": "Malformed paginated rollout identity"}
     try:
         with closing(sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.1)) as conn:
             turn = conn.execute(
                 "SELECT turn_id,status FROM thread_turns WHERE thread_id=? "
-                "ORDER BY rollout_ordinal DESC LIMIT 1", (sid,),
+                "ORDER BY rollout_ordinal DESC LIMIT 1", (indexed_id,),
             ).fetchone()
             item_id = (last_tool or {}).get("id")
             item_present = not item_id or bool(conn.execute(
                 "SELECT 1 FROM thread_items WHERE thread_id=? AND item_id=? LIMIT 1",
-                (sid, item_id),
+                (indexed_id, item_id),
             ).fetchone())
     except sqlite3.Error as exc:
         return {"status": "unavailable", "reason": type(exc).__name__}
@@ -149,6 +178,7 @@ def native_history(root: Path, sid: str, turn_id: str | None,
                    (expected is None or turn[1] == expected))
     return {
         "status": "current" if matches else "behind",
+        "indexed_rollout_id": indexed_id,
         "rollout_turn_id": turn_id,
         "indexed_turn_id": turn[0] if turn else None,
         "latest_tool_indexed": item_present,
