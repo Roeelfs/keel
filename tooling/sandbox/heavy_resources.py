@@ -1,5 +1,5 @@
 """Host observations and policy for the shared heavy-job supervisor."""
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
 import math
@@ -22,6 +22,7 @@ class Policy:
     wait_seconds: float = 15
     poll_seconds: float = 0.5
     max_seconds: float = 7200
+    command_max_seconds: dict = field(default_factory=dict)
 
 
 def account_home():
@@ -38,9 +39,13 @@ def load_policy():
         raise ValueError('unknown resource policy fields: ' + ', '.join(sorted(unknown)))
     defaults = asdict(Policy())
     for key, value in values.items():
+        if key == 'command_max_seconds':
+            continue
         if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or value < 0:
             raise ValueError('invalid resource policy field: ' + key)
     policy = {**defaults, **values}
+    commands = policy.pop('command_max_seconds')
+    policy_max_seconds = policy['max_seconds']  # Commands are checked against the file, not a tightened run.
     # Runtime environment can tighten budgets, never grant extra slots or memory.
     variables = {'max_workers': 'KEEL_HEAVY_MAX_WORKERS',
                  'max_rss_mb': 'KEEL_HEAVY_MAX_RSS_MB',
@@ -66,7 +71,31 @@ def load_policy():
         raise ValueError('invalid pressure or admission wait budget')
     if any(policy[k] <= 0 for k in ['poll_seconds', 'max_rss_mb', 'max_seconds', 'run_pressure_seconds']):
         raise ValueError('resource limits and sample interval must be positive')
-    return Policy(**policy)
+    return Policy(**policy, command_max_seconds=command_budgets(commands, policy_max_seconds))
+
+
+def command_budgets(value, max_seconds):
+    if not isinstance(value, dict):
+        raise ValueError('command_max_seconds must be an object mapping a command prefix to seconds')
+    for prefix, seconds in value.items():
+        words = prefix.split()
+        if not words or '/' in words[0]:
+            raise ValueError('command_max_seconds key must start with an executable basename: ' + repr(prefix))
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or not 0 < seconds <= max_seconds:
+            raise ValueError('command_max_seconds value must be a positive integer no greater than '
+                             'max_seconds: ' + repr(prefix))
+    return value
+
+
+def command_seconds(policy, command):
+    """The wall budget for one command: max_seconds, tightened by its longest matching prefix.
+
+    A prefix is the executable basename followed by leading arguments, matched word by word.
+    """
+    words = [Path(command[0]).name, *command[1:]]
+    matches = [(len(prefix.split()), seconds) for prefix, seconds in policy.command_max_seconds.items()
+               if words[:len(prefix.split())] == prefix.split()]
+    return min(policy.max_seconds, max(matches)[1]) if matches else policy.max_seconds
 
 
 @dataclass(frozen=True)

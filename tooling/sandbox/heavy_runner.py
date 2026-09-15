@@ -10,7 +10,7 @@ import sys
 import time
 import uuid
 
-from heavy_resources import (account_home, ancestors, event, free_percent, job_members,
+from heavy_resources import (account_home, ancestors, command_seconds, event, free_percent, job_members,
                              load_policy, processes, read_record, write_record)
 
 QUEUE_PROGRESS_SECONDS = 30
@@ -228,7 +228,7 @@ def observed_free_percent():
         return None
 
 
-def supervise(child, job, policy, directory, job_id, interruption):
+def supervise(child, job, policy, max_seconds, directory, job_id, interruption):
     started = time.monotonic()
     peak = 0.0
     low_since = None
@@ -244,14 +244,15 @@ def supervise(child, job, policy, directory, job_id, interruption):
         low = sample is not None and sample < policy.run_min_free_percent
         low_since = (now if low_since is None else low_since) if low else None
         reason = ('resource_limit' if rss > policy.max_rss_mb else
-                  'wall_time_budget' if now - started > policy.max_seconds else
+                  'wall_time_budget' if now - started > max_seconds else
                   'memory_pressure_during_run' if low and now - low_since >= policy.run_pressure_seconds
                   else None)
         if reason:
             job.stop()
             child.wait(timeout=5)
+            budget = {'budget_seconds': max_seconds} if reason == 'wall_time_budget' else {}
             event(directory, 'completed', job_id=job_id, reason=reason,
-                  peak_rss_mb=round(peak, 2), exit_code=137)
+                  peak_rss_mb=round(peak, 2), exit_code=137, **budget)
             print(f'with-heavy-lock: {reason}; job peak {peak:.1f} MiB '
                   f'(budget {policy.max_rss_mb:g} MiB). Only this job was stopped.', file=sys.stderr)
             return 137
@@ -298,7 +299,8 @@ def run_job(command, directory, policy, job_id, stream):
         os.write(gate_write, b'1')  # The job cannot run before its lease is published.
         os.close(gate_write)
         gate_write = None
-        return supervise(child, job, policy, directory, job_id, lambda: received_signal)
+        return supervise(child, job, policy, command_seconds(policy, command), directory, job_id,
+                         lambda: received_signal)
     except InterruptedError as error:
         event(directory, 'interrupted', job_id=job_id, reason='signal', signal=error.args[0])
         return 128 + int(error.args[0])

@@ -42,6 +42,11 @@ The host policy is `~/.keel/resource-policy.json`. Runtime environment can tight
 worker, RSS, sample, wall-time and free-memory budgets; it cannot increase them.
 The admission wait is not a resource grant, so `KEEL_HEAVY_WAIT_MAX` may raise or
 lower it.
+`command_max_seconds` tightens the wall-time budget per command, for example
+`{"project-verify verify": 3600}`. A key is the executable basename followed by
+leading arguments, matched word by word; the longest match wins and the budget
+never exceeds `max_seconds`. Values must be positive integers no greater than the
+file's `max_seconds`. A stop records `wall_time_budget` with `budget_seconds`.
 `KEEL_HEAVY_SLOTS`, `KEEL_HEAVY_LOCK_DIR` and an overridden `HOME` no longer change
 admission. The account database determines the home for both policy and state.
 State is always `~/.keel/heavy.slots`, including an atomic lease and `events.jsonl` with
