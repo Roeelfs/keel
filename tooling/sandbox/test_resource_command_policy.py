@@ -69,13 +69,26 @@ class CommandPolicyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["command_max_seconds"], {"project-verify verify": 3600})
 
-    def test_invalid_budgets_refuse_with_a_clear_error(self):
-        for budgets in ([], {"x": 0}, {"x": True}, {"x": 1.5}, {"x": "5"}, {"x": 7201},
-                        {"/usr/bin/x": 5}, {"  ": 5}):
-            self.write_policy(command_max_seconds=budgets)
-            result = self.run_wrapper(["--status"])
-            self.assertEqual(result.returncode, 69, (budgets, result.stderr))
-            self.assertIn("command_max_seconds", result.stderr, budgets)
+    def test_a_non_object_refuses_with_a_clear_error(self):
+        self.write_policy(command_max_seconds=[])
+        result = self.run_wrapper(["--status"])
+        self.assertEqual(result.returncode, 69, result.stderr)
+        self.assertIn("command_max_seconds", result.stderr)
+
+    def test_a_bad_entry_is_skipped_or_clamped_and_never_refuses_every_command(self):
+        self.write_policy(command_max_seconds={
+            "whole-float": 600.0, "above-max": 9999, "null": None, "text": "5", "flag": True,
+            "zero": 0, "negative": -3, "fraction": 1.5, "/usr/bin/tool": 5, "  ": 5})
+        result = self.run_wrapper(["--status"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["command_max_seconds"],
+                         {"whole-float": 600, "above-max": 7200})
+        for skipped in ("null", "text", "flag", "zero", "negative", "fraction", "/usr/bin/tool"):
+            self.assertIn(repr(skipped), result.stderr)
+        self.write_policy(max_seconds=100, command_max_seconds={"project-verify": 3600})
+        lowered = self.run_wrapper(["--status"])
+        self.assertEqual(lowered.returncode, 0, lowered.stderr)
+        self.assertEqual(json.loads(lowered.stdout)["command_max_seconds"], {"project-verify": 100})
 
     def test_matching_command_stops_at_its_budget_and_records_it(self):
         self.write_policy(command_max_seconds={os.path.basename(sys.executable) + " -c": 1})

@@ -75,16 +75,26 @@ def load_policy():
 
 
 def command_budgets(value, max_seconds):
+    """The usable `command_max_seconds` entries, each clamped to max_seconds.
+
+    One bad entry is skipped with a warning: it must never refuse every heavy command on the machine.
+    """
     if not isinstance(value, dict):
         raise ValueError('command_max_seconds must be an object mapping a command prefix to seconds')
+    budgets = {}
     for prefix, seconds in value.items():
         words = prefix.split()
         if not words or '/' in words[0]:
-            raise ValueError('command_max_seconds key must start with an executable basename: ' + repr(prefix))
-        if isinstance(seconds, bool) or not isinstance(seconds, int) or not 0 < seconds <= max_seconds:
-            raise ValueError('command_max_seconds value must be a positive integer no greater than '
-                             'max_seconds: ' + repr(prefix))
-    return value
+            problem = 'the key must start with an executable basename'
+        elif (isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds)
+              or seconds % 1 or seconds <= 0):
+            problem = 'the value must be a positive whole number of seconds'
+        else:
+            budgets[prefix] = min(int(seconds), max_seconds)
+            continue
+        print('with-heavy-lock: ignoring command_max_seconds entry ' + repr(prefix) + ': ' + problem,
+              file=sys.stderr)
+    return budgets
 
 
 def command_seconds(policy, command):
