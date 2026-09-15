@@ -54,7 +54,11 @@ admission. The account database determines the home for both policy and state.
 State is always `~/.keel/heavy.slots`, including an atomic lease and `events.jsonl` with
 job ids, terminal reasons and observed peak RSS. A `started` event records `args`, the
 first three arguments after the executable; an argument containing `=` or longer
-than 120 characters is recorded as `<redacted>`. Nested calls verify a live
+than 120 characters is recorded as `<redacted>`. A `queued` event records the same
+`args` with `cwd`, `executable`, the effective `wait_seconds` and `caller` (`claude` or
+`codex`, the nearest such ancestor process, else null). A `deferred` event adds
+`waited_seconds`, the queue `position` and the `holder`'s executable and cwd, so a
+deferral names both the command that gave up and the job it waited on. Nested calls verify a live
 supervisor ancestor, process identity, job id and held lock. An ambient
 `KEEL_HEAVY_LOCK_HELD=1` flag alone grants no access. The lease records the job
 leader's start time and its live members. If the supervisor dies, any surviving

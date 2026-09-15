@@ -87,17 +87,55 @@ def live_tickets(queue):
     return live
 
 
-def holder_description(directory):
+def holder_fields(directory):
     try:
         lease = read_record(directory / 'lease.json')
     except (OSError, ValueError):  # The lease can vanish or change during a handoff.
+        return None
+    return {'executable': lease.get('executable'), 'cwd': lease.get('cwd')} if lease else {}
+
+
+def holder_description(directory):
+    holder = holder_fields(directory)
+    if holder is None:
         return 'slot holder unknown'
-    if not lease:
+    if not holder:
         return 'no published slot holder'
-    return 'slot held by ' + str(lease.get('executable')) + ' in ' + str(lease.get('cwd'))
+    return 'slot held by ' + str(holder['executable']) + ' in ' + str(holder['cwd'])
 
 
-def acquire(directory, policy, job_id):
+def caller_runtime():
+    # The nearest agent runtime above this process, so a deferral can be traced to the session that asked.
+    try:
+        result = subprocess.run(['ps', '-axo', 'pid=,ppid=,comm='], text=True, capture_output=True,
+                                check=True, timeout=5, env={**os.environ, 'LC_ALL': 'C'})
+    except (OSError, subprocess.SubprocessError):
+        return None
+    parents = {}
+    for line in result.stdout.splitlines():
+        fields = line.split(None, 2)
+        if len(fields) == 3 and fields[0].isdigit() and fields[1].isdigit():
+            parents[int(fields[0])] = (int(fields[1]), os.path.basename(fields[2]).lower())
+    pid, seen = os.getppid(), set()
+    while pid in parents and pid not in seen:
+        seen.add(pid)
+        parent, name = parents[pid]
+        if name == 'claude':
+            return 'claude'
+        if name.startswith('codex'):
+            return 'codex'
+        pid = parent
+    return None
+
+
+def working_directory():
+    try:
+        return os.getcwd()
+    except OSError:  # A deleted cwd; the job itself refuses later, the record must not.
+        return None
+
+
+def acquire(directory, policy, job_id, command):
     stream = (directory / 'slot.1').open('a')
     queue = directory / 'queue'
     queue.mkdir(exist_ok=True, mode=0o700)
@@ -106,7 +144,9 @@ def acquire(directory, policy, job_id):
     owner = processes()[os.getpid()]
     ticket = queue / f'{time.time_ns():020d}-{owner.pid}.json'
     record = {'pid': owner.pid, 'identity': owner.identity, 'job_id': job_id, 'enqueued': time.time()}
-    event(directory, 'queued', job_id=job_id, pid=os.getpid())
+    event(directory, 'queued', job_id=job_id, pid=os.getpid(), cwd=working_directory(),
+          executable=Path(command[0]).name, args=event_args(command),
+          wait_seconds=policy.wait_seconds, caller=caller_runtime())
     acquired = False
     progress_at = None
     handlers = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
@@ -142,7 +182,9 @@ def acquire(directory, policy, job_id):
                     reason = 'resource_busy'
             now = time.monotonic()
             if now >= deadline:
-                event(directory, 'deferred', job_id=job_id, reason=reason)
+                event(directory, 'deferred', job_id=job_id, reason=reason,
+                      waited_seconds=round(now - started, 1), wait_seconds=policy.wait_seconds,
+                      position=position, holder=holder_fields(directory))
                 print('with-heavy-lock: DEFERRED (' + reason + '); no command started. '
                       'Do not retry unchanged or treat this as test success. No CI push is authorized.',
                       file=sys.stderr)
@@ -399,7 +441,7 @@ def main():
             os.execvpe(command[0], command, child_environment(policy, os.environ['KEEL_HEAVY_JOB_ID']))
         job_id = uuid.uuid4().hex
         try:
-            stream = acquire(directory, policy, job_id)
+            stream = acquire(directory, policy, job_id, command)
         except Interrupted as error:
             event(directory, 'interrupted', job_id=job_id, reason='signal', signal=error.args[0])
             return 128 + int(error.args[0])

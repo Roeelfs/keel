@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Per-command wall budgets and recorded arguments: matching, validation and events."""
+import fcntl
 import json
 import os
 import subprocess
@@ -107,6 +108,39 @@ class CommandPolicyTests(unittest.TestCase):
         started = [row for row in self.events() if row["event"] == "started"]
         self.assertEqual(len(started), 1, self.events())
         self.assertEqual(started[0]["args"], ["verify", "<redacted>", "<redacted>"])
+
+    def test_queued_event_records_the_caller_and_its_wait(self):
+        self.write_policy()
+        result = self.run_wrapper(["true", "verify", "--secret=value"], KEEL_HEAVY_WAIT_MAX="30")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        queued = [row for row in self.events() if row["event"] == "queued"]
+        self.assertEqual(len(queued), 1, self.events())
+        self.assertEqual(queued[0]["executable"], "true")
+        self.assertEqual(queued[0]["args"], ["verify", "<redacted>"])
+        self.assertEqual(queued[0]["cwd"], os.getcwd())
+        self.assertEqual(queued[0]["wait_seconds"], 30)
+        self.assertIn(queued[0]["caller"], ("claude", "codex", None))
+
+    def test_deferred_event_records_its_wait_position_and_the_slot_holder(self):
+        self.write_policy()
+        self.assertEqual(self.run_wrapper(["--status"]).returncode, 0)  # Creates the state directory.
+        state = os.path.join(self.keel, "heavy.slots")
+        with open(os.path.join(state, "lease.json"), "w", encoding="utf-8") as handle:
+            json.dump({"job_id": "fixture", "cwd": "/holder", "executable": "project-verify"}, handle)
+        with open(os.path.join(state, "slot.1"), "a") as slot:
+            fcntl.flock(slot, fcntl.LOCK_EX)
+            result = self.run_wrapper(["true", "verify"], KEEL_HEAVY_WAIT_MAX="0.3")
+        self.assertEqual(result.returncode, 75, result.stderr)
+        rows = self.events()
+        deferred = [row for row in rows if row["event"] == "deferred"]
+        self.assertEqual(len(deferred), 1, rows)
+        queued = [row for row in rows if row["event"] == "queued" and row["job_id"] == deferred[0]["job_id"]]
+        self.assertEqual(queued[0]["args"], ["verify"], "a deferral joins to the command that asked")
+        self.assertEqual(deferred[0]["reason"], "resource_busy")
+        self.assertEqual(deferred[0]["wait_seconds"], 0.3)
+        self.assertGreaterEqual(deferred[0]["waited_seconds"], 0.3)
+        self.assertEqual(deferred[0]["position"], 1)
+        self.assertEqual(deferred[0]["holder"], {"executable": "project-verify", "cwd": "/holder"})
 
 
 if __name__ == "__main__":
