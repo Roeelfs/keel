@@ -98,8 +98,15 @@ quoting) runs unless a heavy command name appears anywhere in its text, and is
 refused if one does. Quoted documentation and heredoc bodies are
 excluded from classification. Repository-specific entry points can be added in
 `~/.keel/resource-commands.json`, for example `{"project-verify": ["*"]}`.
-This shell classifier prevents common accidental bypasses; it cannot prove what
-arbitrary scripts or interactive terminal input will execute.
+A listed project-command is exempt from the shared runner only when the exact
+script the payload resolves (an absolute path as-is, or a relative path against
+the tool call's `cwd`; a bare name found via PATH is never exempt) is a regular
+file whose first 8KiB carries a `# keel:self-locking` line, and only if that
+script really takes the lock itself elsewhere (e.g. its own lint-enforced
+wrapper) — a `cd` earlier in the same command, a missing `cwd`, or anything else
+ambiguous about resolution keeps the command classified as heavy. This shell
+classifier prevents common accidental bypasses; it cannot prove what arbitrary
+scripts or interactive terminal input will execute.
 
 Commands that outlast a foreground tool call can be listed in the same file under
 `background_required`, for example

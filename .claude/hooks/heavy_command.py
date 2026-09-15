@@ -1,11 +1,51 @@
 """Classify shell command positions without treating quoted prose as execution."""
 import re
 import shlex
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 PACKAGE_MANAGERS = frozenset({'pnpm', 'npm', 'npx', 'yarn', 'bun', 'bunx', 'corepack'})
 PACKAGE_VERBS = frozenset({'test', 'build', 'install', 'ci', 'i'})
 TEST_RUNNERS = frozenset({'vitest', 'vitest.mjs', 'vitest.js', 'jest', 'jest.js'})
+
+# A project-command that owns its own heavy-slot lock internally (enforced by that project's own
+# lint) can carry this marker to opt out of the shared runner. Only the custom-rule branch below
+# ever consults it; built-in kinds (turbo, vitest, pnpm test, cdk, next build) are never exempt.
+SELF_LOCKING_MARKER_BYTES = 8192
+SELF_LOCKING_MARKER = re.compile(rb'(?m)^# keel:self-locking\b')
+
+
+def is_self_locking(word, cwd):
+    """Resolve `word` to a script and check its first 8KiB for the self-locking marker.
+
+    Fails closed: an absolute path is used as-is; a path containing '/' resolves against `cwd`
+    (never exempt if `cwd` is missing); a bare name is never exempt, even via PATH. Anything that
+    is not a readable regular file (missing, a directory, unreadable) is never exempt. Symlinks
+    are followed.
+    """
+    if not word:
+        return False
+    if word.startswith('/'):
+        candidate = Path(word)
+    elif '/' in word:
+        if not cwd:
+            return False
+        candidate = Path(cwd) / word
+    else:
+        return False
+    try:
+        if not candidate.is_file():
+            return False
+        with candidate.open('rb') as handle:
+            head = handle.read(SELF_LOCKING_MARKER_BYTES)
+    except OSError:
+        return False
+    return SELF_LOCKING_MARKER.search(head) is not None
+
+
+def is_cd_segment(segment):
+    """A `cd`/`pushd` segment means any payload cwd is stale for every later segment."""
+    words = without_prefixes(list(segment))
+    return bool(words) and PurePosixPath(words[0]).name in {'cd', 'pushd'}
 
 
 def strip_heredocs(command):
@@ -38,7 +78,7 @@ def without_prefixes(words):
     return words
 
 
-def inspect_words(words, custom):
+def inspect_words(words, custom, cwd=None, allow_exempt=True):
     words = without_prefixes(words)
     if not words:
         return None
@@ -47,7 +87,7 @@ def inspect_words(words, custom):
     if name == 'with-heavy-lock':
         return None  # The supervisor, not an environment flag, owns nested admission.
     if name == 'eval':
-        return classify(' '.join(rest), custom)
+        return _classify(' '.join(rest), custom, cwd, allow_exempt)
     if name in {'echo', 'printf', 'cat', 'rg', 'grep', 'sed', 'awk'}:
         return None
     if name in {'env', 'nice', 'timeout', 'gtimeout', 'nohup'}:
@@ -55,7 +95,7 @@ def inspect_words(words, custom):
             rest = without_options(rest)[1:]
         elif name == 'nice' and rest[:1] == ['-n']:
             rest = rest[2:]
-        return inspect_words(without_options(rest), custom)
+        return inspect_words(without_options(rest), custom, cwd, allow_exempt)
     if name in PACKAGE_MANAGERS:
         if name == 'yarn' and any(x in rest for x in {'--help', '-h', '--version', '-v'}):
             return None
@@ -66,11 +106,11 @@ def inspect_words(words, custom):
             rest = without_options(rest[1:])
         if rest and rest[0].split(':')[0] in PACKAGE_VERBS:
             return 'package-' + rest[0]
-        return inspect_words(rest, custom)
+        return inspect_words(rest, custom, cwd, allow_exempt)
     if name in TEST_RUNNERS:
         return None if any(x in rest for x in ['--version', '--help', '-h']) else 'unit-tests'
     if name in {'node', 'nodejs'}:
-        return inspect_words(without_options(rest), custom)
+        return inspect_words(without_options(rest), custom, cwd, allow_exempt)
     if name == 'next' and rest[:1] == ['build']:
         return 'build'
     if name == 'cdk' and rest and rest[0] in {'synth', 'diff', 'deploy', 'watch'}:
@@ -78,13 +118,15 @@ def inspect_words(words, custom):
     if name == 'turbo' and any(x.split(':')[0] in {'test', 'build', 'typecheck'} for x in rest):
         return 'workspace-jobs'
     if name in custom and verbs_match(custom[name], rest):
+        if allow_exempt and is_self_locking(words[0], cwd):
+            return None
         return 'project-command'
     for i, word in enumerate(words):
         if PurePosixPath(word).name in {'bash', 'zsh', 'sh'}:
             for j in range(i + 1, len(words)):
                 if words[j] in {'-c', '-lc', '-ic'} and j + 1 < len(words):
-                    return classify(words[j + 1], custom)
-            return inspect_words(words[i + 1:], custom)
+                    return _classify(words[j + 1], custom, cwd, allow_exempt)
+            return inspect_words(words[i + 1:], custom, cwd, allow_exempt)
     return None
 
 
@@ -102,12 +144,21 @@ def segments(command):
     yield segment
 
 
-def classify(command, custom=None):
+def _classify(command, custom, cwd, allow_exempt):
+    stale = not allow_exempt
     for segment in segments(command):
-        found = inspect_words(segment, custom or {})
+        found = inspect_words(segment, custom, cwd, allow_exempt=not stale)
         if found:
             return found
+        if is_cd_segment(segment):
+            stale = True  # cwd is stale from here on; disable the exemption for later segments.
     return None
+
+
+def classify(command, custom=None, cwd=None):
+    """`cwd` is the PreToolUse payload's cwd (Claude and Codex both send it); used only to
+    resolve a relative self-locking script path. Never guessed from the current process."""
+    return _classify(command, custom or {}, cwd, True)
 
 
 def raw_words(command):

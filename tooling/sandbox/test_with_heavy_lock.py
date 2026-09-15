@@ -20,8 +20,12 @@ WRAPPER = os.path.join(REPO, "tooling", "sandbox", "with-heavy-lock")
 HOOK = os.path.join(REPO, ".claude", "hooks", "serialize-heavy-ops.py")
 
 
-def run_hook(command, with_wrapper_on_path=True, hook=None, arguments=(), **tool_input):
-    """Feed a command to the hook; exit 2 means the shell call is denied."""
+def run_hook(command, with_wrapper_on_path=True, hook=None, arguments=(), cwd=None, **tool_input):
+    """Feed a command to the hook; exit 2 means the shell call is denied.
+
+    `cwd` (when given) is sent at the top level of the payload, matching the real
+    PreToolUse request shape from both Claude and Codex.
+    """
     with tempfile.TemporaryDirectory() as bindir:
         env = dict(os.environ)
         if with_wrapper_on_path:
@@ -29,9 +33,12 @@ def run_hook(command, with_wrapper_on_path=True, hook=None, arguments=(), **tool
             env["PATH"] = bindir + os.pathsep + env.get("PATH", "")
         else:
             env["PATH"] = bindir
+        payload = {"tool_input": {"command": command, **tool_input}}
+        if cwd is not None:
+            payload["cwd"] = cwd
         completed = subprocess.run(
             [*([hook] if hook else [sys.executable, HOOK]), *arguments],
-            input=json.dumps({"tool_input": {"command": command, **tool_input}}),
+            input=json.dumps(payload),
             capture_output=True, text=True, env=env,
         )
     return completed
@@ -188,8 +195,8 @@ class BackgroundRequired(unittest.TestCase):
         with open(os.path.join(self.tmp.name, ".keel", "resource-commands.json"), "w") as handle:
             handle.write(rules if isinstance(rules, str) else json.dumps(rules))
 
-    def check(self, command, *arguments, **tool_input):
-        return run_hook(command, hook=self.hook, arguments=arguments, **tool_input)
+    def check(self, command, *arguments, cwd=None, **tool_input):
+        return run_hook(command, hook=self.hook, arguments=arguments, cwd=cwd, **tool_input)
 
     def test_claude_runtime_denies_a_foreground_background_required_command(self):
         commands = ("with-heavy-lock project-verify verify",
@@ -297,6 +304,101 @@ class BackgroundRequired(unittest.TestCase):
         result = self.check("slow-report --since 'today", "--runtime", "claude", run_in_background=True)
         self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
         self.assertEqual(self.check("other-tool 'x", "--runtime", "claude").returncode, 0)
+
+
+class SelfLockingMarker(unittest.TestCase):
+    """A project-command script that owns its own heavy-slot lock can opt out of the runner."""
+
+    RULES = {"project-verify": ["verify", "e2e"]}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        os.mkdir(os.path.join(self.tmp.name, ".keel"))
+        self.write_rules(self.RULES)
+        self.hook = isolated_hook(self.tmp.name)
+        self.repo = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        self.repo.cleanup()
+
+    def write_rules(self, rules):
+        with open(os.path.join(self.tmp.name, ".keel", "resource-commands.json"), "w", encoding="utf-8") as handle:
+            handle.write(rules if isinstance(rules, str) else json.dumps(rules))
+
+    def write_script(self, relative_path, marker=True, padding_bytes=0):
+        path = os.path.join(self.repo.name, relative_path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        body = ""
+        if padding_bytes:
+            body += "# " + ("x" * padding_bytes) + "\n"
+        if marker:
+            body += "# keel:self-locking\n"
+        body += "#!/usr/bin/env bash\necho hi\n"
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(body)
+        os.chmod(path, 0o700)
+        return path
+
+    def check(self, command, *arguments, cwd=None, **tool_input):
+        return run_hook(command, hook=self.hook, arguments=arguments, cwd=cwd, **tool_input)
+
+    def test_marker_present_relative_path_and_payload_cwd_is_allowed(self):
+        self.write_script("tooling/sandbox/project-verify")
+        result = self.check("tooling/sandbox/project-verify verify", cwd=self.repo.name)
+        self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+
+    def test_marker_present_foreground_under_claude_runtime_still_needs_background(self):
+        self.write_rules({**self.RULES, "background_required": {"project-verify": ["verify"]}})
+        self.write_script("tooling/sandbox/project-verify")
+        result = self.check("tooling/sandbox/project-verify verify", "--runtime", "claude", cwd=self.repo.name)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(CLAUDE_TEXT, result.stderr)
+        backgrounded = self.check("tooling/sandbox/project-verify verify", "--runtime", "claude",
+                                  cwd=self.repo.name, run_in_background=True)
+        self.assertEqual((backgrounded.returncode, backgrounded.stdout), (0, ""), backgrounded.stderr)
+
+    def test_marker_absent_is_denied(self):
+        self.write_script("tooling/sandbox/project-verify", marker=False)
+        result = self.check("tooling/sandbox/project-verify verify", cwd=self.repo.name)
+        self.assertEqual(result.returncode, 2)
+
+    def test_marker_past_8192_bytes_is_denied(self):
+        self.write_script("tooling/sandbox/project-verify", marker=True, padding_bytes=8200)
+        result = self.check("tooling/sandbox/project-verify verify", cwd=self.repo.name)
+        self.assertEqual(result.returncode, 2)
+
+    def test_cd_before_the_command_makes_the_payload_cwd_stale(self):
+        self.write_script("tooling/sandbox/project-verify")
+        command = "cd %s && tooling/sandbox/project-verify verify" % self.repo.name
+        result = self.check(command, cwd=self.repo.name)
+        self.assertEqual(result.returncode, 2)
+
+    def test_bare_name_is_never_exempt(self):
+        result = self.check("project-verify verify", cwd=self.repo.name)
+        self.assertEqual(result.returncode, 2)
+
+    def test_absolute_path_with_marker_is_allowed_without_a_payload_cwd(self):
+        path = self.write_script("tooling/sandbox/project-verify")
+        result = self.check(path + " verify")
+        self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+
+    def test_symlink_to_a_marked_file_is_allowed(self):
+        target = self.write_script("tooling/sandbox/project-verify")
+        link = os.path.join(self.repo.name, "tooling", "sandbox", "project-verify-link")
+        os.symlink(target, link)
+        result = self.check("tooling/sandbox/project-verify-link verify", cwd=self.repo.name)
+        self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+
+    def test_wrapped_marked_command_stays_allowed(self):
+        self.write_script("tooling/sandbox/project-verify")
+        result = self.check("with-heavy-lock tooling/sandbox/project-verify verify", cwd=self.repo.name)
+        self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+
+    def test_builtin_kind_is_never_exempt_even_with_a_marker_file(self):
+        self.write_script("pnpm")  # marker on a file that shares a built-in kind's name
+        result = self.check("./pnpm test", cwd=self.repo.name)
+        self.assertEqual(result.returncode, 2)
 
 
 if __name__ == "__main__":

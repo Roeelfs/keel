@@ -54,6 +54,8 @@ def main(arguments):
     command = tool_input.get('command', '')
     if not isinstance(command, str) or not command:
         return 0
+    cwd = request.get('cwd')
+    cwd = cwd if isinstance(cwd, str) and cwd else None
     try:
         account_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
         path = account_home / '.keel/resource-commands.json'
@@ -70,7 +72,7 @@ def main(arguments):
         print('Resource guard could not read resource command rules: ' + str(error), file=sys.stderr)
         return 2
     try:
-        kind = classify(command, rules)
+        kind = classify(command, rules, cwd)
         slow = background_required(command, background) if runtime and not kind else None
     except ValueError as error:
         # Unsplittable shell text is usually a quoting slip in a light command, so it runs
