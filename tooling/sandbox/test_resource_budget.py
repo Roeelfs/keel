@@ -30,6 +30,16 @@ def wait_for(path, timeout=4):
     raise AssertionError("timed out waiting for %s" % path)
 
 
+def real_node():
+    # Version-manager shims (asdf, nvm, volta) resolve the binary from $HOME, and
+    # the tests override HOME; ask node for its own path under the ambient env.
+    result = subprocess.run(["node", "-e", "process.stdout.write(process.execPath)"],
+                            capture_output=True, text=True, timeout=10)
+    if result.returncode != 0 or not result.stdout:
+        raise unittest.SkipTest("node is unavailable: %s" % result.stderr.strip())
+    return result.stdout
+
+
 class ResourceBudgetTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -75,6 +85,16 @@ class ResourceBudgetTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
+    def hold_slot(self):
+        # The command body runs only after the wrapper holds the slot, so the
+        # marker proves the lock is taken; a fixed sleep races under load.
+        started = os.path.join(self.tmp.name, "holder-started")
+        holder = self.popen([sys.executable, "-c", (
+            "import pathlib,time; pathlib.Path(%r).touch(); time.sleep(5)" % started)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        wait_for(started)
+        return holder
+
     def event_rows(self):
         path = os.path.join(self.state, "events.jsonl")
         wait_for(path)
@@ -119,9 +139,7 @@ class ResourceBudgetTests(unittest.TestCase):
         self.assertTrue(os.path.exists(second_started))
 
     def test_forged_marker_cannot_bypass_a_held_slot(self):
-        holder = self.popen(["sleep", "2"], stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
-        time.sleep(0.12)
+        holder = self.hold_slot()
         env = self.env(KEEL_HEAVY_WAIT_MAX="0.10", KEEL_CI_DEFER_BUDGET="0",
                        KEEL_HEAVY_LOCK_HELD="1")
         attempt = self.invoke(["true"], env=env, capture_output=True, text=True, timeout=5)
@@ -139,9 +157,7 @@ class ResourceBudgetTests(unittest.TestCase):
         self.assertEqual(lease.returncode, 0, lease.stderr)
 
     def test_zero_wait_is_not_an_infinite_queue_after_ci_budget_is_spent(self):
-        holder = self.popen(["sleep", "2"], stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
-        time.sleep(0.12)
+        holder = self.hold_slot()
         env = self.env(KEEL_HEAVY_WAIT_MAX="0", KEEL_CI_DEFER_BUDGET="0")
         started = time.monotonic()
         result = self.invoke(["true"], env=env, capture_output=True, text=True, timeout=5)
@@ -161,7 +177,7 @@ class ResourceBudgetTests(unittest.TestCase):
                     "writeFileSync(process.env.OUT, JSON.stringify({argv: process.argv.slice(2), node: process.env.NODE_OPTIONS || ''}));\n"
                 )
             env = self.env(OUT=output, NODE_OPTIONS="--trace-warnings")
-            result = self.invoke(["node", fake_vitest, "--maxWorkers=99", "--pool=threads"],
+            result = self.invoke([real_node(), fake_vitest, "--maxWorkers=99", "--pool=threads"],
                               env=env, capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
             wait_for(output)
