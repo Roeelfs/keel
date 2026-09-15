@@ -24,8 +24,12 @@ Defaults are one job, at most two Vitest/Jest workers (policy may allow up to
 eight), a 6 GiB aggregate resident memory budget, a 20% available-memory
 admission threshold, and a two-hour job limit. Vitest uses `forks`. Turbo's Node
 launcher receives concurrency one.
-The 2 GiB V8 heap setting is a per-process aid; aggregate RSS is measured across
-the job's process group every 0.5 seconds. On excess, only that group is stopped.
+The 2 GiB V8 heap setting is a per-process aid; aggregate RSS is measured every 0.5
+seconds across every process in the job's session: its process group plus any
+descendant that moved to its own group (Turbo's tasks do) or outlived its parent.
+Only `setsid` leaves a job, so a daemon is not counted. On excess, only the job's
+processes are stopped: a group whose leader belongs to the job as a group, any
+other member by pid.
 Free memory is sampled on the same interval. If it stays below
 `run_min_free_percent` (default 10%) for `run_pressure_seconds` (default 15) of
 continuous samples, the group is stopped with `memory_pressure_during_run`; a
@@ -41,10 +45,12 @@ admission. The account database determines the home for both policy and state.
 State is always `~/.keel/heavy.slots`, including an atomic lease and `events.jsonl` with
 job ids, terminal reasons and observed peak RSS. Nested calls verify a live
 supervisor ancestor, process identity, job id and held lock. An ambient
-`KEEL_HEAVY_LOCK_HELD=1` flag alone grants no access. If the supervisor dies,
-the recorded process group keeps a surviving job excluded until it drains. Only
-the supervisor holds the lock, so a daemon that leaves the group never keeps the
-slot busy. Termination and normal cleanup target only the owned group.
+`KEEL_HEAVY_LOCK_HELD=1` flag alone grants no access. The lease records the job
+leader's start time and its live members. If the supervisor dies, any surviving
+process of the job's session, in any group, keeps the slot excluded until it
+drains; a reused leader pid does not. Only the supervisor holds the lock, so a
+daemon that starts its own session never keeps the slot busy. Termination and
+normal cleanup target only the job's own processes.
 
 This is a native process supervisor, **not a hard memory sandbox**. Sampling can
 overshoot; detached processes can leave a process group; a SIGKILLed supervisor

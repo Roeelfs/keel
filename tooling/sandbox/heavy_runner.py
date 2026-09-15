@@ -1,4 +1,4 @@
-"""One machine-wide heavy job, observed as a complete process group."""
+"""One machine-wide heavy job, observed as its complete process tree."""
 from dataclasses import asdict
 import fcntl
 import json
@@ -10,7 +10,7 @@ import sys
 import time
 import uuid
 
-from heavy_resources import (account_home, ancestors, event, free_percent, group_members,
+from heavy_resources import (account_home, ancestors, event, free_percent, job_members,
                              load_policy, processes, read_record, write_record)
 
 QUEUE_PROGRESS_SECONDS = 30
@@ -32,8 +32,9 @@ def lock_available(directory):
 
 
 def lease_group_alive(lease):
-    # A job outlives a killed supervisor only as its recorded process group.
-    return bool(lease and group_members(lease.get('pgid'), processes()))
+    # A job outlives a killed supervisor as the live processes of its session, whatever their group.
+    # A lease from an older runner has no leader identity; its pgid is still the session it started.
+    return bool(lease and job_members(lease.get('pgid'), lease.get('leader_identity'), processes()))
 
 
 def valid_lease(directory):
@@ -175,16 +176,48 @@ def child_environment(policy, job_id):
             'NODE_OPTIONS': options.strip()}
 
 
-def stop_group(pgid):
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        if not group_members(pgid, processes()):
-            return
+class Job:
+    """The supervised command, observed as every live process of the session it leads."""
+
+    def __init__(self, root, lease_path, lease):
+        self.root = root
+        self.lease_path = lease_path
+        self.lease = lease
+        self.recorded = None
+
+    def members(self):
+        table = processes()
+        if 'leader_identity' not in self.lease:  # First sample: the child is still behind its gate.
+            self.lease = {**self.lease, 'leader_identity': table[self.root].identity}
+        members = job_members(self.root, self.lease['leader_identity'], table)
+        recorded = sorted([p.pid, p.pgid, p.identity] for p in members)
+        if recorded != self.recorded:
+            self.recorded = recorded
+            write_record(self.lease_path, {**self.lease, 'members': recorded})
+        return members
+
+    def stop(self):
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            members = self.members()  # Re-sampled: catches processes started during the grace period.
+            if not members:
+                return
+            signal_members(members, self.root, sig)
+            if sig == signal.SIGTERM:
+                time.sleep(0.3)
+
+
+def signal_members(members, root, sig):
+    # A group is signalled whole only when it is the job's own or its leader is a member; any
+    # other member is signalled by pid. Never this supervisor or its group.
+    pids = {p.pid for p in members}
+    groups = {p.pgid for p in members if p.pgid == root or p.pgid in pids} - {os.getpgrp()}
+    targets = [(os.killpg, pgid) for pgid in sorted(groups)]
+    targets += [(os.kill, p.pid) for p in members if p.pgid not in groups and p.pid != os.getpid()]
+    for send, target in targets:
         try:
-            os.killpg(pgid, sig)
-        except ProcessLookupError:
-            return
-        if sig == signal.SIGTERM:
-            time.sleep(0.3)
+            send(target, sig)
+        except (ProcessLookupError, PermissionError):
+            pass  # Exited since the sample.
 
 
 def observed_free_percent():
@@ -195,15 +228,14 @@ def observed_free_percent():
         return None
 
 
-def supervise(child, policy, directory, job_id, interruption):
+def supervise(child, job, policy, directory, job_id, interruption):
     started = time.monotonic()
     peak = 0.0
     low_since = None
     while True:
         if interruption():
             raise InterruptedError(interruption())
-        table = processes()
-        members = group_members(child.pid, table)
+        members = job.members()
         rss = sum(p.rss_mb for p in members)
         peak = max(peak, rss)
         now = time.monotonic()
@@ -216,7 +248,7 @@ def supervise(child, policy, directory, job_id, interruption):
                   'memory_pressure_during_run' if low and now - low_since >= policy.run_pressure_seconds
                   else None)
         if reason:
-            stop_group(child.pid)
+            job.stop()
             child.wait(timeout=5)
             event(directory, 'completed', job_id=job_id, reason=reason,
                   peak_rss_mb=round(peak, 2), exit_code=137)
@@ -234,6 +266,7 @@ def supervise(child, policy, directory, job_id, interruption):
 
 def run_job(command, directory, policy, job_id, stream):
     child = None
+    job = None
     gate_read, gate_write = os.pipe()
     received_signal = 0
     original_handlers = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
@@ -253,17 +286,19 @@ def run_job(command, directory, policy, job_id, stream):
                                  pass_fds=(gate_read,))
         os.close(gate_read)
         gate_read = None
+        # The child is session and group leader: pgid and session id are both its pid.
         lease = {'job_id': job_id, 'supervisor_pid': owner.pid,
                  'supervisor_identity': owner.identity, 'pgid': child.pid,
                  'cwd': os.getcwd(), 'executable': Path(command[0]).name}
-        write_record(directory / 'lease.json', lease)
+        job = Job(child.pid, directory / 'lease.json', lease)
+        job.members()  # Publishes the lease with the gated child's identity.
         event(directory, 'started', **lease, policy=asdict(policy))
         if received_signal:
             raise InterruptedError(received_signal)
         os.write(gate_write, b'1')  # The job cannot run before its lease is published.
         os.close(gate_write)
         gate_write = None
-        return supervise(child, policy, directory, job_id, lambda: received_signal)
+        return supervise(child, job, policy, directory, job_id, lambda: received_signal)
     except InterruptedError as error:
         event(directory, 'interrupted', job_id=job_id, reason='signal', signal=error.args[0])
         return 128 + int(error.args[0])
@@ -279,8 +314,9 @@ def run_job(command, directory, policy, job_id, stream):
         for descriptor in (gate_read, gate_write):
             if descriptor is not None:
                 os.close(descriptor)
+        if job is not None:
+            job.stop()
         if child is not None:
-            stop_group(child.pid)
             child.wait(timeout=5)
         (directory / 'lease.json').unlink(missing_ok=True)
         stream.close()

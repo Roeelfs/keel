@@ -102,8 +102,25 @@ def ancestors(pid, table):
     return seen
 
 
-def group_members(pgid, table):
-    return [p for p in table.values() if p.pgid == pgid and not p.state.startswith('Z')]
+def session_of(pid):
+    try:
+        return os.getsid(pid)
+    except OSError:  # Exited after the table was sampled.
+        return None
+
+
+def job_members(root, leader_identity, table):
+    """Live processes of the job started as session leader `root`.
+
+    Every descendant stays in the job's session, including one that moves to its own process
+    group (turbo's tasks do) or is reparented when its parent exits, even between two samples.
+    Only setsid (a daemon) leaves it. The kernel never reuses `root` as a pid while its session
+    has members, so a live `root` with another start time means the job is gone.
+    """
+    leader = table.get(root)
+    if not isinstance(root, int) or (leader and leader_identity and leader.identity != leader_identity):
+        return []
+    return [p for p in table.values() if not p.state.startswith('Z') and session_of(p.pid) == root]
 
 
 def free_percent():
