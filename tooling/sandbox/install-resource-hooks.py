@@ -25,13 +25,13 @@ def load_json(path, default):
     if not isinstance(value, dict): raise ValueError(f"expected JSON object: {path}")
     return value
 
-def command_for(python, script):
-    """Preserve stdin and map an unavailable/broken launcher to hook denial (2)."""
-    return ("/bin/sh -c 'py=$1; script=$2; if [ ! -x \"$py\" ] || [ ! -f \"$script\" ]; then "
+def command_for(python, script, runtime):
+    """Preserve stdin, name the runtime, and map an unavailable/broken launcher to hook denial (2)."""
+    return ("/bin/sh -c 'py=$1; script=$2; shift 2; if [ ! -x \"$py\" ] || [ ! -f \"$script\" ]; then "
             "echo \"resource guard unavailable: interpreter or script is missing\" >&2; exit 2; fi; "
-            "\"$py\" \"$script\"; rc=$?; if [ \"$rc\" -eq 0 ] || [ \"$rc\" -eq 2 ]; then exit \"$rc\"; fi; "
+            "\"$py\" \"$script\" \"$@\"; rc=$?; if [ \"$rc\" -eq 0 ] || [ \"$rc\" -eq 2 ]; then exit \"$rc\"; fi; "
             "echo \"resource guard unavailable: launcher failed\" >&2; exit 2' resource-hook "
-            + shlex.quote(str(python)) + " " + shlex.quote(str(script)))
+            + shlex.quote(str(python)) + " " + shlex.quote(str(script)) + " --runtime " + shlex.quote(runtime))
 
 def hook_entry(command):
     return {"matcher": "^Bash$", "hooks": [{"type": "command", "command": command, "timeout": 3,
@@ -132,9 +132,10 @@ def install(home, apply):
     validate_sources(); home = home.resolve()
     claude_dir, runtime_dir = home / ".claude" / "hooks", home / ".keel" / "resource-hooks"
     codex_path, claude_path = home / ".codex" / "hooks.json", home / ".claude" / "settings.json"
-    command = command_for(Path(sys.executable).resolve(), claude_dir / RESOURCE_SCRIPT)
+    python, script = Path(sys.executable).resolve(), claude_dir / RESOURCE_SCRIPT
     codex, claude = load_json(codex_path, {}), load_json(claude_path, {})
-    codex_changed, claude_changed = mutate_codex(codex, command), mutate_claude(claude, command)
+    codex_changed = mutate_codex(codex, command_for(python, script, "codex"))
+    claude_changed = mutate_claude(claude, command_for(python, script, "claude"))
     wrapper = home / ".local" / "bin" / "with-heavy-lock"; wrapper_valid = valid_wrapper_target(wrapper, runtime_dir)
     plan = {"home": str(home), "apply": apply, "codex_changed": codex_changed, "claude_changed": claude_changed,
             "wrapper_changed": not wrapper_valid, "copy_claude_hooks": list(CLAUDE_HOOKS), "copy_runtime": list(RUNTIME_FILES),

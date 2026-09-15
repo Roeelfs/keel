@@ -28,9 +28,14 @@ def without_options(words, boolean_flags=frozenset()):
     return result
 
 
-def inspect_words(words, custom):
+def without_prefixes(words):
     while words and (re.match(r'^\w+=', words[0]) or words[0] in {'then', 'do', 'if', '!', 'exec', 'command', 'time'}):
         words = words[1:]
+    return words
+
+
+def inspect_words(words, custom):
+    words = without_prefixes(words)
     if not words:
         return None
     name = PurePosixPath(words[0]).name
@@ -79,17 +84,35 @@ def inspect_words(words, custom):
     return None
 
 
-def classify(command, custom=None):
+def segments(command):
     lexer = shlex.shlex(strip_heredocs(command), posix=True, punctuation_chars=';&|()\n')
     lexer.whitespace = ' \t\r'
     lexer.whitespace_split = True
     segment = []
     for token in lexer:
         if token and all(c in ';&|()\n' for c in token):
-            found = inspect_words(segment, custom or {})
-            if found:
-                return found
+            yield segment
             segment = []
         else:
             segment.append(token)
-    return inspect_words(segment, custom or {})
+    yield segment
+
+
+def classify(command, custom=None):
+    for segment in segments(command):
+        found = inspect_words(segment, custom or {})
+        if found:
+            return found
+    return None
+
+
+def background_required(command, rules):
+    """Name the rule a command segment matches, looking through a leading with-heavy-lock."""
+    for segment in segments(command):
+        words = without_prefixes(segment)
+        if words and PurePosixPath(words[0]).name == 'with-heavy-lock':
+            words = words[2:] if words[1:2] == ['--'] else words[1:]
+        name = PurePosixPath(words[0]).name if words else None
+        if name in rules and ('*' in rules[name] or (len(words) > 1 and words[1] in rules[name])):
+            return name
+    return None

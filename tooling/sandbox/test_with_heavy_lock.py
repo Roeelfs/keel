@@ -11,7 +11,7 @@ import tempfile
 import time
 import unittest
 
-from resource_test_support import isolated_wrapper
+from resource_test_support import isolated_hook, isolated_wrapper
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -20,7 +20,7 @@ WRAPPER = os.path.join(REPO, "tooling", "sandbox", "with-heavy-lock")
 HOOK = os.path.join(REPO, ".claude", "hooks", "serialize-heavy-ops.py")
 
 
-def run_hook(command, with_wrapper_on_path=True):
+def run_hook(command, with_wrapper_on_path=True, hook=None, arguments=(), **tool_input):
     """Feed a command to the hook; exit 2 means the shell call is denied."""
     with tempfile.TemporaryDirectory() as bindir:
         env = dict(os.environ)
@@ -30,7 +30,8 @@ def run_hook(command, with_wrapper_on_path=True):
         else:
             env["PATH"] = bindir
         completed = subprocess.run(
-            [sys.executable, HOOK], input=json.dumps({"tool_input": {"command": command}}),
+            [*([hook] if hook else [sys.executable, HOOK]), *arguments],
+            input=json.dumps({"tool_input": {"command": command, **tool_input}}),
             capture_output=True, text=True, env=env,
         )
     return completed
@@ -145,6 +146,96 @@ class FailClosed(unittest.TestCase):
     def test_light_commands_remain_allowed_without_wrapper(self):
         for command in ("git status --porcelain", "pnpm typecheck", "pnpm lint", "yarn --version", "ls -la"):
             self.assertEqual(run_hook(command, with_wrapper_on_path=False).returncode, 0, command)
+
+
+TODAY_RULES = {"project-verify": ["verify", "e2e"], "slow-setup": ["*"]}
+BACKGROUND_RULES = {**TODAY_RULES,
+                    "background_required": {"project-verify": ["verify"], "slow-setup": ["*"]}}
+CLAUDE_TEXT = "re-run with run_in_background: true; the harness re-invokes you when it exits."
+
+
+class BackgroundRequired(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        os.mkdir(os.path.join(self.tmp.name, ".keel"))
+        self.write_rules(BACKGROUND_RULES)
+        self.hook = isolated_hook(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write_rules(self, rules):
+        with open(os.path.join(self.tmp.name, ".keel", "resource-commands.json"), "w") as handle:
+            handle.write(rules if isinstance(rules, str) else json.dumps(rules))
+
+    def check(self, command, *arguments, **tool_input):
+        return run_hook(command, hook=self.hook, arguments=arguments, **tool_input)
+
+    def test_claude_runtime_denies_a_foreground_background_required_command(self):
+        commands = ("with-heavy-lock project-verify verify",
+                    "with-heavy-lock -- project-verify verify --scope all",
+                    "cd repo && with-heavy-lock ./tools/project-verify verify 2>&1 | tail -40",
+                    "FLAG=1 with-heavy-lock slow-setup")
+        for command in commands:
+            for extra in ({}, {"run_in_background": False}):
+                with self.subTest(command=command, extra=extra):
+                    result = self.check(command, "--runtime", "claude", **extra)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn(CLAUDE_TEXT, result.stderr)
+
+    def test_claude_runtime_allows_the_same_command_backgrounded(self):
+        result = self.check("with-heavy-lock project-verify verify", "--runtime", "claude",
+                            run_in_background=True)
+        self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+
+    def test_codex_runtime_gets_running_cell_guidance(self):
+        result = self.check("with-heavy-lock project-verify verify", "--runtime", "codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)["hookSpecificOutput"]
+        self.assertNotIn("permissionDecision", output)
+        text = output["additionalContext"]
+        self.assertIn("Keep reading the running cell until it exits; never start a second copy.", text)
+        self.assertNotIn("poll", text.lower())
+        self.assertNotIn("run_in_background", text)
+
+    def test_no_runtime_argument_keeps_todays_behavior(self):
+        result = self.check("with-heavy-lock project-verify verify")
+        self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+        self.assertEqual(self.check("project-verify verify").returncode, 2)
+
+    def test_wrapped_single_file_vitest_stays_allowed_in_the_foreground(self):
+        for command in ("with-heavy-lock pnpm exec vitest run src/a.test.ts",
+                        "with-heavy-lock npx vitest run -t 'one case' src/a.test.ts"):
+            for runtime in ("claude", "codex"):
+                with self.subTest(command=command, runtime=runtime):
+                    result = self.check(command, "--runtime", runtime)
+                    self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+
+    def test_unwrapped_heavy_command_keeps_the_existing_denial(self):
+        result = self.check("project-verify verify", "--runtime", "claude")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires the shared resource runner", result.stderr)
+        self.assertNotIn("run_in_background", result.stderr)
+
+    def test_other_verbs_quoted_prose_and_rules_without_the_map_are_unaffected(self):
+        for command in ("with-heavy-lock project-verify e2e", "git status",
+                        'echo "with-heavy-lock project-verify verify"'):
+            with self.subTest(command=command):
+                self.assertEqual(self.check(command, "--runtime", "claude").returncode, 0)
+        self.write_rules(TODAY_RULES)
+        self.assertEqual(self.check("with-heavy-lock project-verify verify", "--runtime", "claude").returncode, 0)
+        self.assertEqual(self.check("project-verify verify", "--runtime", "claude").returncode, 2)
+
+    def test_invalid_registration_or_background_map_fails_closed(self):
+        for arguments in (("--runtime", "other"), ("--runtime",), ("claude",)):
+            with self.subTest(arguments=arguments):
+                result = self.check("git status", *arguments)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("Reinstall resource hooks", result.stderr)
+        self.write_rules({**TODAY_RULES, "background_required": ["project-verify"]})
+        result = self.check("git status", "--runtime", "claude")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("background_required must map command names", result.stderr)
 
 
 if __name__ == "__main__":

@@ -62,8 +62,27 @@ class InstallerTests(unittest.TestCase):
             self.assertTrue(os.access(wrapper, os.X_OK))
             self.assertTrue(fixed['backups'])
 
+    def test_each_runtime_is_registered_with_its_argument_idempotently(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp); codex_path = home / ".codex" / "hooks.json"; claude_path = home / ".claude" / "settings.json"
+            legacy = "/bin/sh -c '\"$1\" \"$2\"' resource-hook /usr/bin/python3 " + str(home / ".claude/hooks/serialize-heavy-ops.py")
+            self.write_json(codex_path, {"hooks": {"PreToolUse": [installer.hook_entry(legacy), {"matcher": "Agent", "hooks": [{"type": "command", "command": "keep-codex"}]}]}})
+            self.write_json(claude_path, {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": legacy}, {"type": "command", "command": "keep-claude"}]}]}})
+            self.assertTrue(installer.install(home, False)["claude_changed"])
+            installer.install(home, True)
+            for path, runtime, keep in ((codex_path, "codex", "keep-codex"), (claude_path, "claude", "keep-claude")):
+                handlers = [h for g in json.loads(path.read_text())["hooks"]["PreToolUse"] for h in g["hooks"]]
+                resource = [h["command"] for h in handlers if installer.resource_handler(h)]
+                self.assertEqual(len(resource), 1, handlers)
+                self.assertTrue(resource[0].endswith(" --runtime " + runtime), resource[0])
+                self.assertIn(keep, [h["command"] for h in handlers])
+                probe = subprocess.run(resource[0], shell=True, input=json.dumps({"tool_input": {"command": "git status"}}), capture_output=True, text=True)
+                self.assertEqual(probe.returncode, 0, probe.stderr)
+            second = installer.install(home, True)
+            self.assertFalse(second["codex_changed"]); self.assertFalse(second["claude_changed"])
+
     def test_missing_hook_interpreter_fails_closed(self):
-        command = installer.command_for('/missing/resource-python', '/missing/resource-hook.py')
+        command = installer.command_for('/missing/resource-python', '/missing/resource-hook.py', 'claude')
         result = subprocess.run(command, shell=True, capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
         self.assertIn('resource guard unavailable', result.stderr)
