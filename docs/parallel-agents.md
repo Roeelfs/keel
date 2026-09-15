@@ -20,15 +20,20 @@ with-heavy-lock npx cdk synth
 with-heavy-lock --status
 ```
 
-Defaults are one job, at most two Vitest/Jest workers, a 6 GiB aggregate resident
-memory budget, a 20% available-memory admission threshold, and a two-hour job
-limit. Vitest uses `forks`. Turbo's Node launcher receives concurrency one.
+Defaults are one job, at most two Vitest/Jest workers (policy may allow up to
+eight), a 6 GiB aggregate resident memory budget, a 20% available-memory
+admission threshold, and a two-hour job limit. Vitest uses `forks`. Turbo's Node
+launcher receives concurrency one.
 The 2 GiB V8 heap setting is a per-process aid; aggregate RSS is measured across
 the job's process group every 0.5 seconds. On excess, only that group is stopped.
+Free memory is sampled on the same interval: two consecutive samples below the
+threshold stop the group with `memory_pressure_during_run`; a single dip does not.
 A small startup gate publishes ownership before the command can execute.
 
 The host policy is `~/.keel/resource-policy.json`. Runtime environment can tighten
-worker, RSS, sample, wall-time and admission budgets; it cannot increase them.
+worker, RSS, sample, wall-time and free-memory budgets; it cannot increase them.
+The admission wait is not a resource grant, so `KEEL_HEAVY_WAIT_MAX` may raise or
+lower it.
 `KEEL_HEAVY_SLOTS`, `KEEL_HEAVY_LOCK_DIR` and an overridden `HOME` no longer change
 admission. The account database determines the home for both policy and state.
 State is always `~/.keel/heavy.slots`, including an atomic lease and `events.jsonl` with
@@ -47,9 +52,17 @@ does not start, resize or restart a VM, or wrap already-running processes.
 
 ### Bounded admission and results
 
-A busy host waits at most 15 seconds, then returns **75 / DEFERRED** without
-starting a command. `KEEL_HEAVY_WAIT_MAX=0` means immediate admission or deferral,
-not an infinite wait. Deferred work is incomplete: continue other useful work,
+Waiters queue in arrival order. Each writes a ticket under
+`~/.keel/heavy.slots/queue/`, and only the oldest live ticket may take the slot.
+A waiter that exits, is signalled, or is SIGKILLed stops holding its place: its
+own cleanup or the next waiter's process-identity check removes the ticket. A
+waiter prints one `QUEUED` line with its position and the holder's executable
+and directory, then progress every 30 seconds.
+
+By default a busy host waits 15 seconds, then returns **75 / DEFERRED** without
+starting a command. Only a caller that already runs in the background should set
+a long `KEEL_HEAVY_WAIT_MAX`; a foreground tool call has its own timeout.
+`KEEL_HEAVY_WAIT_MAX=0` means immediate admission or deferral, not an infinite wait. Deferred work is incomplete: continue other useful work,
 and only retry after the resource state changes. Deferral grants no permission
 to push, deploy or move the run to CI. The old CI budget/infinite-wait fallback
 has been removed. Exit 137 means a resource/wall-time stop; exit 69 means the
@@ -64,8 +77,10 @@ python3 tooling/sandbox/install-resource-hooks.py --apply
 ```
 
 The opt-in installer backs up changed files, preserves unrelated settings, and
-registers the shared `serialize-heavy-ops.py` hook for Claude's Bash tool and
-Codex's native `PreToolUse` / `^Bash$` event (which covers unified exec). Codex
+registers the shared `serialize-heavy-ops.py` hook with `--runtime claude` for
+Claude's Bash tool and `--runtime codex` for Codex's native `PreToolUse` /
+`^Bash$` event (which covers unified exec). Both runtimes send the same request
+shape, so the argument, not the payload, names the runtime. Codex
 requires the exact new definition to be reviewed and trusted in `/hooks` before
 it runs. Verify activation in each runtime; registration alone is not evidence
 that a running session has loaded the new hook. The installer does not change
@@ -78,6 +93,18 @@ excluded from classification. Repository-specific entry points can be added in
 `~/.keel/resource-commands.json`, for example `{"project-verify": ["*"]}`.
 This shell classifier prevents common accidental bypasses; it cannot prove what
 arbitrary scripts or interactive terminal input will execute.
+
+Commands that outlast a foreground tool call can be listed in the same file under
+`background_required`, for example
+`{"project-verify": ["verify"], "background_required": {"project-verify": ["verify"]}}`.
+Choose entries from measured job durations in `events.jsonl`, never from command
+names. Matching looks through a leading `with-heavy-lock` and compares the first
+argument only, so a listed verb covers all of its flags. With `--runtime claude`,
+a listed command is denied unless the Bash call sets `run_in_background: true`.
+With `--runtime codex`, the command runs and the hook adds context: keep reading
+the running cell until it exits, and never start a second copy. Without
+`--runtime`, the list is ignored. A hook older than this rule rejects a file that
+contains `background_required`, so install the hook before adding the list.
 
 Regression checks use small test-owned process groups and temporary homes:
 
