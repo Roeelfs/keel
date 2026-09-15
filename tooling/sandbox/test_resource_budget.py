@@ -404,6 +404,43 @@ class ResourceBudgetTests(unittest.TestCase):
             self.write_policy(max_workers=2)
             self.assertIn("--maxWorkers=2", observed([self.wrapper, node, fake_vitest], KEEL_HEAVY_MAX_WORKERS="8"))
 
+    def test_node_preload_reads_the_policy_when_turbo_strips_keel_variables(self):
+        # Turbo's strict environment keeps NODE_OPTIONS but drops every KEEL_* variable.
+        with tempfile.TemporaryDirectory(dir=self.tmp.name) as work:
+            fake_vitest = os.path.join(work, "vitest.mjs")
+            output = os.path.join(work, "args.json")
+            with open(fake_vitest, "w", encoding="utf-8") as handle:
+                handle.write("import { writeFileSync } from 'node:fs';\n"
+                             "writeFileSync(process.env.OUT, JSON.stringify(process.argv.slice(2)));\n")
+            node = real_node()
+            preload = "--require=" + os.path.join(HERE, "heavy_node.cjs")
+            stripped = {"PATH": os.environ.get("PATH", ""), "OUT": output,
+                        "KEEL_HEAVY_NODE_ACCOUNT_HOME": self.tmp.name}
+            def workers(argv, env):
+                result = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                with open(output, encoding="utf-8") as handle:
+                    return [arg for arg in json.load(handle) if arg.startswith("--maxWorkers=")]
+            direct = [node, preload, fake_vitest]
+            self.write_policy(max_workers=5)
+            self.assertEqual(workers(direct, stripped), ["--maxWorkers=2"], "no held slot keeps the default")
+            os.makedirs(self.state, exist_ok=True)
+            lease = os.path.join(self.state, "lease.json")
+            open(lease, "w").close()
+            self.assertEqual(workers(direct, stripped), ["--maxWorkers=5"])
+            self.write_policy(max_workers=12)
+            self.assertEqual(workers(direct, stripped), ["--maxWorkers=8"])
+            with open(os.path.join(self.tmp.name, ".keel", "resource-policy.json"), "w") as handle:
+                handle.write("{")
+            self.assertEqual(workers(direct, stripped), ["--maxWorkers=2"], "an unreadable policy falls back")
+            os.unlink(lease)
+            # Through the real runner: its lease is the held slot and `env -u` plays turbo.
+            self.write_policy(max_workers=5)
+            through_runner = [self.wrapper, "env", "-u", "KEEL_HEAVY_MAX_WORKERS", "-u", "KEEL_HEAVY_LOCK_HELD",
+                              node, fake_vitest]
+            self.assertEqual(workers(through_runner, self.env(OUT=output, KEEL_HEAVY_NODE_ACCOUNT_HOME=self.tmp.name)),
+                             ["--maxWorkers=5"])
+
     def scripted_pressure(self, values):
         script = os.path.join(self.tmp.name, "free-percent.json")
         with open(script, "w", encoding="utf-8") as handle:

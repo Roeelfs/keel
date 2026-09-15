@@ -23,7 +23,9 @@ with-heavy-lock --status
 Defaults are one job, at most two Vitest/Jest workers (policy may allow up to
 eight), a 6 GiB aggregate resident memory budget, a 20% available-memory
 admission threshold, and a two-hour job limit. Vitest uses `forks`. Turbo's Node
-launcher receives concurrency one.
+launcher receives concurrency one. Turbo's strict environment drops `KEEL_*`
+variables but keeps `NODE_OPTIONS`, so while a lease exists the Node preload reads
+`max_workers` from the policy file; an unreadable policy means two.
 The 2 GiB V8 heap setting is a per-process aid; aggregate RSS is measured every 0.5
 seconds across every process in the job's session: its process group plus any
 descendant that moved to its own group (Turbo's tasks do) or outlived its parent.
