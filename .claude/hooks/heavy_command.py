@@ -73,7 +73,7 @@ def inspect_words(words, custom):
         return 'cdk'
     if name == 'turbo' and any(x.split(':')[0] in {'test', 'build', 'typecheck'} for x in rest):
         return 'workspace-jobs'
-    if name in custom and ('*' in custom[name] or (rest and rest[0] in custom[name])):
+    if name in custom and verbs_match(custom[name], rest):
         return 'project-command'
     for i, word in enumerate(words):
         if PurePosixPath(word).name in {'bash', 'zsh', 'sh'}:
@@ -106,6 +106,15 @@ def classify(command, custom=None):
     return None
 
 
+def verbs_match(verbs, args):
+    """Match the first argument or `*`; a `!word ...` entry excludes args that start with those words."""
+    for entry in verbs:
+        excluded = entry[1:].split() if entry.startswith('!') else None
+        if excluded and args[:len(excluded)] == excluded:
+            return False
+    return '*' in verbs or bool(args and args[0] in verbs)
+
+
 def background_required(command, rules):
     """Name the rule a command segment matches, looking through a leading with-heavy-lock."""
     for segment in segments(command):
@@ -113,6 +122,6 @@ def background_required(command, rules):
         if words and PurePosixPath(words[0]).name == 'with-heavy-lock':
             words = words[2:] if words[1:2] == ['--'] else words[1:]
         name = PurePosixPath(words[0]).name if words else None
-        if name in rules and ('*' in rules[name] or (len(words) > 1 and words[1] in rules[name])):
+        if name in rules and verbs_match(rules[name], words[1:]):
             return name
     return None

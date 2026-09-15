@@ -14,7 +14,6 @@ from heavy_resources import (account_home, ancestors, event, free_percent, group
                              load_policy, processes, read_record, write_record)
 
 QUEUE_PROGRESS_SECONDS = 30
-PRESSURE_POLLS = 2  # Consecutive low free-memory samples that stop a running job.
 
 
 def state_directory():
@@ -58,7 +57,17 @@ class Interrupted(Exception):
     """A termination signal arrived while the job waited in the admission queue."""
 
 
+def heartbeat(path):
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def live_tickets(queue):
+    for temporary in queue.glob('*.tmp.*'):  # A writer interrupted mid-write leaves these behind.
+        if time.time() - heartbeat(temporary) > 3600:
+            temporary.unlink(missing_ok=True)
     # List tickets before sampling processes: every listed writer existed before the sample.
     paths = sorted(queue.glob('*.json'))
     table = processes()
@@ -78,7 +87,10 @@ def live_tickets(queue):
 
 
 def holder_description(directory):
-    lease = read_record(directory / 'lease.json')
+    try:
+        lease = read_record(directory / 'lease.json')
+    except (OSError, ValueError):  # The lease can vanish or change during a handoff.
+        return 'slot holder unknown'
     if not lease:
         return 'no published slot holder'
     return 'slot held by ' + str(lease.get('executable')) + ' in ' + str(lease.get('cwd'))
@@ -104,11 +116,17 @@ def acquire(directory, policy, job_id):
     try:
         write_record(ticket, record)
         while True:
+            try:
+                os.utime(ticket)  # Heartbeat: a stopped or hung waiter stops refreshing its ticket.
+            except FileNotFoundError:
+                pass  # Restored below.
             live = live_tickets(queue)
             if ticket not in live:
                 write_record(ticket, record)  # Restore a wrongly pruned ticket at its original place.
                 live = sorted([*live, ticket])
-            position = live.index(ticket) + 1
+            # Skip, never delete, a live waiter whose heartbeat stalled.
+            fresh_after = time.time() - max(3, 6 * policy.poll_seconds)
+            position = 1 + sum(1 for path in live if path < ticket and heartbeat(path) >= fresh_after)
             reason = 'resource_busy'
             if position == 1:  # Only the oldest live waiter may take the slot.
                 try:
@@ -169,10 +187,18 @@ def stop_group(pgid):
             time.sleep(0.3)
 
 
+def observed_free_percent():
+    # A failed sample counts as "not low": the observer must never stop a job or crash the supervisor.
+    try:
+        return free_percent()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError, OSError):
+        return None
+
+
 def supervise(child, policy, directory, job_id, interruption):
     started = time.monotonic()
     peak = 0.0
-    low_memory_polls = 0
+    low_since = None
     while True:
         if interruption():
             raise InterruptedError(interruption())
@@ -180,12 +206,15 @@ def supervise(child, policy, directory, job_id, interruption):
         members = group_members(child.pid, table)
         rss = sum(p.rss_mb for p in members)
         peak = max(peak, rss)
-        # Admission checks free memory once; a run that drives the host into pressure is stopped too.
-        low = bool(members and policy.min_free_percent and free_percent() < policy.min_free_percent)
-        low_memory_polls = low_memory_polls + 1 if low else 0
+        now = time.monotonic()
+        # Admission checks free memory once; sustained host pressure during the run stops it too.
+        sample = observed_free_percent() if members and policy.run_min_free_percent else None
+        low = sample is not None and sample < policy.run_min_free_percent
+        low_since = (now if low_since is None else low_since) if low else None
         reason = ('resource_limit' if rss > policy.max_rss_mb else
-                  'wall_time_budget' if time.monotonic() - started > policy.max_seconds else
-                  'memory_pressure_during_run' if low_memory_polls >= PRESSURE_POLLS else None)
+                  'wall_time_budget' if now - started > policy.max_seconds else
+                  'memory_pressure_during_run' if low and now - low_since >= policy.run_pressure_seconds
+                  else None)
         if reason:
             stop_group(child.pid)
             child.wait(timeout=5)
@@ -238,6 +267,11 @@ def run_job(command, directory, policy, job_id, stream):
     except InterruptedError as error:
         event(directory, 'interrupted', job_id=job_id, reason='signal', signal=error.args[0])
         return 128 + int(error.args[0])
+    except Exception as error:
+        if child is not None:  # The job started; close its record before the error propagates.
+            event(directory, 'completed', job_id=job_id, reason='supervisor_error',
+                  error=type(error).__name__ + ': ' + str(error))
+        raise
     finally:
         # Ignore repeated interruption during owned-process cleanup.
         for sig in original_handlers:

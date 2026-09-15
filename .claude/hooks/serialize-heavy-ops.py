@@ -13,7 +13,9 @@ except ImportError:
     print('Resource guard installation is incomplete; command refused. Reinstall resource hooks.', file=sys.stderr)
     raise SystemExit(2)
 
-# Each installer names its runtime; the request payload is never used to guess it.
+# The registration names its runtime; the request payload is never used to guess it. The
+# installer registers `--runtime claude` only. `--runtime codex` is opt-in: Codex trusts a hook
+# by its exact command, so adding the argument needs a manual re-trust in Codex `/hooks`.
 BACKGROUND_GUIDANCE = {
     'claude': ('Long-running command ({name}) must not hold the foreground: '
                're-run with run_in_background: true; the harness re-invokes you when it exits.'),

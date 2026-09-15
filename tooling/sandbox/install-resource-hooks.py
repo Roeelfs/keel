@@ -25,13 +25,17 @@ def load_json(path, default):
     if not isinstance(value, dict): raise ValueError(f"expected JSON object: {path}")
     return value
 
-def command_for(python, script, runtime):
-    """Preserve stdin, name the runtime, and map an unavailable/broken launcher to hook denial (2)."""
-    return ("/bin/sh -c 'py=$1; script=$2; shift 2; if [ ! -x \"$py\" ] || [ ! -f \"$script\" ]; then "
+def command_for(python, script, runtime=None):
+    """Preserve stdin and map an unavailable/broken launcher to hook denial (2).
+
+    Without a runtime the string is byte-identical to earlier installs, which Codex trust is keyed on.
+    """
+    shift, forward, suffix = ("shift 2; ", " \"$@\"", " --runtime " + shlex.quote(runtime)) if runtime else ("", "", "")
+    return ("/bin/sh -c 'py=$1; script=$2; " + shift + "if [ ! -x \"$py\" ] || [ ! -f \"$script\" ]; then "
             "echo \"resource guard unavailable: interpreter or script is missing\" >&2; exit 2; fi; "
-            "\"$py\" \"$script\" \"$@\"; rc=$?; if [ \"$rc\" -eq 0 ] || [ \"$rc\" -eq 2 ]; then exit \"$rc\"; fi; "
+            "\"$py\" \"$script\"" + forward + "; rc=$?; if [ \"$rc\" -eq 0 ] || [ \"$rc\" -eq 2 ]; then exit \"$rc\"; fi; "
             "echo \"resource guard unavailable: launcher failed\" >&2; exit 2' resource-hook "
-            + shlex.quote(str(python)) + " " + shlex.quote(str(script)) + " --runtime " + shlex.quote(runtime))
+            + shlex.quote(str(python)) + " " + shlex.quote(str(script)) + suffix)
 
 def hook_entry(command):
     return {"matcher": "^Bash$", "hooks": [{"type": "command", "command": command, "timeout": 3,
@@ -69,9 +73,7 @@ def mutate_codex(config, command):
         if not isinstance(group, dict) or group.get("matcher") != "^Bash$" or not isinstance(group.get("hooks"), list): continue
         for handler in group["hooks"]:
             if resource_handler(handler):
-                changed = handler.get("command") != command
-                if changed: handler["command"] = command
-                return changed
+                return False  # Codex trusts the exact command; rewriting it unguards Codex until re-trusted.
     groups.append(hook_entry(command)); return True
 
 def mutate_claude(config, command):
@@ -134,7 +136,7 @@ def install(home, apply):
     codex_path, claude_path = home / ".codex" / "hooks.json", home / ".claude" / "settings.json"
     python, script = Path(sys.executable).resolve(), claude_dir / RESOURCE_SCRIPT
     codex, claude = load_json(codex_path, {}), load_json(claude_path, {})
-    codex_changed = mutate_codex(codex, command_for(python, script, "codex"))
+    codex_changed = mutate_codex(codex, command_for(python, script))
     claude_changed = mutate_claude(claude, command_for(python, script, "claude"))
     wrapper = home / ".local" / "bin" / "with-heavy-lock"; wrapper_valid = valid_wrapper_target(wrapper, runtime_dir)
     plan = {"home": str(home), "apply": apply, "codex_changed": codex_changed, "claude_changed": claude_changed,

@@ -226,6 +226,27 @@ class BackgroundRequired(unittest.TestCase):
         self.assertEqual(self.check("with-heavy-lock project-verify verify", "--runtime", "claude").returncode, 0)
         self.assertEqual(self.check("project-verify verify", "--runtime", "claude").returncode, 2)
 
+    def test_exclusion_entries_keep_a_verb_prefix_in_the_foreground(self):
+        self.write_rules({"project-verify": ["verify", "e2e", "!verify --quick"],
+                          "slow-setup": ["*", "!status"],
+                          "background_required": {"project-verify": ["verify", "e2e", "!verify --quick"],
+                                                  "slow-setup": ["*", "!status"]}})
+        cases = {"with-heavy-lock project-verify verify": 2,
+                 "with-heavy-lock project-verify verify --full": 2,
+                 "with-heavy-lock project-verify e2e": 2,
+                 "with-heavy-lock project-verify verify --quick": 0,
+                 "with-heavy-lock project-verify verify --quick --scope api": 0,
+                 "with-heavy-lock project-verify --quick verify": 0,
+                 "with-heavy-lock slow-setup": 2,
+                 "with-heavy-lock slow-setup status": 0}
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(self.check(command, "--runtime", "claude").returncode, expected)
+        # The heavy-command map honours the same exclusions: the excluded form needs no wrapper.
+        self.assertEqual(self.check("project-verify verify --quick").returncode, 0)
+        self.assertEqual(self.check("project-verify verify --full").returncode, 2)
+        self.assertEqual(self.check("slow-setup status").returncode, 0)
+
     def test_invalid_registration_or_background_map_fails_closed(self):
         for arguments in (("--runtime", "other"), ("--runtime",), ("claude",)):
             with self.subTest(arguments=arguments):

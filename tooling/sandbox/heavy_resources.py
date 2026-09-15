@@ -17,6 +17,8 @@ class Policy:
     max_workers: int = 2
     max_rss_mb: float = 6144
     min_free_percent: float = 20
+    run_min_free_percent: float = 10
+    run_pressure_seconds: float = 15
     wait_seconds: float = 15
     poll_seconds: float = 0.5
     max_seconds: float = 7200
@@ -59,9 +61,10 @@ def load_policy():
         raise ValueError('this supervisor admits exactly one aggregate-budgeted job')
     if not 1 <= policy['max_workers'] <= 8 or policy['max_workers'] % 1:
         raise ValueError('max_workers must be between 1 and 8')
-    if not 0 <= policy['min_free_percent'] <= 100 or policy['wait_seconds'] < 0:
+    if (not 0 <= policy['min_free_percent'] <= 100 or not 0 <= policy['run_min_free_percent'] <= 100
+            or policy['wait_seconds'] < 0):
         raise ValueError('invalid pressure or admission wait budget')
-    if any(policy[k] <= 0 for k in ['poll_seconds', 'max_rss_mb', 'max_seconds']):
+    if any(policy[k] <= 0 for k in ['poll_seconds', 'max_rss_mb', 'max_seconds', 'run_pressure_seconds']):
         raise ValueError('resource limits and sample interval must be positive')
     return Policy(**policy)
 
@@ -79,7 +82,8 @@ class Process:
 def processes():
     result = subprocess.run(
         ['ps', '-axo', 'pid=,ppid=,pgid=,rss=,stat=,lstart='],
-        text=True, capture_output=True, check=True, timeout=5)
+        text=True, capture_output=True, check=True, timeout=5,
+        env={**os.environ, 'LC_ALL': 'C', 'TZ': 'UTC'})  # lstart is an identity: fix its format.
     result_rows = {}
     for line in result.stdout.splitlines():
         fields = line.split(None, 5)

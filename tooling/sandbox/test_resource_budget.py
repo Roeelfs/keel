@@ -33,12 +33,15 @@ def wait_for(path, timeout=4):
 
 # Replaces the host memory observer with a scripted sequence, one value per call.
 SCRIPTED_FREE_PERCENT = (
-    "import json\n"
+    "import json, subprocess\n"
     "def _scripted_free_percent(path=Path(%r)):\n"
     "    state = json.loads(path.read_text())\n"
     "    calls = state['calls']\n"
     "    path.write_text(json.dumps({'values': state['values'], 'calls': calls + 1}))\n"
-    "    return float(state['values'][min(calls, len(state['values']) - 1)])\n"
+    "    value = state['values'][min(calls, len(state['values']) - 1)]\n"
+    "    if value == 'raise':\n"
+    "        raise subprocess.CalledProcessError(1, 'memory observer')\n"
+    "    return float(value)\n"
     "heavy_resources.free_percent = _scripted_free_percent\n"
 )
 
@@ -225,10 +228,12 @@ class ResourceBudgetTests(unittest.TestCase):
             member_pids = json.load(handle)
         for pid in member_pids:
             wait_for(os.path.join(ready, str(pid)))
-        rss = [int(subprocess.check_output(["ps", "-o", "rss=", "-p", str(pid)], text=True).strip()) / 1024
-               for pid in member_pids]
-        self.assertLess(max(rss), 40, rss)
-        self.assertGreater(sum(rss), 40, rss)
+        sample = subprocess.run(["ps", "-o", "rss=", "-p", ",".join(map(str, member_pids))],
+                                capture_output=True, text=True)
+        rss = [int(value) / 1024 for value in sample.stdout.split()]
+        if len(rss) == len(member_pids):  # Members may already be stopped; the event below is the proof.
+            self.assertLess(max(rss), 40, rss)
+            self.assertGreater(sum(rss), 40, rss)
         self.assertNotEqual(owned.wait(timeout=12), 0, "aggregate budget must terminate the owned job")
         self.assertIsNone(unrelated.poll(), "resource enforcement must not kill unrelated sessions")
         rows = self.event_rows()
@@ -406,28 +411,93 @@ class ResourceBudgetTests(unittest.TestCase):
         self.wrapper = isolated_wrapper(self.tmp.name, SCRIPTED_FREE_PERCENT % script)
         return script
 
-    def test_free_memory_low_for_two_polls_stops_the_running_job(self):
-        # Call 0 is admission; calls 1 and 2 are consecutive polls of the running job.
-        self.scripted_pressure([50, 10, 10, 50])
+    def pressure_events(self):
+        return [row for row in self.event_rows() if row.get("reason") == "memory_pressure_during_run"]
+
+    def calls(self, script):
+        with open(script, encoding="utf-8") as handle:
+            return json.load(handle)["calls"]
+
+    def test_policy_rejects_out_of_range_run_pressure_fields(self):
+        for values in ({"run_min_free_percent": 101}, {"run_pressure_seconds": 0}):
+            self.write_policy(**values)
+            result = self.invoke(["--status"], capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 69, (values, result.stderr))
+        self.write_policy()
+        state = self.status()
+        self.assertEqual((state["run_min_free_percent"], state["run_pressure_seconds"]), (10, 15))
+
+    def test_sustained_low_free_memory_stops_the_running_job(self):
+        # Admission pressure is off in these tests, so every scripted sample belongs to the run.
+        self.write_policy(run_min_free_percent=20, run_pressure_seconds=0.5)
+        self.scripted_pressure([5])
         result = self.invoke([sys.executable, "-c", "import time; time.sleep(10)"],
-                             env=self.env(KEEL_HEAVY_MIN_FREE_PERCENT="20"),
                              capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 137, result.stderr)
         self.assertIn("memory_pressure_during_run", result.stderr)
-        stops = [row for row in self.event_rows() if row.get("reason") == "memory_pressure_during_run"]
+        stops = self.pressure_events()
         self.assertEqual(len(stops), 1, stops)
         self.assertEqual(stops[0]["exit_code"], 137)
 
-    def test_one_poll_free_memory_blip_does_not_stop_the_job(self):
-        script = self.scripted_pressure([50, 10, 50])
-        result = self.invoke([sys.executable, "-c", "import time; time.sleep(.6)"],
-                             env=self.env(KEEL_HEAVY_MIN_FREE_PERCENT="20"),
+    def test_dip_shorter_than_the_window_does_not_stop_the_job(self):
+        self.write_policy(run_min_free_percent=20, run_pressure_seconds=3)
+        script = self.scripted_pressure([5, 5, 5, 50])
+        result = self.invoke([sys.executable, "-c", "import time; time.sleep(1)"],
                              capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
-        with open(script, encoding="utf-8") as handle:
-            self.assertGreaterEqual(json.load(handle)["calls"], 4, "the blip and a recovery were sampled")
-        self.assertFalse([row for row in self.event_rows()
-                          if row.get("reason") == "memory_pressure_during_run"])
+        self.assertGreaterEqual(self.calls(script), 5, "the dip and a recovery were sampled")
+        self.assertFalse(self.pressure_events())
+
+    def test_raising_memory_observer_does_not_stop_the_job(self):
+        self.write_policy(run_min_free_percent=20, run_pressure_seconds=0.1)
+        script = self.scripted_pressure(["raise"])
+        result = self.invoke([sys.executable, "-c", "import time; time.sleep(.8)"],
+                             capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertGreaterEqual(self.calls(script), 3, "the failing observer was consulted")
+        self.assertFalse(self.pressure_events())
+
+    def test_unexpected_supervisor_error_records_a_completed_event(self):
+        self.wrapper = isolated_wrapper(self.tmp.name, (
+            "import heavy_runner\n"
+            "def _broken_supervise(*_args):\n"
+            "    raise ValueError('supervisor fault')\n"
+            "heavy_runner.supervise = _broken_supervise\n"))
+        result = self.invoke(["true"], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 69, result.stderr)
+        errors = [row for row in self.event_rows() if row.get("reason") == "supervisor_error"]
+        self.assertEqual(len(errors), 1, errors)
+        self.assertEqual(errors[0]["event"], "completed")
+        self.assertIn("supervisor fault", errors[0]["error"])
+
+    def test_stopped_head_waiter_does_not_block_the_next_waiter(self):
+        holder, release = self.hold_until_released()
+        stopped = self.waiter(["true"], KEEL_HEAVY_WAIT_MAX="60")
+        self.assertIn("QUEUED at position 1;", stopped.stderr.readline())
+        head = self.tickets()
+        os.kill(stopped.pid, signal.SIGSTOP)
+        try:
+            waiter = self.waiter(["true"], KEEL_HEAVY_WAIT_MAX="30")
+            self.assertIn("QUEUED", waiter.stderr.readline())
+            self.release(holder, release)
+            self.assertEqual(waiter.wait(timeout=20), 0, "a stalled head must be skipped")
+            self.assertEqual(self.tickets(), head, "a live stalled ticket is skipped, never deleted")
+        finally:
+            stopped.kill()  # SIGKILL also ends a stopped process.
+            stopped.wait(timeout=5)
+
+    def test_prune_removes_only_old_temporary_queue_files(self):
+        queue = os.path.join(self.state, "queue")
+        os.makedirs(queue)
+        old, fresh = os.path.join(queue, "a.tmp.1"), os.path.join(queue, "b.tmp.2")
+        for path in (old, fresh):
+            open(path, "w").close()
+        two_hours_ago = time.time() - 7200
+        os.utime(old, (two_hours_ago, two_hours_ago))
+        result = self.invoke(["true"], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(os.path.exists(old))
+        self.assertTrue(os.path.exists(fresh))
 
 
 if __name__ == "__main__":

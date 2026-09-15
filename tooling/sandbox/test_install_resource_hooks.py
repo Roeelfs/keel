@@ -28,12 +28,14 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(probe.returncode, 0, probe.stderr)
             second = installer.install(home, True); self.assertFalse(second["codex_changed"]); self.assertFalse(second["claude_changed"]); self.assertFalse(second["wrapper_changed"]); self.assertNotIn("backups", second)
 
-    def test_stale_codex_handler_and_legacy_wrapper_are_replaced(self):
+    def test_existing_codex_handler_is_kept_and_legacy_wrapper_is_replaced(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp); self.write_json(home / ".codex" / "hooks.json", {"hooks": {"PreToolUse": [installer.hook_entry("python stale/serialize-heavy-ops.py"), {"matcher": "Agent", "hooks": [{"type": "command", "command": "keep"}]}]}})
+            codex_bytes = (home / ".codex" / "hooks.json").read_bytes()
             self.write_json(home / ".claude" / "settings.json", {"hooks": {"PreToolUse": [{"matcher": "Comment", "hooks": [{"type": "command", "command": "serialize-heavy-ops.py"}]}]}})
             wrapper = home / ".local" / "bin" / "with-heavy-lock"; wrapper.parent.mkdir(parents=True); wrapper.write_text("legacy"); wrapper.chmod(0o700)
-            result = installer.install(home, True); self.assertTrue(result["codex_changed"]); self.assertTrue(result["claude_changed"]); self.assertTrue(wrapper.is_symlink())
+            result = installer.install(home, True); self.assertFalse(result["codex_changed"]); self.assertTrue(result["claude_changed"]); self.assertTrue(wrapper.is_symlink())
+            self.assertEqual((home / ".codex" / "hooks.json").read_bytes(), codex_bytes)
             self.assertEqual(wrapper.resolve(), (home / ".keel" / "resource-hooks" / "with-heavy-lock").resolve()); self.assertTrue(any("with-heavy-lock.resource-hooks" in item for item in result["backups"]))
 
     def test_existing_claude_shell_guard_is_upgraded_without_a_duplicate(self):
@@ -62,29 +64,42 @@ class InstallerTests(unittest.TestCase):
             self.assertTrue(os.access(wrapper, os.X_OK))
             self.assertTrue(fixed['backups'])
 
-    def test_each_runtime_is_registered_with_its_argument_idempotently(self):
+    def test_claude_gets_the_runtime_argument_and_an_existing_codex_entry_stays_byte_identical(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp); codex_path = home / ".codex" / "hooks.json"; claude_path = home / ".claude" / "settings.json"
-            legacy = "/bin/sh -c '\"$1\" \"$2\"' resource-hook /usr/bin/python3 " + str(home / ".claude/hooks/serialize-heavy-ops.py")
-            self.write_json(codex_path, {"hooks": {"PreToolUse": [installer.hook_entry(legacy), {"matcher": "Agent", "hooks": [{"type": "command", "command": "keep-codex"}]}]}})
+            legacy = installer.command_for("/usr/bin/python3", home / ".claude/hooks/serialize-heavy-ops.py")
+            codex_path.parent.mkdir(parents=True)
+            codex_path.write_text(json.dumps({"hooks": {"PreToolUse": [installer.hook_entry(legacy), {"matcher": "Agent", "hooks": [{"type": "command", "command": "keep-codex"}]}]}}, indent=4) + "\n\n")
+            codex_bytes = codex_path.read_bytes()
             self.write_json(claude_path, {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": legacy}, {"type": "command", "command": "keep-claude"}]}]}})
-            self.assertTrue(installer.install(home, False)["claude_changed"])
-            installer.install(home, True)
-            for path, runtime, keep in ((codex_path, "codex", "keep-codex"), (claude_path, "claude", "keep-claude")):
-                handlers = [h for g in json.loads(path.read_text())["hooks"]["PreToolUse"] for h in g["hooks"]]
-                resource = [h["command"] for h in handlers if installer.resource_handler(h)]
-                self.assertEqual(len(resource), 1, handlers)
-                self.assertTrue(resource[0].endswith(" --runtime " + runtime), resource[0])
-                self.assertIn(keep, [h["command"] for h in handlers])
-                probe = subprocess.run(resource[0], shell=True, input=json.dumps({"tool_input": {"command": "git status"}}), capture_output=True, text=True)
-                self.assertEqual(probe.returncode, 0, probe.stderr)
-            second = installer.install(home, True)
-            self.assertFalse(second["codex_changed"]); self.assertFalse(second["claude_changed"])
+            plan = installer.install(home, False); self.assertTrue(plan["claude_changed"]); self.assertFalse(plan["codex_changed"])
+            for _ in range(2):
+                result = installer.install(home, True)
+                self.assertFalse(result["codex_changed"]); self.assertEqual(codex_path.read_bytes(), codex_bytes)
+            self.assertFalse(result["claude_changed"])
+            handlers = [h for g in json.loads(claude_path.read_text())["hooks"]["PreToolUse"] for h in g["hooks"]]
+            resource = [h["command"] for h in handlers if installer.resource_handler(h)]
+            self.assertEqual(len(resource), 1, handlers)
+            self.assertTrue(resource[0].endswith(" --runtime claude"), resource[0])
+            self.assertIn("keep-claude", [h["command"] for h in handlers])
+            probe = subprocess.run(resource[0], shell=True, input=json.dumps({"tool_input": {"command": "git status"}}), capture_output=True, text=True)
+            self.assertEqual(probe.returncode, 0, probe.stderr)
+
+    def test_fresh_codex_registration_has_no_runtime_argument(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            self.assertTrue(installer.install(home, True)["codex_changed"])
+            commands = [h["command"] for g in json.loads((home / ".codex/hooks.json").read_text())["hooks"]["PreToolUse"] for h in g["hooks"]]
+            self.assertEqual(len(commands), 1)
+            self.assertNotIn("--runtime", commands[0])
+            probe = subprocess.run(commands[0], shell=True, input=json.dumps({"tool_input": {"command": "git status"}}), capture_output=True, text=True)
+            self.assertEqual(probe.returncode, 0, probe.stderr)
 
     def test_missing_hook_interpreter_fails_closed(self):
-        command = installer.command_for('/missing/resource-python', '/missing/resource-hook.py', 'claude')
-        result = subprocess.run(command, shell=True, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 2)
-        self.assertIn('resource guard unavailable', result.stderr)
+        for runtime in (None, 'claude'):
+            command = installer.command_for('/missing/resource-python', '/missing/resource-hook.py', runtime)
+            result = subprocess.run(command, shell=True, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn('resource guard unavailable', result.stderr)
 
 if __name__ == "__main__": unittest.main(verbosity=2)

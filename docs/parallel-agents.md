@@ -26,8 +26,10 @@ admission threshold, and a two-hour job limit. Vitest uses `forks`. Turbo's Node
 launcher receives concurrency one.
 The 2 GiB V8 heap setting is a per-process aid; aggregate RSS is measured across
 the job's process group every 0.5 seconds. On excess, only that group is stopped.
-Free memory is sampled on the same interval: two consecutive samples below the
-threshold stop the group with `memory_pressure_during_run`; a single dip does not.
+Free memory is sampled on the same interval. If it stays below
+`run_min_free_percent` (default 10%) for `run_pressure_seconds` (default 15) of
+continuous samples, the group is stopped with `memory_pressure_during_run`; a
+shorter dip does not stop it. A failed memory sample counts as not low.
 A small startup gate publishes ownership before the command can execute.
 
 The host policy is `~/.keel/resource-policy.json`. Runtime environment can tighten
@@ -55,7 +57,9 @@ does not start, resize or restart a VM, or wrap already-running processes.
 Waiters queue in arrival order. Each writes a ticket under
 `~/.keel/heavy.slots/queue/`, and only the oldest live ticket may take the slot.
 A waiter that exits, is signalled, or is SIGKILLed stops holding its place: its
-own cleanup or the next waiter's process-identity check removes the ticket. A
+own cleanup or the next waiter's process-identity check removes the ticket. Every
+waiter refreshes its ticket's modification time on each poll; a live waiter that
+is stopped or hung stops refreshing and is skipped, not deleted. A
 waiter prints one `QUEUED` line with its position and the holder's executable
 and directory, then progress every 30 seconds.
 
@@ -78,11 +82,12 @@ python3 tooling/sandbox/install-resource-hooks.py --apply
 
 The opt-in installer backs up changed files, preserves unrelated settings, and
 registers the shared `serialize-heavy-ops.py` hook with `--runtime claude` for
-Claude's Bash tool and `--runtime codex` for Codex's native `PreToolUse` /
-`^Bash$` event (which covers unified exec). Both runtimes send the same request
-shape, so the argument, not the payload, names the runtime. Codex
-requires the exact new definition to be reviewed and trusted in `/hooks` before
-it runs. Verify activation in each runtime; registration alone is not evidence
+Claude's Bash tool and without a runtime argument for Codex's native
+`PreToolUse` / `^Bash$` event (which covers unified exec). Both runtimes send the
+same request shape, so only a registration argument can name the runtime. Codex
+trusts a hook by its exact command, so the installer never rewrites an existing
+Codex entry: a changed command leaves Codex unguarded until it is re-trusted. Codex
+requires a new definition to be reviewed and trusted in `/hooks` before it runs. Verify activation in each runtime; registration alone is not evidence
 that a running session has loaded the new hook. The installer does not change
 security approvals or fabricate trust. Other machines need their own install.
 
@@ -99,11 +104,14 @@ Commands that outlast a foreground tool call can be listed in the same file unde
 `{"project-verify": ["verify"], "background_required": {"project-verify": ["verify"]}}`.
 Choose entries from measured job durations in `events.jsonl`, never from command
 names. Matching looks through a leading `with-heavy-lock` and compares the first
-argument only, so a listed verb covers all of its flags. With `--runtime claude`,
+argument, so a listed verb covers all of its flags. An entry starting with `!`
+excludes arguments that begin with its words: `["verify", "e2e", "!verify --quick"]`
+covers `verify` and `verify --full` but not `verify --quick`. Both maps accept
+exclusions. With `--runtime claude`,
 a listed command is denied unless the Bash call sets `run_in_background: true`.
-With `--runtime codex`, the command runs and the hook adds context: keep reading
-the running cell until it exits, and never start a second copy. Without
-`--runtime`, the list is ignored. A hook older than this rule rejects a file that
+`--runtime codex` is opt-in and needs a manual re-trust in Codex `/hooks`: the
+command runs and the hook adds context to keep reading the running cell until it
+exits, and never start a second copy. Without `--runtime`, the list is ignored. A hook older than this rule rejects a file that
 contains `background_required`, so install the hook before adding the list.
 
 Regression checks use small test-owned process groups and temporary homes:
