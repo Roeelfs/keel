@@ -45,8 +45,10 @@ lower it.
 `command_max_seconds` tightens the wall-time budget per command, for example
 `{"project-verify verify": 3600}`. A key is the executable basename followed by
 leading arguments, matched word by word; the longest match wins and the budget
-never exceeds `max_seconds`. Values must be positive integers no greater than the
-file's `max_seconds`. A stop records `wall_time_budget` with `budget_seconds`.
+never exceeds `max_seconds`. A value above the file's `max_seconds` is clamped to
+it. An entry that is not a positive whole number, or whose key starts with a path,
+is skipped with a warning; only a `command_max_seconds` that is not an object
+refuses the policy. A stop records `wall_time_budget` with `budget_seconds`.
 `KEEL_HEAVY_SLOTS`, `KEEL_HEAVY_LOCK_DIR` and an overridden `HOME` no longer change
 admission. The account database determines the home for both policy and state.
 State is always `~/.keel/heavy.slots`, including an atomic lease and `events.jsonl` with
@@ -59,13 +61,20 @@ leader's start time and its live members. If the supervisor dies, any surviving
 process of the job's session, in any group, keeps the slot excluded until it
 drains; a reused leader pid does not. Only the supervisor holds the lock, so a
 daemon that starts its own session never keeps the slot busy. Termination and
-normal cleanup target only the job's own processes.
+normal cleanup target only the job's own processes. After SIGKILL the supervisor
+re-samples for up to two seconds. If any job process survives, or sampling fails,
+it keeps the lease and records `survivors` in the completed event, so the next job
+waits until they exit. A failed lease rewrite is logged and never stops supervision.
 
 This is a native process supervisor, **not a hard memory sandbox**. Sampling can
 overshoot; detached processes can leave a process group; a SIGKILLed supervisor
 cannot continue measuring memory. Use a separately bounded Linux VM/container
 for workloads that require kernel-enforced CPU and memory ceilings. This change
 does not start, resize or restart a VM, or wrap already-running processes.
+
+Known follow-ups:
+- A job process the command left running (for example a backgrounded helper) keeps the supervisor, and the slot, busy until `max_seconds` stops it.
+- A tighter `KEEL_HEAVY_MAX_WORKERS` set by the caller is lost under Turbo's strict environment; the Node preload then uses the policy's `max_workers`.
 
 ### Bounded admission and results
 
@@ -118,8 +127,12 @@ script the payload resolves (an absolute path as-is, or a relative path against
 the tool call's `cwd`; a bare name found via PATH is never exempt) is a regular
 file whose first 8KiB carries a `# keel:self-locking` line, and only if that
 script really takes the lock itself elsewhere (e.g. its own lint-enforced
-wrapper) — a `cd` earlier in the same command, a missing `cwd`, or anything else
-ambiguous about resolution keeps the command classified as heavy. This shell
+wrapper). Anything in the command that may move the cwd removes the exemption for
+the whole command: `cd`, `pushd`, `popd`, `builtin`, `source`, `.`, `eval`, `{`,
+`}`, a function definition, `git -C`, or a cwd flag on `env` or a package manager
+(including after `exec`/`run`/`dlx`). So do a missing `cwd` and anything else
+ambiguous about resolution. The marker is read through a non-blocking open that
+must be a regular file. This shell
 classifier prevents common accidental bypasses; it cannot prove what arbitrary
 scripts or interactive terminal input will execute.
 
