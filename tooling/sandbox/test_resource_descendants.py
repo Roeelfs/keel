@@ -17,7 +17,8 @@ from heavy_resources import processes
 from resource_test_support import isolated_wrapper
 
 
-# The job forks a child that leaves the job's process group, allocates, and sleeps.
+# The job forks a child that leaves the job's process group, allocates, and waits.
+# The child re-touches one byte per page so a loaded host cannot page the allocation out of RSS.
 # PARENT_SECONDS=0 makes the parent exit at once, so the child is reparented.
 FORKING_JOB = (
     "import os, pathlib, sys, time\n"
@@ -25,8 +26,11 @@ FORKING_JOB = (
     "if pid == 0:\n"
     "    os.setpgid(0, 0)\n"
     "    pathlib.Path(os.environ['CHILD_PID']).write_text(str(os.getpid()))\n"
-    "    blob = os.urandom(int(os.environ['ALLOC_MB']) << 20)\n"
-    "    time.sleep(20)\n"
+    "    blob = bytearray(os.urandom(int(os.environ['ALLOC_MB']) << 20))\n"
+    "    pages = bytes(len(range(0, len(blob), 4096)))\n"
+    "    for _ in range(400):\n"
+    "        blob[::4096] = pages\n"
+    "        time.sleep(0.05)\n"
     "    os._exit(0)\n"
     "time.sleep(float(os.environ['PARENT_SECONDS']))\n"
 )
