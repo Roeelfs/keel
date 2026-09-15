@@ -430,6 +430,39 @@ class SelfLockingMarker(unittest.TestCase):
         result = self.check(command, cwd=self.repo.name)
         self.assertEqual(result.returncode, 2)
 
+    def test_every_cwd_changing_shape_disables_the_exemption(self):
+        # The payload cwd holds the marked script; each command actually runs an unmarked copy elsewhere.
+        self.write_script("tooling/sandbox/project-verify")
+        elsewhere = tempfile.TemporaryDirectory()
+        self.addCleanup(elsewhere.cleanup)
+        copy = os.path.join(elsewhere.name, "tooling", "sandbox", "project-verify")
+        os.makedirs(os.path.dirname(copy))
+        with open(copy, "w", encoding="utf-8") as handle:
+            handle.write("#!/usr/bin/env bash\necho unmarked\n")
+        other, run = elsewhere.name, "tooling/sandbox/project-verify verify"
+        shapes = [
+            "{ cd %s; %s; }" % (other, run),
+            "builtin cd %s; %s" % (other, run),
+            "eval cd %s; %s" % (other, run),
+            "if false; then :; else cd %s; fi; %s" % (other, run),
+            "while cd %s; do %s; break; done" % (other, run),
+            "f(){ cd %s; }; f; %s" % (other, run),
+            "popd; %s" % run,
+            "source %s/env; %s" % (other, run),
+            ". %s/env; %s" % (other, run),
+            "npm exec --prefix %s -- %s" % (other, run),
+            "pnpm exec -C %s %s" % (other, run),
+            "bash -c 'cd %s; %s'" % (other, run),
+        ]
+        for command in shapes:
+            with self.subTest(command=command):
+                self.assertEqual(self.check(command, cwd=self.repo.name).returncode, 2)
+
+    def test_marked_command_with_redirect_and_pipe_stays_exempt(self):
+        self.write_script("tooling/sandbox/project-verify")
+        result = self.check("tooling/sandbox/project-verify verify 2>&1 | tail -40", cwd=self.repo.name)
+        self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

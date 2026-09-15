@@ -42,20 +42,28 @@ def is_self_locking(word, cwd):
     return SELF_LOCKING_MARKER.search(head) is not None
 
 
-def is_cd_segment(segment):
-    """A `cd`/`pushd`/`git -C` segment means any payload cwd is stale for every later segment.
+# Any of these words anywhere can move the directory a later relative path resolves against, including
+# from inside a group, a loop, a function body, `builtin`, `eval` or a sourced file.
+CWD_CHANGING_WORDS = frozenset({'cd', 'pushd', 'popd', 'builtin', 'source', '.', 'eval', '{', '}'})
+FUNCTION_DEFINITION = re.compile(r'\w+\s*\(\s*\)')
 
-    `git -C <dir>` never changes the invoking shell's cwd, but a false positive here only
-    over-restricts (a later segment loses the exemption it might otherwise have earned), which
-    is the safe direction, so it is treated the same as `cd`.
+
+def may_change_cwd(command, parsed):
+    """True if the payload cwd may be stale anywhere in `command`; the exemption is then off for all of it.
+
+    Position is deliberately ignored: a shell keyword, group or function can run a `cd` before a
+    segment that follows it in the text. `git -C <dir>` never moves the shell, but over-refusing is
+    the safe direction, so it counts too.
     """
-    words = without_prefixes(list(segment))
-    if not words:
-        return False
-    name = PurePosixPath(words[0]).name
-    if name in {'cd', 'pushd'}:
+    if FUNCTION_DEFINITION.search(strip_heredocs(command)):
         return True
-    return name == 'git' and any(word.split('=', 1)[0] == '-C' for word in words[1:])
+    for segment in parsed:
+        if any(word in CWD_CHANGING_WORDS for word in segment):
+            return True
+        words = without_prefixes(list(segment))
+        if words and PurePosixPath(words[0]).name == 'git' and any(w.split('=', 1)[0] == '-C' for w in words[1:]):
+            return True
+    return False
 
 
 def strip_heredocs(command):
@@ -141,6 +149,8 @@ def inspect_words(words, custom, cwd=None, allow_exempt=True):
         if name == 'yarn' and not rest:
             return 'package-install'
         if rest[:1] in (['exec'], ['run'], ['dlx']):
+            if has_cwd_flag(rest[1:]):
+                allow_exempt = False  # `exec --prefix <dir>` / `exec -C <dir>` moves resolution too.
             rest = without_options(rest[1:])
         if rest and rest[0].split(':')[0] in PACKAGE_VERBS:
             return 'package-' + rest[0]
@@ -183,13 +193,12 @@ def segments(command):
 
 
 def _classify(command, custom, cwd, allow_exempt):
-    stale = not allow_exempt
-    for segment in segments(command):
-        found = inspect_words(segment, custom, cwd, allow_exempt=not stale)
+    parsed = list(segments(command))
+    allow_exempt = allow_exempt and not may_change_cwd(command, parsed)
+    for segment in parsed:
+        found = inspect_words(segment, custom, cwd, allow_exempt)
         if found:
             return found
-        if is_cd_segment(segment):
-            stale = True  # cwd is stale from here on; disable the exemption for later segments.
     return None
 
 
