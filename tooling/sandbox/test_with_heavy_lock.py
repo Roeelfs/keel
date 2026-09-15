@@ -458,6 +458,20 @@ class SelfLockingMarker(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(self.check(command, cwd=self.repo.name).returncode, 2)
 
+    def test_marker_read_never_blocks_on_a_fifo(self):
+        # A FIFO swapped in after a regular-file check must not hang the hook on open or read.
+        fifo = os.path.join(self.repo.name, "tooling", "sandbox", "project-verify")
+        os.makedirs(os.path.dirname(fifo))
+        os.mkfifo(fifo)
+        probe = ("import pathlib, sys\nsys.path.insert(0, %r)\nimport heavy_command\n"
+                 "pathlib.Path.is_file = lambda self: True  # The swap lands after the type check.\n"
+                 "print(heavy_command.is_self_locking(%r, None))\n") % (os.path.dirname(HOOK), fifo)
+        try:
+            result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=5)
+        except subprocess.TimeoutExpired:
+            self.fail("the marker read blocked on a FIFO")
+        self.assertEqual(result.stdout.strip(), "False", result.stderr)
+
     def test_marked_command_with_redirect_and_pipe_stays_exempt(self):
         self.write_script("tooling/sandbox/project-verify")
         result = self.check("tooling/sandbox/project-verify verify 2>&1 | tail -40", cwd=self.repo.name)

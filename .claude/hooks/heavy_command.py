@@ -1,6 +1,8 @@
 """Classify shell command positions without treating quoted prose as execution."""
+import os
 import re
 import shlex
+import stat
 from pathlib import Path, PurePosixPath
 
 PACKAGE_MANAGERS = frozenset({'pnpm', 'npm', 'npx', 'yarn', 'bun', 'bunx', 'corepack'})
@@ -19,8 +21,9 @@ def is_self_locking(word, cwd):
 
     Fails closed: an absolute path is used as-is; a path containing '/' resolves against `cwd`
     (never exempt if `cwd` is missing); a bare name is never exempt, even via PATH. Anything that
-    is not a readable regular file (missing, a directory, unreadable) is never exempt. Symlinks
-    are followed.
+    is not a readable regular file (missing, a directory, a FIFO, unreadable) is never exempt.
+    Symlinks are followed. The type is checked on the opened descriptor, never before the open,
+    and the open is non-blocking, so a path swapped for a FIFO cannot hang the hook.
     """
     if not word:
         return False
@@ -33,12 +36,17 @@ def is_self_locking(word, cwd):
     else:
         return False
     try:
-        if not candidate.is_file():
-            return False
-        with candidate.open('rb') as handle:
-            head = handle.read(SELF_LOCKING_MARKER_BYTES)
+        descriptor = os.open(candidate, os.O_RDONLY | os.O_NONBLOCK)
     except OSError:
         return False
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return False
+        head = os.read(descriptor, SELF_LOCKING_MARKER_BYTES)
+    except OSError:
+        return False
+    finally:
+        os.close(descriptor)
     return SELF_LOCKING_MARKER.search(head) is not None
 
 
