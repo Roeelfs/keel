@@ -265,6 +265,11 @@ def supervise(child, job, policy, max_seconds, directory, job_id, interruption):
         time.sleep(policy.poll_seconds)
 
 
+def event_args(command):
+    # Enough to tell `verify --quick` from `verify`; an argument that may carry a secret is not recorded.
+    return ['<redacted>' if '=' in arg or len(arg) > 120 else arg for arg in command[1:4]]
+
+
 def run_job(command, directory, policy, job_id, stream):
     child = None
     job = None
@@ -293,7 +298,7 @@ def run_job(command, directory, policy, job_id, stream):
                  'cwd': os.getcwd(), 'executable': Path(command[0]).name}
         job = Job(child.pid, directory / 'lease.json', lease)
         job.members()  # Publishes the lease with the gated child's identity.
-        event(directory, 'started', **lease, policy=asdict(policy))
+        event(directory, 'started', **lease, args=event_args(command), policy=asdict(policy))
         if received_signal:
             raise InterruptedError(received_signal)
         os.write(gate_write, b'1')  # The job cannot run before its lease is published.

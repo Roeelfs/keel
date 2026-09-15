@@ -50,7 +50,9 @@ file's `max_seconds`. A stop records `wall_time_budget` with `budget_seconds`.
 `KEEL_HEAVY_SLOTS`, `KEEL_HEAVY_LOCK_DIR` and an overridden `HOME` no longer change
 admission. The account database determines the home for both policy and state.
 State is always `~/.keel/heavy.slots`, including an atomic lease and `events.jsonl` with
-job ids, terminal reasons and observed peak RSS. Nested calls verify a live
+job ids, terminal reasons and observed peak RSS. A `started` event records `args`, the
+first three arguments after the executable; an argument containing `=` or longer
+than 120 characters is recorded as `<redacted>`. Nested calls verify a live
 supervisor ancestor, process identity, job id and held lock. An ambient
 `KEEL_HEAVY_LOCK_HELD=1` flag alone grants no access. The lease records the job
 leader's start time and its live members. If the supervisor dies, any surviving

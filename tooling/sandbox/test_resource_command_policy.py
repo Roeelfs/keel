@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-command wall budgets: prefix matching, policy validation and the recorded stop."""
+"""Per-command wall budgets and recorded arguments: matching, validation and events."""
 import json
 import os
 import subprocess
@@ -8,7 +8,19 @@ import tempfile
 import unittest
 
 from heavy_resources import Policy, command_seconds
+from heavy_runner import event_args
 from resource_test_support import isolated_wrapper
+
+
+class EventArgsTests(unittest.TestCase):
+    def test_records_up_to_three_arguments_after_the_executable(self):
+        self.assertEqual(event_args(["/repo/project-verify", "verify", "--quick", "--grep", "more"]),
+                         ["verify", "--quick", "--grep"])
+        self.assertEqual(event_args(["project-verify"]), [])
+
+    def test_redacts_assignments_and_long_arguments(self):
+        self.assertEqual(event_args(["tool", "--token=abc", "x" * 121, "x" * 120]),
+                         ["<redacted>", "<redacted>", "x" * 120])
 
 
 class CommandSecondsTests(unittest.TestCase):
@@ -74,6 +86,14 @@ class CommandPolicyTests(unittest.TestCase):
         self.assertEqual(stops[0]["budget_seconds"], 1)
         other = self.run_wrapper([sys.executable, "-B", "-c", "import time; time.sleep(1.3)"])
         self.assertEqual(other.returncode, 0, "a non-matching command keeps max_seconds: " + other.stderr)
+
+    def test_started_event_records_redacted_arguments(self):
+        self.write_policy()
+        result = self.run_wrapper(["true", "verify", "--secret=value", "x" * 121, "--full"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        started = [row for row in self.events() if row["event"] == "started"]
+        self.assertEqual(len(started), 1, self.events())
+        self.assertEqual(started[0]["args"], ["verify", "<redacted>", "<redacted>"])
 
 
 if __name__ == "__main__":
