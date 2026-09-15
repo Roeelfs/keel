@@ -141,6 +141,32 @@ class DescendantBudgetTests(unittest.TestCase):
             wait_until(lambda: not alive(child.pid, child.identity), timeout=5, message="the member to be stopped")
         self.assertIn("lease", self.stderr())
 
+    def test_a_member_that_survives_the_kill_keeps_the_lease(self):
+        # Fault injection: the stop spares one member, as a process forked after the last sample or stuck
+        # in uninterruptible I/O escapes a real one.
+        child_pid = os.path.join(self.tmp.name, "child-pid")
+        self.wrapper = isolated_wrapper(self.tmp.name, (
+            "import heavy_runner\n"
+            "_real_signal_members = heavy_runner.signal_members\n"
+            "def _spare_the_child(members, root, sig):\n"
+            "    survivor = int(open(%r).read())\n"
+            "    _real_signal_members([p for p in members if p.pid != survivor], root, sig)\n"
+            "heavy_runner.signal_members = _spare_the_child\n") % child_pid)
+        supervisor, pid, identity = self.start_forking_job(KEEL_HEAVY_MAX_SECONDS="1")
+        self.assertEqual(supervisor.wait(timeout=20), 137, self.stderr())
+        self.assertTrue(alive(pid, identity), "the fixture member escaped the stop")
+        stops = self.events("wall_time_budget")
+        self.assertEqual(len(stops), 1, self.events())
+        self.assertEqual(stops[0].get("survivors"), 1, stops[0])
+        self.assertTrue(os.path.exists(os.path.join(self.state, "lease.json")), "a survivor keeps the lease")
+        self.assertTrue(self.live())
+        self.assertEqual(self.attempt().returncode, 75, "the next job must not run beside a survivor")
+        os.kill(pid, signal.SIGKILL)
+        wait_until(lambda: not alive(pid, identity), timeout=5, message="the survivor to exit")
+        acquired = subprocess.run([self.wrapper, "true"], env=self.env(), capture_output=True,
+                                  text=True, timeout=10)
+        self.assertEqual(acquired.returncode, 0, "the slot is reclaimed once the survivor is gone")
+
     def test_sampling_failure_still_signals_the_job_group(self):
         broken = os.path.join(self.tmp.name, "ps-broken")
         self.wrapper = isolated_wrapper(self.tmp.name, (

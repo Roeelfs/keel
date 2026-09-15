@@ -206,17 +206,23 @@ class Job:
                 self.lease_error = None
         return members
 
+    def sampled(self):
+        try:
+            return self.members()
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+            return None  # Unknown, never "gone".
+
     def stop(self):
+        """TERM, a grace period, KILL, then up to 2 s for the job to vanish.
+
+        Returns the members still alive afterwards, or None when sampling failed and survival is unknown.
+        """
         for sig in (signal.SIGTERM, signal.SIGKILL):
-            try:
-                members = self.members()  # Re-sampled: catches processes started during the grace period.
-            except (OSError, subprocess.SubprocessError, ValueError, KeyError) as error:
-                print('with-heavy-lock: process sample failed; signalling the job group: ' + str(error),
-                      file=sys.stderr)
-                members = None
+            members = self.sampled()  # Re-sampled: catches processes started during the grace period.
             if members == []:
-                return
+                return []
             if members is None:
+                print('with-heavy-lock: process sample failed; signalling the job group', file=sys.stderr)
                 try:
                     os.killpg(self.root, sig)
                 except (ProcessLookupError, PermissionError):
@@ -225,6 +231,13 @@ class Job:
                 signal_members(members, self.root, sig)
             if sig == signal.SIGTERM:
                 time.sleep(0.3)
+        # A process forked after the last sample, or stuck in uninterruptible I/O, can outlive KILL.
+        deadline = time.monotonic() + 2
+        while True:
+            survivors = self.sampled()
+            if survivors == [] or time.monotonic() >= deadline:
+                return survivors
+            time.sleep(0.1)
 
 
 def signal_members(members, root, sig):
@@ -269,9 +282,11 @@ def supervise(child, job, policy, max_seconds, directory, job_id, interruption):
                   'memory_pressure_during_run' if low and now - low_since >= policy.run_pressure_seconds
                   else None)
         if reason:
-            job.stop()
+            survivors = job.stop()
             child.wait(timeout=5)
             budget = {'budget_seconds': max_seconds} if reason == 'wall_time_budget' else {}
+            if survivors != []:
+                budget['survivors'] = 'unknown' if survivors is None else len(survivors)
             event(directory, 'completed', job_id=job_id, reason=reason,
                   peak_rss_mb=round(peak, 2), exit_code=137, **budget)
             print(f'with-heavy-lock: {reason}; job peak {peak:.1f} MiB '
@@ -344,14 +359,19 @@ def run_job(command, directory, policy, job_id, stream):
         for descriptor in (gate_read, gate_write):
             if descriptor is not None:
                 os.close(descriptor)
-        if job is not None:
-            job.stop()
+        survivors = job.stop() if job is not None else []
         if child is not None:
             child.wait(timeout=5)
-        try:
-            (directory / 'lease.json').unlink(missing_ok=True)
-        except OSError as error:
-            print('with-heavy-lock: lease could not be removed: ' + str(error), file=sys.stderr)
+        if survivors == []:
+            try:
+                (directory / 'lease.json').unlink(missing_ok=True)
+            except OSError as error:
+                print('with-heavy-lock: lease could not be removed: ' + str(error), file=sys.stderr)
+        else:
+            # The session check keeps the slot busy until they exit; the next admission then reclaims it.
+            count = 'an unknown number of' if survivors is None else str(len(survivors))
+            print(f'with-heavy-lock: {count} job processes outlived SIGKILL; the lease is kept until they exit.',
+                  file=sys.stderr)
         stream.close()
         for sig, handler in original_handlers.items():
             signal.signal(sig, handler)
