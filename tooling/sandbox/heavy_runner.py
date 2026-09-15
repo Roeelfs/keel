@@ -183,7 +183,8 @@ class Job:
         self.root = root
         self.lease_path = lease_path
         self.lease = lease
-        self.recorded = None
+        self.recorded = None  # The member list last written; None until the lease is published.
+        self.lease_error = None
 
     def members(self):
         table = processes()
@@ -192,16 +193,36 @@ class Job:
         members = job_members(self.root, self.lease['leader_identity'], table)
         recorded = sorted([p.pid, p.pgid, p.identity] for p in members)
         if recorded != self.recorded:
-            self.recorded = recorded
-            write_record(self.lease_path, {**self.lease, 'members': recorded})
+            try:
+                write_record(self.lease_path, {**self.lease, 'members': recorded})
+            except OSError as error:
+                # Best-effort: a lease that cannot be rewritten must never stop the job from being budgeted
+                # or stopped. Liveness reads the session, so a stale member list still guards the slot.
+                if str(error) != self.lease_error:
+                    print('with-heavy-lock: lease update failed; still supervising: ' + str(error), file=sys.stderr)
+                self.lease_error = str(error)
+            else:
+                self.recorded = recorded
+                self.lease_error = None
         return members
 
     def stop(self):
         for sig in (signal.SIGTERM, signal.SIGKILL):
-            members = self.members()  # Re-sampled: catches processes started during the grace period.
-            if not members:
+            try:
+                members = self.members()  # Re-sampled: catches processes started during the grace period.
+            except (OSError, subprocess.SubprocessError, ValueError, KeyError) as error:
+                print('with-heavy-lock: process sample failed; signalling the job group: ' + str(error),
+                      file=sys.stderr)
+                members = None
+            if members == []:
                 return
-            signal_members(members, self.root, sig)
+            if members is None:
+                try:
+                    os.killpg(self.root, sig)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            else:
+                signal_members(members, self.root, sig)
             if sig == signal.SIGTERM:
                 time.sleep(0.3)
 
@@ -298,6 +319,8 @@ def run_job(command, directory, policy, job_id, stream):
                  'cwd': os.getcwd(), 'executable': Path(command[0]).name}
         job = Job(child.pid, directory / 'lease.json', lease)
         job.members()  # Publishes the lease with the gated child's identity.
+        if job.recorded is None:
+            raise OSError('the resource lease could not be published')  # Never run a job without one.
         event(directory, 'started', **lease, args=event_args(command), policy=asdict(policy))
         if received_signal:
             raise InterruptedError(received_signal)
@@ -325,7 +348,10 @@ def run_job(command, directory, policy, job_id, stream):
             job.stop()
         if child is not None:
             child.wait(timeout=5)
-        (directory / 'lease.json').unlink(missing_ok=True)
+        try:
+            (directory / 'lease.json').unlink(missing_ok=True)
+        except OSError as error:
+            print('with-heavy-lock: lease could not be removed: ' + str(error), file=sys.stderr)
         stream.close()
         for sig, handler in original_handlers.items():
             signal.signal(sig, handler)

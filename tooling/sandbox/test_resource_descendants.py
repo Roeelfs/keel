@@ -83,13 +83,8 @@ class DescendantBudgetTests(unittest.TestCase):
 
     def start_forking_job(self, alloc_mb=10, parent_seconds=20, **extra):
         child_pid = os.path.join(self.tmp.name, "child-pid")
-        env = self.env(ALLOC_MB=str(alloc_mb), PARENT_SECONDS=str(parent_seconds),
-                       CHILD_PID=child_pid, **extra)
-        # A file, never a pipe: a surviving child holds the pipe open and a read would wait on it.
-        with open(os.path.join(self.tmp.name, "stderr"), "w") as stderr:
-            supervisor = subprocess.Popen([self.wrapper, sys.executable, "-c", FORKING_JOB], env=env,
-                                          stdout=subprocess.DEVNULL, stderr=stderr)
-        self.children.append(supervisor)
+        supervisor = self.launch([sys.executable, "-c", FORKING_JOB], ALLOC_MB=str(alloc_mb),
+                                 PARENT_SECONDS=str(parent_seconds), CHILD_PID=child_pid, **extra)
         wait_until(lambda: os.path.exists(child_pid) and os.path.getsize(child_pid),
                    message="the forked child")
         with open(child_pid, encoding="utf-8") as handle:
@@ -101,9 +96,66 @@ class DescendantBudgetTests(unittest.TestCase):
             self.assertEqual(process.pgid, pid, "the fixture child leads its own process group")
         return supervisor, pid, identity
 
+    def launch(self, command, **extra):
+        # A file, never a pipe: a surviving child holds the pipe open and a read would wait on it.
+        with open(os.path.join(self.tmp.name, "stderr"), "w") as stderr:
+            supervisor = subprocess.Popen([self.wrapper, *command], env=self.env(**extra),
+                                          stdout=subprocess.DEVNULL, stderr=stderr)
+        self.children.append(supervisor)
+        return supervisor
+
+    def job_leader(self):
+        root = wait_until(lambda: self.lease().get("pgid"), message="the published lease")
+        identity = processes()[root].identity
+        self.owned.append((root, identity))
+        return root, identity
+
     def stderr(self):
         with open(os.path.join(self.tmp.name, "stderr"), encoding="utf-8") as handle:
             return handle.read()
+
+    def test_lease_write_failure_still_stops_the_job_at_its_budget(self):
+        locked = os.path.join(self.tmp.name, "locked")
+        child_pid = os.path.join(self.tmp.name, "child-pid")
+        job = ("import os, pathlib, subprocess, sys, time\n"
+               "while not os.path.exists(os.environ['LOCKED']): time.sleep(0.02)\n"
+               "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(20)'])\n"
+               "pathlib.Path(os.environ['CHILD_PID']).write_text(str(child.pid))\n"
+               "time.sleep(20)\n")
+        supervisor = self.launch([sys.executable, "-c", job], KEEL_HEAVY_MAX_SECONDS="2",
+                                 LOCKED=locked, CHILD_PID=child_pid)
+        root, identity = self.job_leader()
+        os.chmod(self.state, 0o500)  # From here every lease rewrite fails with EACCES.
+        try:
+            open(locked, "w").close()  # The job now adds a member, so the supervisor must rewrite.
+            wait_until(lambda: os.path.exists(child_pid) and os.path.getsize(child_pid), message="the new member")
+            with open(child_pid, encoding="utf-8") as handle:
+                child = processes().get(int(handle.read()))
+            if child:
+                self.owned.append((child.pid, child.identity))
+            self.assertEqual(supervisor.wait(timeout=15), 137, self.stderr())
+        finally:
+            os.chmod(self.state, 0o700)
+        wait_until(lambda: not alive(root, identity), timeout=5, message="the job leader to be stopped")
+        if child:
+            wait_until(lambda: not alive(child.pid, child.identity), timeout=5, message="the member to be stopped")
+        self.assertIn("lease", self.stderr())
+
+    def test_sampling_failure_still_signals_the_job_group(self):
+        broken = os.path.join(self.tmp.name, "ps-broken")
+        self.wrapper = isolated_wrapper(self.tmp.name, (
+            "import os, subprocess, heavy_runner\n"
+            "_real_processes = heavy_runner.processes\n"
+            "def _processes():\n"
+            "    if os.path.exists(%r):\n"
+            "        raise subprocess.TimeoutExpired(['ps'], 5)\n"
+            "    return _real_processes()\n"
+            "heavy_runner.processes = _processes\n") % broken)
+        supervisor = self.launch([sys.executable, "-c", "import time; time.sleep(20)"])
+        root, identity = self.job_leader()
+        open(broken, "w").close()  # Every process sample from here raises, as a hung `ps` would.
+        supervisor.wait(timeout=15)
+        wait_until(lambda: not alive(root, identity), timeout=5, message="the job group to be signalled")
 
     def events(self, reason=None):
         path = os.path.join(self.state, "events.jsonl")
