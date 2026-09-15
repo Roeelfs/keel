@@ -235,12 +235,40 @@ class ResourceBudgetTests(unittest.TestCase):
         wait_for(started)
         supervisor.kill()  # Kill only the test-owned wrapper supervisor, not its group.
         supervisor.wait(timeout=5)
+        self.assertTrue(self.status()["live"], "a surviving group still occupies the slot")
         deferred = self.invoke(["true"], env=self.env(KEEL_HEAVY_WAIT_MAX="0.1"),
                                capture_output=True, text=True, timeout=5)
         self.assertEqual(deferred.returncode, 75, deferred.stderr)
         wait_for(finished, timeout=3)
         acquired = self.invoke(["true"], capture_output=True, text=True, timeout=5)
         self.assertEqual(acquired.returncode, 0, acquired.stderr)
+
+    def test_daemon_that_leaves_the_group_does_not_keep_the_slot(self):
+        daemon_pid = os.path.join(self.tmp.name, "daemon-pid")
+        # fork keeps every inherited descriptor, as a Go daemon (limactl) does.
+        command = [sys.executable, "-c", (
+            "import os,pathlib,time\n"
+            "if os.fork() == 0:\n"
+            "    os.setsid()\n"
+            "    null = os.open(os.devnull, os.O_RDWR)\n"
+            "    for fd in (0, 1, 2): os.dup2(null, fd)\n"
+            "    pathlib.Path(%r).write_text(str(os.getpid()))\n"
+            "    time.sleep(10)\n"
+            "    os._exit(0)\n"
+            "while not os.path.exists(%r): time.sleep(.02)\n" % (daemon_pid, daemon_pid))]
+        try:
+            result = self.invoke(command, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            state = self.status()
+            self.assertIsNone(state["lease"], state)
+            self.assertFalse(state["live"], "a detached daemon must not keep the slot held")
+            acquired = self.invoke(["true"], env=self.env(KEEL_HEAVY_WAIT_MAX="0"),
+                                   capture_output=True, text=True, timeout=5)
+            self.assertEqual(acquired.returncode, 0, acquired.stderr)
+        finally:
+            wait_for(daemon_pid)
+            with open(daemon_pid, encoding="utf-8") as handle:
+                os.kill(int(handle.read()), 9)  # The test-owned daemon only.
 
 
 if __name__ == "__main__":

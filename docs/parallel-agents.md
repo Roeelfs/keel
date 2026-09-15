@@ -35,8 +35,9 @@ State is always `~/.keel/heavy.slots`, including an atomic lease and `events.jso
 job ids, terminal reasons and observed peak RSS. Nested calls verify a live
 supervisor ancestor, process identity, job id and held lock. An ambient
 `KEEL_HEAVY_LOCK_HELD=1` flag alone grants no access. If the supervisor dies,
-the inherited lock and recorded process group keep a surviving job excluded
-until it drains. Termination and normal cleanup target only the owned group.
+the recorded process group keeps a surviving job excluded until it drains. Only
+the supervisor holds the lock, so a daemon that leaves the group never keeps the
+slot busy. Termination and normal cleanup target only the owned group.
 
 This is a native process supervisor, **not a hard memory sandbox**. Sampling can
 overshoot; detached processes can leave a process group; a SIGKILLed supervisor

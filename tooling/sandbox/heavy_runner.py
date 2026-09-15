@@ -29,6 +29,11 @@ def lock_available(directory):
             return False
 
 
+def lease_group_alive(lease):
+    # A job outlives a killed supervisor only as its recorded process group.
+    return bool(lease and group_members(lease.get('pgid'), processes()))
+
+
 def valid_lease(directory):
     lease = read_record(directory / 'lease.json')
     if not lease or lease.get('job_id') != os.environ.get('KEEL_HEAVY_JOB_ID'):
@@ -54,8 +59,7 @@ def acquire(directory, policy, job_id):
     while True:
         try:
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            prior = read_record(directory / 'lease.json')
-            live = prior and group_members(prior.get('pgid'), processes())
+            live = lease_group_alive(read_record(directory / 'lease.json'))
             reason = 'previous_job_alive' if live else pressure_reason(policy)
             if not reason:
                 return stream
@@ -141,9 +145,10 @@ def run_job(command, directory, policy, job_id, stream):
         bootstrap = Path(__file__).resolve().with_name('heavy_child.py')
         if not bootstrap.is_file():
             raise ValueError('job startup gate is missing')
+        # Only the supervisor holds the slot: a daemon that leaves the group must not inherit it.
         child = subprocess.Popen([sys.executable, str(bootstrap), str(gate_read), *command],
                                  env=child_environment(policy, job_id), start_new_session=True,
-                                 pass_fds=(stream.fileno(), gate_read))
+                                 pass_fds=(gate_read,))
         os.close(gate_read)
         gate_read = None
         lease = {'job_id': job_id, 'supervisor_pid': owner.pid,
@@ -183,7 +188,8 @@ def main():
         command = sys.argv[1:]
         if command == ['--status']:
             lease = read_record(directory / 'lease.json')
-            print(json.dumps({**asdict(policy), 'live': not lock_available(directory),
+            live = not lock_available(directory) or lease_group_alive(lease)
+            print(json.dumps({**asdict(policy), 'live': live,
                               'lease': lease, 'state_dir': str(directory)}))
             return 0
         if command == ['--check-lease']:
