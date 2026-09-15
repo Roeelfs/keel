@@ -400,6 +400,36 @@ class SelfLockingMarker(unittest.TestCase):
         result = self.check("./pnpm test", cwd=self.repo.name)
         self.assertEqual(result.returncode, 2)
 
+    def test_env_dash_capital_c_disables_the_exemption(self):
+        # A marker under the payload cwd must not exempt a script actually resolved elsewhere.
+        self.write_script("tooling/sandbox/project-verify")
+        command = "env -C /tmp/elsewhere tooling/sandbox/project-verify verify"
+        result = self.check(command, cwd=self.repo.name)
+        self.assertEqual(result.returncode, 2)
+
+    def test_env_chdir_flag_disables_the_exemption(self):
+        self.write_script("tooling/sandbox/project-verify")
+        command = "env --chdir=/tmp/elsewhere tooling/sandbox/project-verify verify"
+        result = self.check(command, cwd=self.repo.name)
+        self.assertEqual(result.returncode, 2)
+
+    def test_pnpm_dir_equals_flag_disables_the_exemption(self):
+        self.write_script("tooling/sandbox/project-verify")
+        command = "pnpm --dir=/tmp/elsewhere exec tooling/sandbox/project-verify verify"
+        result = self.check(command, cwd=self.repo.name)
+        self.assertEqual(result.returncode, 2)
+
+    def test_env_var_assignment_is_not_a_chdir_flag(self):
+        self.write_script("tooling/sandbox/project-verify")
+        result = self.check("env FOO=1 tooling/sandbox/project-verify verify", cwd=self.repo.name)
+        self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+
+    def test_git_dash_capital_c_segment_makes_the_payload_cwd_stale(self):
+        self.write_script("tooling/sandbox/project-verify")
+        command = "git -C /tmp/elsewhere status && tooling/sandbox/project-verify verify"
+        result = self.check(command, cwd=self.repo.name)
+        self.assertEqual(result.returncode, 2)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

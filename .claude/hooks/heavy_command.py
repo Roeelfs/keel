@@ -43,9 +43,19 @@ def is_self_locking(word, cwd):
 
 
 def is_cd_segment(segment):
-    """A `cd`/`pushd` segment means any payload cwd is stale for every later segment."""
+    """A `cd`/`pushd`/`git -C` segment means any payload cwd is stale for every later segment.
+
+    `git -C <dir>` never changes the invoking shell's cwd, but a false positive here only
+    over-restricts (a later segment loses the exemption it might otherwise have earned), which
+    is the safe direction, so it is treated the same as `cd`.
+    """
     words = without_prefixes(list(segment))
-    return bool(words) and PurePosixPath(words[0]).name in {'cd', 'pushd'}
+    if not words:
+        return False
+    name = PurePosixPath(words[0]).name
+    if name in {'cd', 'pushd'}:
+        return True
+    return name == 'git' and any(word.split('=', 1)[0] == '-C' for word in words[1:])
 
 
 def strip_heredocs(command):
@@ -61,15 +71,38 @@ def strip_heredocs(command):
     return '\n'.join(output)
 
 
+VALUE_FLAGS = frozenset({'--filter', '-F', '--dir', '-C', '--cwd', '--prefix', '--workspace',
+                          '-w', '--package', '-p', '--config', '-c', '--userconfig', '-u',
+                          '--unset', '--chdir'})
+# A flag that changes the directory a following relative path resolves against. Present on
+# `env` (`-C`/`--chdir`) and on package managers (`pnpm -C/--dir`, `npm --prefix`, `yarn --cwd`).
+CWD_FLAGS = frozenset({'-C', '--chdir', '--dir', '--prefix', '--cwd'})
+
+
 def without_options(words, boolean_flags=frozenset()):
     result = list(words)
-    value_flags = {'--filter', '-F', '--dir', '-C', '--cwd', '--prefix', '--workspace',
-                   '-w', '--package', '-p', '--config', '-c', '--userconfig', '-u', '--unset'}
     while result and result[0].startswith('-'):
         first, *result = result
-        if first in value_flags and first not in boolean_flags and result:
+        bare = first.split('=', 1)[0]
+        if bare in VALUE_FLAGS and bare not in boolean_flags and '=' not in first and result:
             result = result[1:]
     return result
+
+
+def has_cwd_flag(words, boolean_flags=frozenset()):
+    """True if a leading option in `words` changes the directory a relative path resolves
+    against (`-C dir`, `--chdir[=dir]`, `--dir[=dir]`, `--prefix[=dir]`, `--cwd[=dir]`). Walks
+    the same leading-option run as `without_options`, so a value-consuming flag before it does
+    not shift a later cwd flag out of view."""
+    remaining = list(words)
+    while remaining and remaining[0].startswith('-'):
+        first, *remaining = remaining
+        bare = first.split('=', 1)[0]
+        if bare in CWD_FLAGS:
+            return True
+        if bare in VALUE_FLAGS and bare not in boolean_flags and '=' not in first and remaining:
+            remaining = remaining[1:]
+    return False
 
 
 def without_prefixes(words):
@@ -95,11 +128,16 @@ def inspect_words(words, custom, cwd=None, allow_exempt=True):
             rest = without_options(rest)[1:]
         elif name == 'nice' and rest[:1] == ['-n']:
             rest = rest[2:]
+        elif name == 'env' and has_cwd_flag(rest):
+            allow_exempt = False  # -C/--chdir changes where a later relative path resolves.
         return inspect_words(without_options(rest), custom, cwd, allow_exempt)
     if name in PACKAGE_MANAGERS:
         if name == 'yarn' and any(x in rest for x in {'--help', '-h', '--version', '-v'}):
             return None
-        rest = without_options(rest, {'-w'} if name == 'pnpm' else frozenset())
+        manager_boolean = {'-w'} if name == 'pnpm' else frozenset()
+        if has_cwd_flag(rest, manager_boolean):
+            allow_exempt = False  # -C/--dir/--prefix/--cwd changes the resolution directory.
+        rest = without_options(rest, manager_boolean)
         if name == 'yarn' and not rest:
             return 'package-install'
         if rest[:1] in (['exec'], ['run'], ['dlx']):
