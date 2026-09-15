@@ -3,6 +3,10 @@ import re
 import shlex
 from pathlib import PurePosixPath
 
+PACKAGE_MANAGERS = frozenset({'pnpm', 'npm', 'npx', 'yarn', 'bun', 'bunx', 'corepack'})
+PACKAGE_VERBS = frozenset({'test', 'build', 'install', 'ci', 'i'})
+TEST_RUNNERS = frozenset({'vitest', 'vitest.mjs', 'vitest.js', 'jest', 'jest.js'})
+
 
 def strip_heredocs(command):
     output, pending = [], []
@@ -52,7 +56,7 @@ def inspect_words(words, custom):
         elif name == 'nice' and rest[:1] == ['-n']:
             rest = rest[2:]
         return inspect_words(without_options(rest), custom)
-    if name in {'pnpm', 'npm', 'npx', 'yarn', 'bun', 'bunx', 'corepack'}:
+    if name in PACKAGE_MANAGERS:
         if name == 'yarn' and any(x in rest for x in {'--help', '-h', '--version', '-v'}):
             return None
         rest = without_options(rest, {'-w'} if name == 'pnpm' else frozenset())
@@ -60,10 +64,10 @@ def inspect_words(words, custom):
             return 'package-install'
         if rest[:1] in (['exec'], ['run'], ['dlx']):
             rest = without_options(rest[1:])
-        if rest and rest[0].split(':')[0] in {'test', 'build', 'install', 'ci', 'i'}:
+        if rest and rest[0].split(':')[0] in PACKAGE_VERBS:
             return 'package-' + rest[0]
         return inspect_words(rest, custom)
-    if name in {'vitest', 'vitest.mjs', 'vitest.js', 'jest', 'jest.js'}:
+    if name in TEST_RUNNERS:
         return None if any(x in rest for x in ['--version', '--help', '-h']) else 'unit-tests'
     if name in {'node', 'nodejs'}:
         return inspect_words(without_options(rest), custom)
@@ -104,6 +108,29 @@ def classify(command, custom=None):
         if found:
             return found
     return None
+
+
+def raw_words(command):
+    """Word basenames of text shlex rejected: quoting erased, every shell operator a break."""
+    text = re.sub(r"[\"'\\]", '', strip_heredocs(command))
+    return [PurePosixPath(word).name for word in re.split(r"[\s;&|()<>`$={}]+", text) if word]
+
+
+def unparsed_heavy_token(command, custom=None):
+    """Name a heavy token anywhere in unparseable text; ignoring word position over-reports by design."""
+    found, later = None, set()
+    for name in reversed(raw_words(command)):
+        if (name in TEST_RUNNERS or name in {'turbo', 'cdk'} or name in (custom or {})
+                or name in PACKAGE_MANAGERS and (name == 'yarn' or later & PACKAGE_VERBS)
+                or name == 'next' and 'build' in later):
+            found = name
+        later.add(name.split(':')[0])
+    return found
+
+
+def unparsed_rule_name(command, rules):
+    """Name the first rule command anywhere in unparseable text."""
+    return next((name for name in raw_words(command) if name in rules), None)
 
 
 def verbs_match(verbs, args):

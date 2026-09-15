@@ -92,8 +92,10 @@ that a running session has loaded the new hook. The installer does not change
 security approvals or fabricate trust. Other machines need their own install.
 
 The hook refuses recognized unwrapped test/build/install/CDK commands, including
-shell command segments after a wrapped invocation. Missing runner or an invalid
-command/rule parse fails closed. Quoted documentation and heredoc bodies are
+shell command segments after a wrapped invocation. A missing runner or an invalid
+rules file fails closed. A command the classifier cannot split (unbalanced
+quoting) runs unless a heavy command name appears anywhere in its text, and is
+refused if one does. Quoted documentation and heredoc bodies are
 excluded from classification. Repository-specific entry points can be added in
 `~/.keel/resource-commands.json`, for example `{"project-verify": ["*"]}`.
 This shell classifier prevents common accidental bypasses; it cannot prove what

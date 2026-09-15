@@ -8,7 +8,7 @@ import shutil
 import sys
 
 try:
-    from heavy_command import background_required, classify
+    from heavy_command import background_required, classify, unparsed_heavy_token, unparsed_rule_name
 except ImportError:
     print('Resource guard installation is incomplete; command refused. Reinstall resource hooks.', file=sys.stderr)
     raise SystemExit(2)
@@ -66,11 +66,21 @@ def main(arguments):
             raise ValueError('resource command rules must map command names to lists of verbs')
         if not valid_rules(background):
             raise ValueError('background_required must map command names to lists of verbs')
+    except (ValueError, OSError, TypeError) as error:
+        print('Resource guard could not read resource command rules: ' + str(error), file=sys.stderr)
+        return 2
+    try:
         kind = classify(command, rules)
         slow = background_required(command, background) if runtime and not kind else None
-    except (ValueError, OSError, TypeError) as error:
-        print('Resource guard could not parse command: ' + str(error), file=sys.stderr)
-        return 2
+    except ValueError as error:
+        # Unsplittable shell text is usually a quoting slip in a light command, so it runs
+        # unless a heavy token appears anywhere in it.
+        token = unparsed_heavy_token(command, rules)
+        if token:
+            return deny('Resource guard could not parse this command (' + str(error) + ') and it '
+                        'names heavy command ' + token + '. Fix the shell quoting so it can be classified.')
+        kind = None
+        slow = unparsed_rule_name(command, background) if runtime else None
     if kind:
         wrapper = shutil.which('with-heavy-lock')
         fallback = account_home / '.local/bin/with-heavy-lock'

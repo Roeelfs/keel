@@ -109,6 +109,26 @@ class QuotedDataVsExecution(unittest.TestCase):
         self.assertEqual(run_hook("eval 'pnpm test'").returncode, 2)
 
 
+class UnparseableCommand(unittest.TestCase):
+    def test_light_command_with_unbalanced_quoting_is_allowed(self):
+        for command in ('grep -n "could not parse .claude/hooks/serialize-heavy-ops.py',
+                        "git commit -m 'fix install docs", "echo it's done", "ls \\",
+                        "pnpm typecheck 'x", 'eval "echo \'unclosed"'):
+            with self.subTest(command=command):
+                result = run_hook(command)
+                self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+
+    def test_heavy_token_in_unparseable_text_is_denied(self):
+        for command in ('grep "x && pnpm test', "npx vitest run 'a.test.ts", "bash -c 'pnpm install",
+                        'cdk deploy "x', 'with-heavy-lock pnpm test "x', 'yarn "', "next build 'x",
+                        'turbo run build "', 'pn""pm --filter web test "', "node_modules/.bin/jest '",
+                        'bash -c "pnpm test \'x"', 'grep "pnpm install docs/'):
+            with self.subTest(command=command):
+                result = run_hook(command)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("could not parse this command", result.stderr)
+
+
 class HeavyCommandCorpus(unittest.TestCase):
     def test_package_root_flag_and_env_unset_are_not_command_names(self):
         for command in ('pnpm -w test', 'env -u DEBUG pnpm test', 'node node_modules/vitest/vitest.js run'):
@@ -257,6 +277,26 @@ class BackgroundRequired(unittest.TestCase):
         result = self.check("git status", "--runtime", "claude")
         self.assertEqual(result.returncode, 2)
         self.assertIn("background_required must map command names", result.stderr)
+
+    def test_malformed_rules_file_fails_closed_even_for_unparseable_light_text(self):
+        self.write_rules('{"project-verify": ["verify"')
+        for command in ("git status", 'grep "x'):
+            with self.subTest(command=command):
+                result = self.check(command, "--runtime", "claude")
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("could not read resource command rules", result.stderr)
+
+    def test_unparseable_text_is_checked_against_configured_rules(self):
+        self.write_rules({**TODAY_RULES, "background_required": {"slow-report": ["*"]}})
+        result = self.check('./tools/project-verify verify "x', "--runtime", "claude")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("names heavy command project-verify", result.stderr)
+        result = self.check("slow-report --since 'today", "--runtime", "claude")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(CLAUDE_TEXT, result.stderr)
+        result = self.check("slow-report --since 'today", "--runtime", "claude", run_in_background=True)
+        self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+        self.assertEqual(self.check("other-tool 'x", "--runtime", "claude").returncode, 0)
 
 
 if __name__ == "__main__":
