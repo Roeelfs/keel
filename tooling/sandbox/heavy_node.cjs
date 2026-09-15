@@ -5,7 +5,7 @@
 const path = require('node:path');
 const main = (process.argv[1] || '').replaceAll('\\', '/');
 const name = path.basename(main);
-const workers = Math.max(1, Math.min(2, Number(process.env.KEEL_HEAVY_MAX_WORKERS) || 2));
+const workers = Math.max(1, Math.min(8, Number(process.env.KEEL_HEAVY_MAX_WORKERS) || 2));
 
 function clamp(flags, additions) {
   const args = process.argv.slice(2);

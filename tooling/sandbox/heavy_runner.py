@@ -13,6 +13,9 @@ import uuid
 from heavy_resources import (account_home, ancestors, event, free_percent, group_members,
                              load_policy, processes, read_record, write_record)
 
+QUEUE_PROGRESS_SECONDS = 30
+PRESSURE_POLLS = 2  # Consecutive low free-memory samples that stop a running job.
+
 
 def state_directory():
     path = account_home() / '.keel/heavy.slots'
@@ -51,29 +54,94 @@ def pressure_reason(policy):
     return None
 
 
+class Interrupted(Exception):
+    """A termination signal arrived while the job waited in the admission queue."""
+
+
+def live_tickets(queue):
+    # List tickets before sampling processes: every listed writer existed before the sample.
+    paths = sorted(queue.glob('*.json'))
+    table = processes()
+    live = []
+    for path in paths:
+        try:
+            ticket = read_record(path)
+        except (OSError, ValueError):
+            ticket = None
+        pid = ticket.get('pid') if ticket else None
+        owner = table.get(pid) if isinstance(pid, int) else None
+        if owner and not owner.state.startswith('Z') and owner.identity == ticket.get('identity'):
+            live.append(path)
+        else:
+            path.unlink(missing_ok=True)  # Dead waiter, reused pid, or unreadable ticket.
+    return live
+
+
+def holder_description(directory):
+    lease = read_record(directory / 'lease.json')
+    if not lease:
+        return 'no published slot holder'
+    return 'slot held by ' + str(lease.get('executable')) + ' in ' + str(lease.get('cwd'))
+
+
 def acquire(directory, policy, job_id):
     stream = (directory / 'slot.1').open('a')
-    deadline = time.monotonic() + policy.wait_seconds
-    reason = 'resource_busy'
+    queue = directory / 'queue'
+    queue.mkdir(exist_ok=True, mode=0o700)
+    started = time.monotonic()
+    deadline = started + policy.wait_seconds
+    owner = processes()[os.getpid()]
+    ticket = queue / f'{time.time_ns():020d}-{owner.pid}.json'
+    record = {'pid': owner.pid, 'identity': owner.identity, 'job_id': job_id, 'enqueued': time.time()}
     event(directory, 'queued', job_id=job_id, pid=os.getpid())
-    while True:
-        try:
-            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            live = lease_group_alive(read_record(directory / 'lease.json'))
-            reason = 'previous_job_alive' if live else pressure_reason(policy)
-            if not reason:
-                return stream
-            fcntl.flock(stream, fcntl.LOCK_UN)
-        except BlockingIOError:
+    acquired = False
+    progress_at = None
+    handlers = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
+    def interrupted(signum, _frame):
+        raise Interrupted(signum)
+    for sig in handlers:
+        signal.signal(sig, interrupted)
+    try:
+        write_record(ticket, record)
+        while True:
+            live = live_tickets(queue)
+            if ticket not in live:
+                write_record(ticket, record)  # Restore a wrongly pruned ticket at its original place.
+                live = sorted([*live, ticket])
+            position = live.index(ticket) + 1
             reason = 'resource_busy'
-        if time.monotonic() >= deadline:
+            if position == 1:  # Only the oldest live waiter may take the slot.
+                try:
+                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    alive = lease_group_alive(read_record(directory / 'lease.json'))
+                    reason = 'previous_job_alive' if alive else pressure_reason(policy)
+                    if not reason:
+                        acquired = True
+                        return stream
+                    fcntl.flock(stream, fcntl.LOCK_UN)
+                except BlockingIOError:
+                    reason = 'resource_busy'
+            now = time.monotonic()
+            if now >= deadline:
+                event(directory, 'deferred', job_id=job_id, reason=reason)
+                print('with-heavy-lock: DEFERRED (' + reason + '); no command started. '
+                      'Do not retry unchanged or treat this as test success. No CI push is authorized.',
+                      file=sys.stderr)
+                return None
+            if progress_at is None or now >= progress_at:
+                label = 'QUEUED' if progress_at is None else 'still QUEUED'
+                waited = '' if progress_at is None else f' after {now - started:.0f}s'
+                print(f'with-heavy-lock: {label} at position {position}{waited}; '
+                      f'{holder_description(directory)}; waiting up to {policy.wait_seconds:g}s.',
+                      file=sys.stderr)
+                progress_at = now + QUEUE_PROGRESS_SECONDS
+            time.sleep(min(policy.poll_seconds, max(0, deadline - time.monotonic())))
+    finally:
+        ticket.unlink(missing_ok=True)
+        if not acquired:
             stream.close()
-            event(directory, 'deferred', job_id=job_id, reason=reason)
-            print('with-heavy-lock: DEFERRED (' + reason + '); no command started. '
-                  'Do not retry unchanged or treat this as test success. No CI push is authorized.',
-                  file=sys.stderr)
-            return None
-        time.sleep(min(policy.poll_seconds, max(0, deadline - time.monotonic())))
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
 
 
 def child_environment(policy, job_id):
@@ -104,6 +172,7 @@ def stop_group(pgid):
 def supervise(child, policy, directory, job_id, interruption):
     started = time.monotonic()
     peak = 0.0
+    low_memory_polls = 0
     while True:
         if interruption():
             raise InterruptedError(interruption())
@@ -111,8 +180,12 @@ def supervise(child, policy, directory, job_id, interruption):
         members = group_members(child.pid, table)
         rss = sum(p.rss_mb for p in members)
         peak = max(peak, rss)
+        # Admission checks free memory once; a run that drives the host into pressure is stopped too.
+        low = bool(members and policy.min_free_percent and free_percent() < policy.min_free_percent)
+        low_memory_polls = low_memory_polls + 1 if low else 0
         reason = ('resource_limit' if rss > policy.max_rss_mb else
-                  'wall_time_budget' if time.monotonic() - started > policy.max_seconds else None)
+                  'wall_time_budget' if time.monotonic() - started > policy.max_seconds else
+                  'memory_pressure_during_run' if low_memory_polls >= PRESSURE_POLLS else None)
         if reason:
             stop_group(child.pid)
             child.wait(timeout=5)
@@ -202,7 +275,11 @@ def main():
         if valid_lease(directory):
             os.execvpe(command[0], command, child_environment(policy, os.environ['KEEL_HEAVY_JOB_ID']))
         job_id = uuid.uuid4().hex
-        stream = acquire(directory, policy, job_id)
+        try:
+            stream = acquire(directory, policy, job_id)
+        except Interrupted as error:
+            event(directory, 'interrupted', job_id=job_id, reason='signal', signal=error.args[0])
+            return 128 + int(error.args[0])
         return run_job(command, directory, policy, job_id, stream) if stream else 75
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print('with-heavy-lock: resource control unavailable; command refused: ' + str(error), file=sys.stderr)

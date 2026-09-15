@@ -7,6 +7,7 @@ use only temporary state directories and short-lived children they create.
 import json
 import os
 import pwd
+import signal
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,18 @@ def wait_for(path, timeout=4):
             return
         time.sleep(0.02)
     raise AssertionError("timed out waiting for %s" % path)
+
+
+# Replaces the host memory observer with a scripted sequence, one value per call.
+SCRIPTED_FREE_PERCENT = (
+    "import json\n"
+    "def _scripted_free_percent(path=Path(%r)):\n"
+    "    state = json.loads(path.read_text())\n"
+    "    calls = state['calls']\n"
+    "    path.write_text(json.dumps({'values': state['values'], 'calls': calls + 1}))\n"
+    "    return float(state['values'][min(calls, len(state['values']) - 1)])\n"
+    "heavy_resources.free_percent = _scripted_free_percent\n"
+)
 
 
 def real_node():
@@ -269,6 +282,152 @@ class ResourceBudgetTests(unittest.TestCase):
             wait_for(daemon_pid)
             with open(daemon_pid, encoding="utf-8") as handle:
                 os.kill(int(handle.read()), 9)  # The test-owned daemon only.
+
+    def write_policy(self, **values):
+        with open(os.path.join(self.tmp.name, ".keel", "resource-policy.json"), "w") as handle:
+            json.dump({"min_free_percent": 0, **values}, handle)
+
+    def tickets(self):
+        queue = os.path.join(self.state, "queue")
+        return sorted(n for n in os.listdir(queue) if n.endswith(".json")) if os.path.isdir(queue) else []
+
+    def hold_until_released(self):
+        started = os.path.join(self.tmp.name, "gated-started")
+        release = os.path.join(self.tmp.name, "release")
+        holder = self.popen([sys.executable, "-c", (
+            "import os,pathlib,time\npathlib.Path(%r).touch()\n"
+            "while not os.path.exists(%r): time.sleep(.02)" % (started, release))],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        wait_for(started)
+        return holder, release
+
+    def waiter(self, args, **extra):
+        # The first stderr line is QUEUED (or DEFERRED): reading it proves the ticket exists.
+        return self.popen(args, env=self.env(**extra), stdout=subprocess.DEVNULL,
+                          stderr=subprocess.PIPE, text=True)
+
+    def release(self, holder, release):
+        open(release, "w").close()
+        self.assertEqual(holder.wait(timeout=5), 0)
+
+    def test_staggered_waiters_acquire_in_enqueue_order(self):
+        holder, release = self.hold_until_released()
+        order = os.path.join(self.tmp.name, "order")
+        waiters = []
+        for position, label in enumerate(("first", "second", "third"), start=1):
+            body = "open(%r, 'a').write(%r)" % (order, label + "\n")
+            waiter = self.waiter([sys.executable, "-c", body], KEEL_HEAVY_WAIT_MAX="30")
+            line = waiter.stderr.readline()
+            self.assertIn("QUEUED at position %d;" % position, line)
+            self.assertIn("slot held by " + os.path.basename(sys.executable), line)
+            waiters.append(waiter)
+        self.assertEqual(len(self.tickets()), 3)
+        self.release(holder, release)
+        for waiter in waiters:
+            self.assertEqual(waiter.wait(timeout=15), 0)
+        with open(order, encoding="utf-8") as handle:
+            self.assertEqual(handle.read().split(), ["first", "second", "third"])
+        self.assertEqual(self.tickets(), [])
+
+    def test_sigkilled_waiter_ticket_is_pruned_and_blocks_nobody(self):
+        holder, release = self.hold_until_released()
+        killed = self.waiter(["true"], KEEL_HEAVY_WAIT_MAX="30")
+        self.assertIn("QUEUED at position 1;", killed.stderr.readline())
+        stale = self.tickets()
+        self.assertEqual(len(stale), 1)
+        killed.kill()  # SIGKILL runs no cleanup, so the ticket stays behind.
+        killed.wait(timeout=5)
+        self.assertEqual(self.tickets(), stale)
+        waiter = self.waiter(["true"], KEEL_HEAVY_WAIT_MAX="30")
+        self.assertIn("QUEUED at position 1;", waiter.stderr.readline(),
+                      "a dead waiter's ticket must not hold a place in the queue")
+        self.assertNotIn(stale[0], self.tickets())
+        self.release(holder, release)
+        self.assertEqual(waiter.wait(timeout=10), 0)
+        self.assertEqual(self.tickets(), [])
+
+    def test_signalled_waiter_removes_its_own_ticket(self):
+        holder, release = self.hold_until_released()
+        waiter = self.waiter(["true"], KEEL_HEAVY_WAIT_MAX="30")
+        self.assertIn("QUEUED", waiter.stderr.readline())
+        self.assertEqual(len(self.tickets()), 1)
+        waiter.terminate()
+        self.assertEqual(waiter.wait(timeout=5), 128 + signal.SIGTERM)
+        self.assertEqual(self.tickets(), [])
+        self.assertTrue(any(row.get("event") == "interrupted" for row in self.event_rows()))
+        self.release(holder, release)
+
+    def test_wait_max_environment_raises_and_lowers_the_policy_wait(self):
+        self.assertEqual(self.status(self.env(KEEL_HEAVY_WAIT_MAX="1"))["wait_seconds"], 1)
+        self.assertEqual(self.status(self.env(KEEL_HEAVY_WAIT_MAX="900"))["wait_seconds"], 900)
+        self.write_policy(wait_seconds=0.1)
+        holder, release = self.hold_until_released()
+        waiter = self.waiter(["true"], KEEL_HEAVY_WAIT_MAX="30")
+        self.assertIn("QUEUED", waiter.stderr.readline())
+        time.sleep(0.5)  # Well past the 0.1s policy wait.
+        self.release(holder, release)
+        self.assertEqual(waiter.wait(timeout=10), 0, "a raised wait must outlast the policy wait")
+
+    def test_worker_policy_accepts_one_to_eight_and_environment_cannot_raise_it(self):
+        self.write_policy(max_workers=2)
+        self.assertEqual(self.status(self.env(KEEL_HEAVY_MAX_WORKERS="8"))["max_workers"], 2)
+        self.write_policy(max_workers=8)
+        self.assertEqual(self.status()["max_workers"], 8)
+        for rejected in (0, 9):
+            self.write_policy(max_workers=rejected)
+            result = self.invoke(["--status"], capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 69, result.stderr)
+            self.assertIn("max_workers must be between 1 and 8", result.stderr)
+
+    def test_node_worker_clamp_is_eight_and_the_runner_passes_the_policy_value(self):
+        with tempfile.TemporaryDirectory(dir=self.tmp.name) as work:
+            fake_vitest = os.path.join(work, "vitest.mjs")
+            output = os.path.join(work, "args.json")
+            with open(fake_vitest, "w", encoding="utf-8") as handle:
+                handle.write("import { writeFileSync } from 'node:fs';\n"
+                             "writeFileSync(process.env.OUT, JSON.stringify(process.argv.slice(2)));\n")
+            def observed(argv, **extra):
+                result = subprocess.run(argv, env=self.env(OUT=output, **extra),
+                                        capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                with open(output, encoding="utf-8") as handle:
+                    return json.load(handle)
+            preload = "--require=" + os.path.join(HERE, "heavy_node.cjs")
+            node = real_node()
+            self.assertIn("--maxWorkers=8", observed([node, preload, fake_vitest], KEEL_HEAVY_MAX_WORKERS="12"))
+            self.assertIn("--maxWorkers=5", observed([node, preload, fake_vitest], KEEL_HEAVY_MAX_WORKERS="5"))
+            self.write_policy(max_workers=2)
+            self.assertIn("--maxWorkers=2", observed([self.wrapper, node, fake_vitest], KEEL_HEAVY_MAX_WORKERS="8"))
+
+    def scripted_pressure(self, values):
+        script = os.path.join(self.tmp.name, "free-percent.json")
+        with open(script, "w", encoding="utf-8") as handle:
+            json.dump({"values": values, "calls": 0}, handle)
+        self.wrapper = isolated_wrapper(self.tmp.name, SCRIPTED_FREE_PERCENT % script)
+        return script
+
+    def test_free_memory_low_for_two_polls_stops_the_running_job(self):
+        # Call 0 is admission; calls 1 and 2 are consecutive polls of the running job.
+        self.scripted_pressure([50, 10, 10, 50])
+        result = self.invoke([sys.executable, "-c", "import time; time.sleep(10)"],
+                             env=self.env(KEEL_HEAVY_MIN_FREE_PERCENT="20"),
+                             capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 137, result.stderr)
+        self.assertIn("memory_pressure_during_run", result.stderr)
+        stops = [row for row in self.event_rows() if row.get("reason") == "memory_pressure_during_run"]
+        self.assertEqual(len(stops), 1, stops)
+        self.assertEqual(stops[0]["exit_code"], 137)
+
+    def test_one_poll_free_memory_blip_does_not_stop_the_job(self):
+        script = self.scripted_pressure([50, 10, 50])
+        result = self.invoke([sys.executable, "-c", "import time; time.sleep(.6)"],
+                             env=self.env(KEEL_HEAVY_MIN_FREE_PERCENT="20"),
+                             capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(script, encoding="utf-8") as handle:
+            self.assertGreaterEqual(json.load(handle)["calls"], 4, "the blip and a recovery were sampled")
+        self.assertFalse([row for row in self.event_rows()
+                          if row.get("reason") == "memory_pressure_during_run"])
 
 
 if __name__ == "__main__":

@@ -42,11 +42,13 @@ def load_policy():
     # Runtime environment can tighten budgets, never grant extra slots or memory.
     variables = {'max_workers': 'KEEL_HEAVY_MAX_WORKERS',
                  'max_rss_mb': 'KEEL_HEAVY_MAX_RSS_MB',
-                 'wait_seconds': 'KEEL_HEAVY_WAIT_MAX',
                  'max_seconds': 'KEEL_HEAVY_MAX_SECONDS'}
     for key, variable in variables.items():
         if variable in os.environ:
             policy[key] = min(policy[key], float(os.environ[variable]))
+    # wait is not a resource grant — this one field is deliberately override-both-ways
+    if 'KEEL_HEAVY_WAIT_MAX' in os.environ:
+        policy['wait_seconds'] = float(os.environ['KEEL_HEAVY_WAIT_MAX'])
     if 'KEEL_HEAVY_POLL_SECONDS' in os.environ:
         policy['poll_seconds'] = min(policy['poll_seconds'], float(os.environ['KEEL_HEAVY_POLL_SECONDS']))
     if 'KEEL_HEAVY_MIN_FREE_PERCENT' in os.environ:
@@ -55,8 +57,8 @@ def load_policy():
         raise ValueError('resource policy values must be finite')
     if policy['slots'] != 1:
         raise ValueError('this supervisor admits exactly one aggregate-budgeted job')
-    if not 1 <= policy['max_workers'] <= 2 or policy['max_workers'] % 1:
-        raise ValueError('max_workers must be 1 or 2')
+    if not 1 <= policy['max_workers'] <= 8 or policy['max_workers'] % 1:
+        raise ValueError('max_workers must be between 1 and 8')
     if not 0 <= policy['min_free_percent'] <= 100 or policy['wait_seconds'] < 0:
         raise ValueError('invalid pressure or admission wait budget')
     if any(policy[k] <= 0 for k in ['poll_seconds', 'max_rss_mb', 'max_seconds']):
