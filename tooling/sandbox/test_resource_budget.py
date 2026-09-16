@@ -46,6 +46,21 @@ SCRIPTED_FREE_PERCENT = (
 )
 
 
+# Replaces the process sampler with one that fails the way `ps` does under load, but only once the
+# job holds the slot, so acquisition and the lease publish still see a real table.
+SCRIPTED_PROCESSES = (
+    "import json, subprocess\n"
+    "_real_processes = heavy_resources.processes\n"
+    "def _scripted_processes(path=Path(%r), lease=Path(%r), limit=%r):\n"
+    "    failures = json.loads(path.read_text())['failures']\n"
+    "    if lease.exists() and failures < limit:\n"
+    "        path.write_text(json.dumps({'failures': failures + 1}))\n"
+    "        raise subprocess.TimeoutExpired(['ps'], 5)\n"
+    "    return _real_processes()\n"
+    "heavy_resources.processes = _scripted_processes\n"
+)
+
+
 def real_node():
     # Version-manager shims (asdf, nvm, volta) resolve the binary from $HOME, and
     # the tests override HOME; ask node for its own path under the ambient env.
@@ -506,6 +521,40 @@ class ResourceBudgetTests(unittest.TestCase):
         self.assertEqual(len(errors), 1, errors)
         self.assertEqual(errors[0]["event"], "completed")
         self.assertIn("supervisor fault", errors[0]["error"])
+
+    def scripted_processes(self, limit, setup=""):
+        counter = os.path.join(self.tmp.name, "process-samples.json")
+        with open(counter, "w", encoding="utf-8") as handle:
+            json.dump({"failures": 0}, handle)
+        lease = os.path.join(self.state, "lease.json")
+        self.wrapper = isolated_wrapper(self.tmp.name, SCRIPTED_PROCESSES % (counter, lease, limit) + setup)
+        return counter
+
+    def failures(self, counter):
+        with open(counter, encoding="utf-8") as handle:
+            return json.load(handle)["failures"]
+
+    def test_transient_process_sample_failure_keeps_the_job_running(self):
+        counter = self.scripted_processes(3)
+        result = self.invoke([sys.executable, "-c", "import time; time.sleep(1)"],
+                             capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.failures(counter), 3, "the scripted failures were consulted")
+        self.assertIn("process sample failed; still supervising", result.stderr)
+        rows = self.event_rows()
+        self.assertEqual([row for row in rows if row.get("reason") == "supervisor_error"], [], rows)
+        completed = [row for row in rows if row.get("event") == "completed"]
+        self.assertEqual(completed[-1]["reason"], "exit")
+        self.assertEqual(completed[-1]["exit_code"], 0)
+
+    def test_sustained_process_sample_failure_still_refuses_the_job(self):
+        self.scripted_processes(10 ** 6, "import heavy_runner\nheavy_runner.SAMPLE_BLIND_SECONDS = 0.3\n")
+        result = self.invoke([sys.executable, "-c", "import time; time.sleep(30)"],
+                             capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 69, result.stderr)
+        errors = [row for row in self.event_rows() if row.get("reason") == "supervisor_error"]
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("process sampling failed", errors[0]["error"])
 
     def test_stopped_head_waiter_does_not_block_the_next_waiter(self):
         holder, release = self.hold_until_released()

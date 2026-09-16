@@ -304,17 +304,33 @@ def observed_free_percent():
         return None
 
 
+SAMPLE_BLIND_SECONDS = 60
+
+
 def supervise(child, job, policy, max_seconds, directory, job_id, interruption):
     started = time.monotonic()
     peak = 0.0
     low_since = None
+    blind_since = None
     while True:
         if interruption():
             raise InterruptedError(interruption())
-        members = job.members()
+        # `ps` can time out or be signalled under load. That says nothing about the job, so a failed
+        # sample keeps supervising; only sustained blindness means the job can no longer be budgeted.
+        members = job.sampled()
+        now = time.monotonic()
+        if members is None:
+            if blind_since is None:
+                blind_since = now
+                print('with-heavy-lock: process sample failed; still supervising', file=sys.stderr)
+            if now - blind_since >= SAMPLE_BLIND_SECONDS:
+                raise OSError('process sampling failed for '
+                              f'{SAMPLE_BLIND_SECONDS:g}s; the job cannot be budgeted')
+            time.sleep(policy.poll_seconds)
+            continue
+        blind_since = None
         rss = sum(p.rss_mb for p in members)
         peak = max(peak, rss)
-        now = time.monotonic()
         # Admission checks free memory once; sustained host pressure during the run stops it too.
         sample = observed_free_percent() if members and policy.run_min_free_percent else None
         low = sample is not None and sample < policy.run_min_free_percent

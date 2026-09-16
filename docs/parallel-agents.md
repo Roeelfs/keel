@@ -69,6 +69,10 @@ normal cleanup target only the job's own processes. After SIGKILL the supervisor
 re-samples for up to two seconds. If any job process survives, or sampling fails,
 it keeps the lease and records `survivors` in the completed event, so the next job
 waits until they exit. A failed lease rewrite is logged and never stops supervision.
+A failed process sample is logged and keeps supervising too: a `ps` that timed out or
+was signalled says nothing about the job, and killing a long verify over it is worse
+than a blind minute. Only 60 s of unbroken sampling failure refuses the job, because
+past that it can no longer be budgeted.
 
 This is a native process supervisor, **not a hard memory sandbox**. Sampling can
 overshoot; detached processes can leave a process group; a SIGKILLed supervisor

@@ -167,10 +167,13 @@ class DescendantBudgetTests(unittest.TestCase):
                                   text=True, timeout=10)
         self.assertEqual(acquired.returncode, 0, "the slot is reclaimed once the survivor is gone")
 
-    def test_sampling_failure_still_signals_the_job_group(self):
+    def test_sustained_sampling_failure_still_signals_the_job_group(self):
+        # A transient failure is tolerated (test_resource_budget); only unbroken blindness
+        # past SAMPLE_BLIND_SECONDS ends the job, shortened here from 60s.
         broken = os.path.join(self.tmp.name, "ps-broken")
         self.wrapper = isolated_wrapper(self.tmp.name, (
             "import os, subprocess, heavy_runner\n"
+            "heavy_runner.SAMPLE_BLIND_SECONDS = 0.5\n"
             "_real_processes = heavy_runner.processes\n"
             "def _processes():\n"
             "    if os.path.exists(%r):\n"
