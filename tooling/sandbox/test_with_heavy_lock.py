@@ -215,6 +215,26 @@ class BackgroundRequired(unittest.TestCase):
                             run_in_background=True)
         self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
 
+    def test_a_runner_rule_requires_background_for_every_queued_command(self):
+        self.write_rules({**TODAY_RULES,
+                          "background_required": {"with-heavy-lock": ["*", "!--status", "!--check-lease"]}})
+        for command in ("with-heavy-lock pnpm --filter @acme/backend exec vitest run src/a.test.ts",
+                        "with-heavy-lock -- npx vitest run",
+                        "cd repo && with-heavy-lock slow-setup 2>&1 | tail -5"):
+            with self.subTest(command=command):
+                denied = self.check(command, "--runtime", "claude")
+                self.assertEqual(denied.returncode, 2, denied.stderr)
+                self.assertIn(CLAUDE_TEXT, denied.stderr)
+                allowed = self.check(command, "--runtime", "claude", run_in_background=True)
+                self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        for command in ("with-heavy-lock --status", "~/.local/bin/with-heavy-lock --check-lease", "git status"):
+            with self.subTest(command=command):
+                self.assertEqual(self.check(command, "--runtime", "claude").returncode, 0)
+        unwrapped = self.check("pnpm vitest run", "--runtime", "claude")
+        self.assertEqual(unwrapped.returncode, 2, unwrapped.stderr)
+        self.assertIn("set run_in_background: true", unwrapped.stderr,
+                      "the wrap instruction names backgrounding, so the retry is not denied twice")
+
     def test_codex_runtime_gets_running_cell_guidance(self):
         result = self.check("with-heavy-lock project-verify verify", "--runtime", "codex")
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -90,8 +90,11 @@ def main(arguments):
             wrapper = str(fallback)
         if wrapper:
             reason = ('Heavy command (' + kind + ') requires the shared resource runner. '
-                      'Run it through ' + wrapper + '. One job and two test workers are allowed. '
+                      'Run it through ' + wrapper + '. One heavy job runs at a time; the rest queue. '
                       'A resource deferral is not a test failure or permission to push to CI.')
+            if runtime == 'claude' and 'with-heavy-lock' in background:
+                # Said up front, so the retry is not denied a second time for holding the foreground.
+                reason += ' A queued job can wait minutes, so set run_in_background: true.'
         else:
             reason = 'Resource runner is missing. Heavy command refused; install with-heavy-lock first.'
         return deny(reason)

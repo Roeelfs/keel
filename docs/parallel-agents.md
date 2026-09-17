@@ -152,7 +152,11 @@ names. Matching looks through a leading `with-heavy-lock` and compares the first
 argument, so a listed verb covers all of its flags. An entry starting with `!`
 excludes arguments that begin with its words: `["verify", "e2e", "!verify --quick"]`
 covers `verify` and `verify --full` but not `verify --quick`. Both maps accept
-exclusions. With `--runtime claude`,
+exclusions. A `with-heavy-lock` entry matches the runner itself, so
+`{"background_required": {"with-heavy-lock": ["*", "!--status", "!--check-lease"]}}`
+covers every command it may queue. Use it when the admission wait (`wait_seconds`) is
+longer than a foreground tool call can last; the runtime's refusal of an unwrapped
+heavy command then names backgrounding too. With `--runtime claude`,
 a listed command is denied unless the Bash call sets `run_in_background: true`.
 `--runtime codex` is opt-in and needs a manual re-trust in Codex `/hooks`: the
 command runs and the hook adds context to keep reading the running cell until it

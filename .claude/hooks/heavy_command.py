@@ -249,10 +249,14 @@ def verbs_match(verbs, args):
 
 
 def background_required(command, rules):
-    """Name the rule a command segment matches, looking through a leading with-heavy-lock."""
+    """Name the rule a command segment matches, looking through a leading with-heavy-lock.
+
+    A `with-heavy-lock` rule matches the runner itself, so every command it may queue is covered at once."""
     for segment in segments(command):
         words = without_prefixes(segment)
         if words and PurePosixPath(words[0]).name == 'with-heavy-lock':
+            if 'with-heavy-lock' in rules and verbs_match(rules['with-heavy-lock'], words[1:]):
+                return 'with-heavy-lock'
             words = words[2:] if words[1:2] == ['--'] else words[1:]
         name = PurePosixPath(words[0]).name if words else None
         if name in rules and verbs_match(rules[name], words[1:]):
