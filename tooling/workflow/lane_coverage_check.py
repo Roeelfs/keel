@@ -155,7 +155,11 @@ def main() -> int:
             tokenless.append(name)
             continue
         hits = sum(1 for token in tokens if token in program)
-        if hits >= args.min_tokens:
+        # A claim that carries ONE distinctive token can only ever match one. Requiring
+        # min_tokens of it made such a lane permanently uncitable — red even when the program
+        # quoted its only token verbatim (2026-09-23: verifier lanes whose claim was '#687' or
+        # '0.118'). An unsatisfiable gate gets bypassed, so the bar is capped at what the claim holds.
+        if hits >= min(args.min_tokens, len(tokens)):
             cited.append(name)
         else:
             uncited.append((name, len(tokens)))

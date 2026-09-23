@@ -116,6 +116,17 @@ class LaneCoverage(unittest.TestCase):
         rc, out = run(rows, "the gap median was 36.55h")
         self.assertEqual(rc, 1, out)
 
+    def test_single_token_claim_is_citable(self):
+        """A claim holding one distinctive token is cited when the program quotes that token."""
+        rows = [lane("v", verdict="confirmed: upstream issue #687 still open")]
+        rc, out = run(rows, "WATCH: upstream #687 is unfixed.")
+        self.assertEqual(rc, 0, out)
+
+    def test_single_token_claim_still_fails_when_dropped(self):
+        rows = [lane("v", verdict="confirmed: upstream issue #687 still open")]
+        rc, out = run(rows, "nothing about it here")
+        self.assertEqual(rc, 1, out)
+
     def test_unreadable_input_is_not_a_pass(self):
         proc = subprocess.run(
             [sys.executable, TOOL, "--journal", "/nonexistent/j.jsonl", "--program", "/nonexistent/p.md"],
