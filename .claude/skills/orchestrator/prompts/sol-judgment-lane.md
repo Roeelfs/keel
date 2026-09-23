@@ -1,8 +1,8 @@
 # Sol judgment lane — bounded frontier escalation
 
-Sol is the frontier tier. It earns its cost on **judgment**: investigation, grilling, adversarial
-falsification, "is this reasoning actually sound?". It does not earn it on synthesis, summarizing,
-mining, or execution — those stay on Terra or Luna.
+Sol-high is the frontier judgment effort. It earns its cost on **judgment**: investigation, grilling,
+adversarial falsification, "is this reasoning actually sound?". It does not earn it on synthesis,
+summarizing, mining, or execution — those stay on Sol-medium or Luna.
 
 ## The shape that makes it affordable
 
@@ -17,23 +17,23 @@ spawned 30 subagent threads and another produced 81 rollout files, against a med
 So the rule is not "use Sol sparingly." It is **use Sol freely in this shape, never in the other
 one.**
 
-## When Sol, when Terra
+## When Sol-high, when Sol-medium
 
 | The ask | Tier | Why |
 |---|---|---|
-| "Is this design sound? Attack it." | **Sol** | adversarial judgment is the frontier's edge |
-| "Grill this plan / find what I'm missing" | **Sol** | the value is in what a weaker model fails to notice |
-| "Investigate why X — competing hypotheses" | **Sol** | hypothesis discrimination, not retrieval |
-| "Falsify this finding" | **Sol** | the falsifier wave is the canonical Sol use |
-| "Security / irreversible-architecture judgment" | **Sol** | already the standing escalation |
-| "Summarize these N documents" | Terra | synthesis, not judgment |
-| "Research how library X's API works" | Terra | retrieval; the answer is in the docs |
+| "Is this design sound? Attack it." | **Sol-high** | adversarial judgment is the frontier's edge |
+| "Grill this plan / find what I'm missing" | **Sol-high** | the value is in what a weaker model fails to notice |
+| "Investigate why X — competing hypotheses" | **Sol-high** | hypothesis discrimination, not retrieval |
+| "Falsify this finding" | **Sol-high** | the falsifier wave is the canonical Sol use |
+| "Security / irreversible-architecture judgment" | **Sol-high** | already the standing escalation |
+| "Summarize these N documents" | Sol-medium | synthesis, not judgment |
+| "Research how library X's API works" | Sol-medium | retrieval; the answer is in the docs |
 | "Census / locate / extract / existence check" | Luna | mechanical |
-| "Run this command group" | Terra-low | procedural worker |
+| "Run this command group" | Luna-low | procedural worker |
 
-The split inside *research* is the one that gets missed: **research-as-retrieval is Terra;
-research-as-judgment is Sol.** "What does the vendor document?" is Terra. "Which of these three
-readings is right, and what would falsify each?" is Sol.
+The split inside *research* is the one that gets missed: **research-as-retrieval is Sol-medium;
+research-as-judgment is Sol-high.** "What does the vendor document?" is Sol-medium. "Which of these
+three readings is right, and what would falsify each?" is Sol-high.
 
 ## Mission contract
 
@@ -61,11 +61,12 @@ the question is itself false, say so and stop — that is a successful lane, not
 Return the deliverable and nothing else. Do not summarize your process.
 ```
 
-Spawn with `fork_turns: "none"`, `model: "gpt-5.6-sol"`, and the highest effort the question
-warrants. Native `spawn_agent` exposes only Sol and Terra; the CLI form is:
+Spawn with `fork_turns: "none"`, `model: "gpt-6-sol"`, and the highest effort the question
+warrants. Native `spawn_agent` accepts gpt-6-astra, gpt-6-sol, and gpt-6-luna (plus gen-5.6 sol/terra)
+— verified live 2026-09-23; the CLI form for this Sol-high lane is:
 
 ```bash
-cd <repo> && echo '' | codex exec --skip-git-repo-check -m gpt-5.6-sol \
+cd <repo> && echo '' | codex exec --skip-git-repo-check -m gpt-6-sol \
   -c model_reasoning_effort=high -s read-only -o <outfile> -- "<mission>"
 ```
 

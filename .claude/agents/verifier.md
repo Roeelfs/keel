@@ -1,7 +1,7 @@
 ---
 name: verifier
 description: Verification governance gate — decides whether a claim of "done/fixed/passing" is actually supported by evidence, and writes the regression test that pins the specific defect. Returns a per-claim VERIFIED | UNSUPPORTED | CONTRADICTED verdict. Use before accepting completion, and as the hand-off target for the diagnosis loop, code-reviewer and critic.
-model: claude-fable-5
+model: fable
 tools: Read, Grep, Glob, Bash, Write, Edit
 ---
 

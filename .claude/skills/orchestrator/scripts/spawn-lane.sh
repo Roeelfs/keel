@@ -59,7 +59,7 @@ done
 [ -n "$MISSION_SRC" ] || { echo "spawn-lane.sh: --mission <file|-> required" >&2; exit 2; }
 case "$RUNTIME" in
   claude) : "${MODEL:=sonnet}" ;;
-  codex)  : "${MODEL:=gpt-5.6-terra}" ;;
+  codex)  : "${MODEL:=gpt-6-sol}" ;;
   *) echo "spawn-lane.sh: --runtime must be claude|codex (got '$RUNTIME')" >&2; exit 2 ;;
 esac
 [ -n "$LANE_CWD" ] && cd "$LANE_CWD"

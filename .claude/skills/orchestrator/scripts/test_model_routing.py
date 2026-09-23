@@ -9,42 +9,42 @@ ROUTING = (SKILL_DIR / "prompts" / "model-routing.md").read_text()
 
 
 class ModelRoutingContractTests(unittest.TestCase):
-    def test_long_lived_codex_root_is_terra_medium(self):
+    def test_long_lived_codex_root_is_sol_medium(self):
         self.assertIn("Long-lived Codex root", SKILL)
-        self.assertIn("`gpt-5.6-terra` at Medium", SKILL)
+        self.assertIn("`gpt-6-sol` at Medium", SKILL)
         self.assertIn(
-            "| Orchestrator (long-lived Codex root) | n/a | gpt-5.6-terra | Medium |",
+            "| Orchestrator (long-lived Codex root) | n/a | gpt-6-sol | Medium |",
             ROUTING,
         )
 
     def test_sol_is_a_bounded_judgment_escalation(self):
-        self.assertIn("Sol escalation", SKILL)
+        self.assertIn("Sol-high escalation", SKILL)
         self.assertIn("fresh, bounded", SKILL)
-        self.assertIn("Return the decision artifact to the Terra root", SKILL)
+        self.assertIn("Return the decision artifact to the Sol-medium root", SKILL)
 
     def test_representative_codex_lane_is_not_sol_high(self):
-        self.assertIn("-m gpt-5.6-terra", SKILL)
+        self.assertIn("-m gpt-6-sol", SKILL)
         self.assertIn("model_reasoning_effort=medium", SKILL)
-        self.assertNotIn("| Orchestrator | Opus | gpt-5.6-sol | think / Medium |", ROUTING)
+        self.assertNotIn("| Orchestrator | Opus | gpt-6-sol | think / Medium |", ROUTING)
 
     def test_bounded_children_keep_minimal_history(self):
         self.assertIn('`fork_turns: "none"`', ROUTING)
 
-    def test_procedural_worker_is_terra_low_not_sol(self):
+    def test_procedural_worker_is_luna_low_not_sol(self):
         row = next(
             line for line in ROUTING.splitlines()
             if line.startswith("| Procedural worker: deterministic command pass |")
         )
-        self.assertIn("gpt-5.6-terra", row)
+        self.assertIn("gpt-6-luna", row)
         self.assertIn("standard / Low", row)
-        self.assertNotIn("gpt-5.6-sol", row)
+        self.assertNotIn("gpt-6-sol", row)
 
-    def test_native_children_use_supported_terra_low(self):
+    def test_native_children_use_supported_luna_low(self):
         for role in ("State miner", "Procedural worker", "Doc writer / file search"):
             row = next(line for line in ROUTING.splitlines() if line.startswith(f"| {role} |"))
-            self.assertIn("gpt-5.6-terra (low)", row, role)
+            self.assertIn("gpt-6-luna (low)", row, role)
 
-    def test_routine_planning_and_refactors_stay_on_terra(self):
+    def test_routine_planning_and_refactors_stay_on_sol(self):
         for purpose in (
             "Define: spec + moderate proof ledger",
             "Build: implementation + targeted tests",
@@ -54,25 +54,25 @@ class ModelRoutingContractTests(unittest.TestCase):
             "Migration risk review",
         ):
             row = next(line for line in ROUTING.splitlines() if line.startswith(f"| {purpose} |"))
-            self.assertIn("gpt-5.6-terra", row, purpose)
+            self.assertIn("gpt-6-sol", row, purpose)
 
-    def test_diagnosis_defaults_to_terra_and_sol_effort_is_explicit(self):
+    def test_diagnosis_defaults_to_sol_medium_and_high_effort_is_explicit(self):
         self.assertIn(
-            "| Failure-cluster diagnostician | Sonnet | gpt-5.6-terra (medium) |",
+            "| Failure-cluster diagnostician | Sonnet | gpt-6-sol (medium) |",
             ROUTING,
         )
         self.assertIn(
-            "| Boundary / security / adversarial | Fable 5 + Opus 5 | gpt-5.6-sol (xhigh) |",
+            "| Boundary / security / adversarial | Fable 5.1 + Opus 5.5 | gpt-6-sol (xhigh) |",
             ROUTING,
         )
 
     def test_review_uses_sol_only_for_named_critical_dispute(self):
         self.assertIn(
-            "| Define: one critical coverage review | Sonnet | gpt-5.6-terra | think / Medium |",
+            "| Define: one critical coverage review | Sonnet | gpt-6-sol | think / Medium |",
             ROUTING,
         )
         self.assertIn(
-            "| Define: unresolved security/irreversible dispute | Opus + Codex | gpt-5.6-sol | think harder / Extra high |",
+            "| Define: unresolved security/irreversible dispute | Opus + Codex | gpt-6-sol | think harder / Extra high |",
             ROUTING,
         )
         self.assertNotIn("| /spec-test-plan | Opus", ROUTING)
@@ -90,7 +90,7 @@ class SolJudgmentLaneTests(unittest.TestCase):
         lane = (skill_dir / "prompts" / "sol-judgment-lane.md").read_text()
         for text in (
             "One question · fresh context · one document · stop",
-            "research-as-retrieval is Terra",
+            "research-as-retrieval is Sol-medium",
             "codex-headroom.sh --model falsifier",
             "You are a leaf agent",
         ):

@@ -60,7 +60,7 @@ class ProceduralWorkerContractTests(unittest.TestCase):
             self.assertIn(text, PROMPT)
 
     def test_native_worker_is_fresh_low_effort_and_owns_process(self):
-        for text in ('fork_turns: "none"', 'reasoning_effort: "low"', "Terra-low"):
+        for text in ('fork_turns: "none"', 'reasoning_effort: "low"', "Luna-low"):
             self.assertIn(text, RUNTIME + PROMPT + ROUTING)
         self.assertIn("root never calls `write_stdin`", RUNTIME)
         self.assertIn("latency-sized event wait", RUNTIME)

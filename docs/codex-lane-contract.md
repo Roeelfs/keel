@@ -30,9 +30,9 @@ CODEX_NETWORK=1 CODEX_SERVICE_TIER=fast \
   outfiles and no error in the artifact. The wrapper resolves the real `node` + `codex.js`
   directly. This is the single reason the invocation is not a bare `codex exec`.
 - **`<class>`** picks the model through `codex-headroom.sh`, which is also the capacity gate:
-  `frontier` → astra (the final-gate judgment) · `falsifier|verify|judge|security` → sol ·
-  `review|research|synthesis` → terra · `mining|census|trivial` → luna. Never hardcode a model;
-  never invent a class to get a better one — the class IS the model decision.
+  `frontier` → astra (the final-gate judgment) · `falsifier|verify|judge|security` → sol (high) ·
+  `review|research|synthesis` → sol (medium) · `mining|census|trivial` → luna. Never hardcode a
+  model; never invent a class to get a better one — the class IS the model decision.
 - **The cap level decides dispatch-or-refuse, and nothing else** (2026-09-06). Every class answers
   its ideal model at every level below 99%; at 99% the gate refuses outright and the caller routes
   to Claude. There is no middle band: the gate used to degrade a tier or two as the window filled,

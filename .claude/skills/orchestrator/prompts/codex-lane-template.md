@@ -19,11 +19,11 @@ Accepted build task group: <exact tasks; required for BUILD>
 
 The lifecycle is define → build → verify-release. This fresh bounded task owns only PHASE.
 
-DEFINE: make scope, acceptance criteria, mode, and the proof-obligation ledger durable. The root author writes the moderate plan. At most one fresh Terra-medium critical coverage reviewer; Sol only for a named security/irreversible/trust-boundary dispute.
+DEFINE: make scope, acceptance criteria, mode, and the proof-obligation ledger durable. The root author writes the moderate plan. At most one fresh Sol-medium critical coverage reviewer; Sol-high only for a named security/irreversible/trust-boundary dispute.
 
 BUILD: implement only the exact accepted task group from durable artifacts, run targeted changed-seam checks, and record changed seams. Do not absorb adjacent discovered work or repeatedly run the project gate; defer nonblocking discoveries with an owner.
 
-VERIFY-RELEASE: group deterministic commands into one targeted pass and dispatch one fresh Terra-low native procedural worker with `fork_turns:"none"`; include the project gate last and exactly once. A changed SHA may earn one fresh correction-pass worker. The phase root interprets results and updates the ledger; it never owns the worker's exec/write_stdin session. Reuse existing tests. FAIL is an owned defect; BLOCKED is an external prerequisite preventing the next accepted action; DEFERRED is owned backlog. A runtime claim needs real-boundary evidence when project law requires it.
+VERIFY-RELEASE: group deterministic commands into one targeted pass and dispatch one fresh Luna-low native procedural worker with `fork_turns:"none"`; include the project gate last and exactly once. A changed SHA may earn one fresh correction-pass worker. The phase root interprets results and updates the ledger; it never owns the worker's exec/write_stdin session. Reuse existing tests. FAIL is an owned defect; BLOCKED is an external prerequisite preventing the next accepted action; DEFERRED is owned backlog. A runtime claim needs real-boundary evidence when project law requires it.
 
 Hard rules:
 - Native goal commands belong to the orchestrator root. This lane never creates, replaces, completes, or blocks the root's goal.

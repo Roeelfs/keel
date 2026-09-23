@@ -16,16 +16,16 @@ Depth lives in `references/` and is **not** auto-loaded:
 
 ## Model topology — cheap root, intelligent escalations
 
-- **Long-lived Codex root:** use `gpt-5.6-terra` at Medium. The root pays for accumulated context on every turn, so it coordinates, integrates, and keeps state on the everyday tier.
-- **Sol escalation:** use a fresh, bounded `gpt-5.6-sol` lane only for architecture with irreversible consequences, security/trust boundaries, hard RCA, or final adversarial adjudication. Give it no history or the smallest evidence slice, one decision artifact, and a stop condition.
-- Return the decision artifact to the Terra root. When a Sol planning phase ends, start or resume a fresh Terra-medium implementation task instead of extending the Sol session through execution and review.
-- Routine implementation and topical review stay on Terra. Native mining, file search, and deterministic procedure use Terra-low because the collaboration API currently exposes only Terra and Sol. An explicit user model choice supported by the callable surface overrides this default.
+- **Long-lived Codex root:** use `gpt-6-sol` at Medium. The root pays for accumulated context on every turn, so it coordinates, integrates, and keeps state on the everyday tier.
+- **Sol-high escalation:** use a fresh, bounded `gpt-6-sol` lane at high effort only for architecture with irreversible consequences, security/trust boundaries, hard RCA, or final adversarial adjudication. Give it no history or the smallest evidence slice, one decision artifact, and a stop condition.
+- Return the decision artifact to the Sol-medium root. When a Sol-high planning phase ends, start or resume a fresh Sol-medium implementation task instead of extending the Sol-high session through execution and review.
+- Routine implementation and topical review stay on Sol-medium. Native mining, file search, and deterministic procedure use Luna-low instead — native `spawn_agent` accepts gpt-6-astra, gpt-6-sol, and gpt-6-luna (plus gen-5.6 sol/terra), verified live 2026-09-23. An explicit user model choice supported by the callable surface overrides this default.
 
 ## Root control plane, worker execution plane
 
 The long-lived orchestrator root owns the **control plane**: state/ledger decisions, scope and target selection, product edits, failure interpretation, human/auth gates, and every production mutation. It may run small bounded read-only probes that complete in one tool call and immediately inform a decision.
 
-The root does not retain the **execution plane** for deterministic command batches. When a targeted pass would require process continuation, retain large raw output, or run the full project gate, dispatch one fresh native Codex procedural worker for the whole pass using `prompts/procedural-worker.md`. Never spawn one child per command. The worker is Terra-low with no inherited history; the root grades its pointer artifact and makes the next decision.
+The root does not retain the **execution plane** for deterministic command batches. When a targeted pass would require process continuation, retain large raw output, or run the full project gate, dispatch one fresh native Codex procedural worker for the whole pass using `prompts/procedural-worker.md`. Never spawn one child per command. The worker is Luna-low with no inherited history; the root grades its pointer artifact and makes the next decision.
 
 Source-mutating formatters, dependency-changing installs, migrations, and product fixes belong to the build phase, not the procedural worker. Interactive authentication and production mutations stay in the root even after authorization; post-mutation verification may use a worker.
 
@@ -107,7 +107,7 @@ A lane goes interactive **only when it needs the human**; everything else runs p
 | **Chip session** | human judgment | `spawn_task` — **requires a human click** | grillings, decision gates, and resurrecting a parked lane the human will personally drive (`sessions-to-chips`) — never a substitute for a headless lane in an unattended stretch |
 
 ```bash
-cd <repo> && echo '' | codex exec --skip-git-repo-check -m gpt-5.6-terra \
+cd <repo> && echo '' | codex exec --skip-git-repo-check -m gpt-6-sol \
   -c model_reasoning_effort=medium -s read-only -o <outfile> -- "<prompt>"
 ```
 > **Grade this lane by its ARTIFACT before counting it** — exit 0 is not evidence. Invocation flags, the `wc -l` / severity-grep check, and the DEAD vs **BLOCKED-ON-QUOTA** vs REAL classification live in [`docs/codex-lane-contract.md`](../../../docs/codex-lane-contract.md). Measured 2026-08-02/03: 18 of 52 rollouts hit a quota wall while exiting normally; 20 of 52 completed fine, so a dead lane is never proof the runtime is down.
@@ -348,7 +348,7 @@ List which paths each in-flight lane owns and name them DO-NOT-TOUCH in the new 
 
 Backlog lives on the repo's tracker, named in its `AGENTS.md` `## Agent skills` block. For a huge/foggy multi-session effort run `/wayfinder` FIRST; to break a settled plan into tickets, `/to-tickets`.
 
-Per-lane model/effort recommendations: `prompts/model-routing.md`. A Codex orchestrator root defaults to **Terra-medium**; Sol is a bounded judgment escalation, never the context-accumulating execution loop. Ad-hoc Claude delegation defaults to **sonnet**; `opus` needs a one-line justification; the deep verify/judge/adversarial bucket is `fable` (Claude) or `gpt-5.6-sol` (Codex).
+Per-lane model/effort recommendations: `prompts/model-routing.md`. A Codex orchestrator root defaults to **Sol-medium**; Sol-high is a bounded judgment escalation, never the context-accumulating execution loop. Ad-hoc Claude delegation defaults to **sonnet**; `opus` needs a one-line justification; the deep verify/judge/adversarial bucket is `fable` (Claude) or `gpt-6-sol` at high effort (Codex).
 
 ## Skill memory
 

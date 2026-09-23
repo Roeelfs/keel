@@ -18,7 +18,7 @@ class ExecutorContractTests(unittest.TestCase):
             "one targeted pass",
             "one changed-seam correction pass",
             "failure signature",
-            "Terra-medium",
+            "Sol-medium",
             "readiness",
             "blocker artifact",
         ):
@@ -63,7 +63,7 @@ class ExecutorContractTests(unittest.TestCase):
         for text in (
             "one procedural worker per pass",
             "history-free",
-            "Terra-low",
+            "Luna-low",
             "one realistic wait",
             "Do not spawn one worker per command",
             "promotes decisive evidence into the durable ledger",

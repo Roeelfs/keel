@@ -48,7 +48,7 @@ A spec written in a long session accumulates blind spots. This skill breaks that
 > Append each lane's findings to the report file as its notification arrives, and
 > assemble the Final Report by reading that file back — never from memory of the wave.
 2. **11 parallel reviewers** — each with a focused prompt and one job
-3. **Multi-model** — Claude (Opus/Sonnet) + 3x Codex GPT-5.6-sol (standard + adversarial + industry research)
+3. **Multi-model** — Claude (Opus/Sonnet) + 3x Codex GPT-6-sol (standard + adversarial + industry research)
 4. **Web-enabled research** — all Codex agents run with network access so findings are grounded in real public implementations, CVEs, post-mortems, and RFCs — not just training-data recall
 5. **Semantic boundary mining** — the edge-case miner enumerates entity/state/value boundaries the spec is silent on (cardinality, lifecycle, tenancy, encoding, time, concurrency, permission, resource, schema-evolution, forbidden-but-syntactically-valid)
 6. **Project-policy security mining** — the security miner reads `docs/security-policy.md` (filled by the user from `templates/security-policy.example.md`) plus the project root `CLAUDE.md`/`AGENTS.md`, and audits the spec against your project's stated rules plus portable security categories (authN/authZ, secret/credential storage, tenant/org isolation, input validation & injection, data-boundary separation, privilege escalation, allowlist/denylist gaps, output sanitization). Cites the project's own policy in every finding — no inventing rules
@@ -182,19 +182,19 @@ Read the spec with fresh eyes. Then dispatch ALL 13 primary reviewers simultaneo
 - **Execution:** `~/.claude/scripts/codex-dispatch.sh` via Bash with `run_in_background: true` (never a raw `codex exec` — that goes through the PATH shim)
 
 > **Grade this lane by its ARTIFACT before counting it** — exit 0 is not evidence. Invocation flags, the `wc -l` / severity-grep check, and the DEAD vs **BLOCKED-ON-QUOTA** vs REAL classification live in [`docs/codex-lane-contract.md`](../../../docs/codex-lane-contract.md). Measured 2026-08-02/03: 18 of 52 rollouts hit a quota wall while exiting normally; 20 of 52 completed fine, so a dead lane is never proof the runtime is down.
-- **Model:** GPT-5.6-sol, high reasoning effort
+- **Model:** GPT-6-sol, high reasoning effort
 - **Input:** The SPEC FILE content (NOT git diff — the companion's `adversarial-review` reviews git changes, which is wrong for spec review)
 - **Job:** Attack surface analysis. Auth/permissions, data loss, rollback safety, race conditions, version skew, observability gaps, architectural fit, simplicity.
 
 **Agent 8 — Codex Standard Review:**
 - **Execution:** `~/.claude/scripts/codex-dispatch.sh` via Bash with `run_in_background: true` (never a raw `codex exec` — that goes through the PATH shim)
-- **Model:** GPT-5.6-sol, high reasoning effort
+- **Model:** GPT-6-sol, high reasoning effort
 - **Input:** The SPEC FILE content (NOT git diff)
 - **Job:** Completeness, correctness, feasibility, type safety, implementation gaps, stale code detection. **Web access enabled** — Codex cross-references API/library/standard claims against authoritative sources.
 
 **Agent 9 — Codex Industry Research Auditor:**
 - **Execution:** `~/.claude/scripts/codex-dispatch.sh` via Bash with `run_in_background: true` (never a raw `codex exec` — that goes through the PATH shim)
-- **Model:** GPT-5.6-sol, high reasoning effort
+- **Model:** GPT-6-sol, medium reasoning effort
 - **Input:** The SPEC FILE content (NOT git diff)
 - **Job:** **Elevation, not defect-hunting.** Pick 3-6 core themes from the spec. For each, research the web + GitHub for (a) maintained OSS libraries that already solve it, (b) public engineering writeups from big companies (Stripe/Netflix/Google/Meta/Airbnb/etc.) showing how they shipped it at scale, (c) production gotchas those companies hit. Output grounded, URL-cited refactor suggestions. Two soft severities: **ELEVATE** (proven public pattern worth adopting) and **CAUTION** (spec contradicts established best practice).
 
@@ -343,7 +343,7 @@ For any MAJOR+ finding where Claude and Codex disagree, run an iterative debate 
 ```markdown
 ### Disagreement #N: <topic>
 
-**Codex (GPT-5.6-sol) says:** <summary of Codex position + severity + confidence>
+**Codex (GPT-6-sol) says:** <summary of Codex position + severity + confidence>
 **Claude says:** <summary of Claude position + which agents>
 
 **Key question:** <the specific architectural/design question at the heart of the disagreement>
@@ -404,7 +404,7 @@ After cross-examination resolves (or goes to user), compile the full report:
 
 ### Spec: <filename>
 ### Profile: <full | focused | hotfix> — dropped lanes: <none | list, each `SKIPPED (<reason>)`>
-### Reviewers: Completeness (Opus) + Codebase (Sonnet) + Architecture (Opus) + Cutover Architect (Opus | SKIPPED greenfield) + Provider-Fit (Opus) + Edge-Case Miner (Opus) + Security Miner (Opus) + Observability Auditor (Opus) + Live-Evidence (Opus | SKIPPED no-live-surface) + Spec Drift Scout (Sonnet) + Codex Standard (GPT-5.6-sol) + Codex Adversarial (GPT-5.6-sol) + Codex Industry Research (GPT-5.6-sol, web-enabled) + Investigation Workflow (code-grounded, verified)
+### Reviewers: Completeness (Opus) + Codebase (Sonnet) + Architecture (Opus) + Cutover Architect (Opus | SKIPPED greenfield) + Provider-Fit (Opus) + Edge-Case Miner (Opus) + Security Miner (Opus) + Observability Auditor (Opus) + Live-Evidence (Opus | SKIPPED no-live-surface) + Spec Drift Scout (Sonnet) + Codex Standard (GPT-6-sol) + Codex Adversarial (GPT-6-sol) + Codex Industry Research (GPT-6-sol, web-enabled) + Investigation Workflow (code-grounded, verified)
 ### Falsifier wave: <N findings falsified: K survived / M refuted / J needs-live-evidence>
 ### Codex Standard Verdict: <approve|needs-attention|timed-out>
 ### Codex Adversarial Verdict: <approve|needs-attention|timed-out>
@@ -645,7 +645,7 @@ When the investigation completes, read the output file and extract findings your
 
 ```markdown
 ### Alignment Findings
-**Model:** gpt-5.6-sol at high | **Mode:** single-pass [or adaptive]
+**Model:** gpt-6-sol at high | **Mode:** single-pass [or adaptive]
 
 #### Confirmed Misalignments
 - [severity] <description> — Evidence: <files/lines>. Action: <fix>
@@ -738,12 +738,12 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 | 5c | **Live-Evidence Premise Auditor** | `prompts/live-evidence-auditor.md` | general-purpose | opus | **First-wave, gated to specs touching a live surface. Extracts load-bearing premises and falsifies each against LIVE evidence: deployed flag/config values, live schema/signatures/rows (provenance, duplicate keys, dedup dry-runs, row-size × page-size × channel-cap arithmetic), upstream-trigger liveness (a dead pipeline = bake theatre), DNS/infra reads, budget traceability (every number → a measurement or a named constant). Read-only, every verdict cites the exact command + observed value.** |
 | 6 | **Spec Drift Scout** | `prompts/spec-drift-scout.md` | general-purpose | sonnet | **Cross-worktree/project-scope drift: recent pushed refs, dirty worktrees, sibling specs, architecture changes, feature overlap, missing spec updates** |
 | 6b | **Spec Drift Investigator** | `prompts/spec-drift-investigator.md` | general-purpose | opus | **Second-wave deep dive on one drift candidate: update current/other spec, combine, move, split, create missing spec, or mark intentional** |
-| 7 | **Codex Adversarial** | `prompts/codex-adversarial-reviewer.md` | **codex-dispatch.sh (web)**, class `falsifier` | **GPT-5.6-sol** | **Attack surface, risks — cross-referenced against public CVEs/post-mortems** |
-| 8 | **Codex Standard** | `prompts/codex-standard-reviewer.md` | **codex-dispatch.sh (web)**, class `verify` | **GPT-5.6-sol** | **Completeness, feasibility — API/library claims verified against primary sources** |
-| 9 | **Codex Industry Research** | `prompts/codex-research-auditor.md` | **codex-dispatch.sh (web)**, class `research` | **GPT-5.6-terra** | **Elevation: OSS libraries, big-company patterns, production gotchas with URL citations** |
+| 7 | **Codex Adversarial** | `prompts/codex-adversarial-reviewer.md` | **codex-dispatch.sh (web)**, class `falsifier` | **GPT-6-sol** | **Attack surface, risks — cross-referenced against public CVEs/post-mortems** |
+| 8 | **Codex Standard** | `prompts/codex-standard-reviewer.md` | **codex-dispatch.sh (web)**, class `verify` | **GPT-6-sol** | **Completeness, feasibility — API/library claims verified against primary sources** |
+| 9 | **Codex Industry Research** | `prompts/codex-research-auditor.md` | **codex-dispatch.sh (web)**, class `research` | **GPT-6-sol (medium)** | **Elevation: OSS libraries, big-company patterns, production gotchas with URL citations** |
 | 10 | **Codex Frontier Judgment** | `prompts/codex-frontier-judge.md` | **codex-dispatch.sh (web)**, class `frontier` | **GPT-6-astra** | **The higher judgment rung beside sol, EVERY profile: wrong-decision hunt, cross-cutting risks the narrow lanes miss, best-in-class delta, approve / approve-with-changes / redesign** |
 | 11 | **Investigation Workflow** | `investigation` skill (`DEEP-WORKFLOW.md`) | **dynamic Workflow** | **multi-agent** | **Elevation grounding: spec themes framed against THIS codebase, fanned out across sources, adversarially verified in code → industry-standard + best-in-class elevation evidence (Claude Code-only)** |
-| 12 | **Alignment Investigator** | (coordinator-composed prompt) | **codex-dispatch.sh**, class `verify` | **GPT-5.6-sol** | **Decision-reality drift** |
+| 12 | **Alignment Investigator** | (coordinator-composed prompt) | **codex-dispatch.sh**, class `verify` | **GPT-6-sol** | **Decision-reality drift** |
 | 13 | **Finding Falsifiers** (one per CRITICAL/MAJOR) | `prompts/finding-falsifier.md` | general-purpose | sonnet | **Post-wave disprove-step: refute each finding against code/spec/evidence; verify every citation a reviewer or fix introduces; resolve Claude↔Codex repo-fact splits by reading the seam; guard severity downgrades (an unrefuted CRITICAL keeps its severity)** |
 
 ## Process Gates (bind the coordinator, not just the reviewers)

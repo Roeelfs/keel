@@ -35,7 +35,7 @@ python3 ~/.claude/skills/spec-test-plan/scripts/validate_plan.py <test-plan.md>
 
 Group rows by reusable command/setup so one command can prove several obligations. Keep raw output under `$TMPDIR/spec-test-execute/<run-id>/` and write concise evidence references into the ledger after each command group, not after every assertion.
 
-On native Codex, the phase root does not execute a deterministic pass inline when it would require process continuation, retain large output, or run the full gate. Dispatch **one procedural worker per pass**: one fresh history-free Terra-low worker owns all targeted command groups plus the project gate, writes raw logs outside the conversation, and returns only a compact structured result pointer. The root begins with one realistic wait, validates the pointer and evidence artifact, promotes decisive evidence into the durable ledger, and interprets the result. Do not spawn one worker per command or let the root take over the worker's process. Small bounded read-only probes that immediately inform judgment stay in the root.
+On native Codex, the phase root does not execute a deterministic pass inline when it would require process continuation, retain large output, or run the full gate. Dispatch **one procedural worker per pass**: one fresh history-free Luna-low worker owns all targeted command groups plus the project gate, writes raw logs outside the conversation, and returns only a compact structured result pointer. The root begins with one realistic wait, validates the pointer and evidence artifact, promotes decisive evidence into the durable ledger, and interprets the result. Do not spawn one worker per command or let the root take over the worker's process. Small bounded read-only probes that immediately inform judgment stay in the root.
 
 If existing artifacts already prove a row at the same SHA, keep it terminal; do not execute it again. If the user says stop review/testing and finish/finalize, end this verifier immediately and return the current ledger to the declared build group; start no replacement review/test plan. If testing is explicitly forbidden, mark the handoff `UNVERIFIED`. Only explicit stop-now/no-further-tools/handoff-now language is terminal for all work: interrupt every descendant and perform no further tools or waits.
 
@@ -76,7 +76,7 @@ A **failure signature** is:
 
 Normalize by removing volatile timestamps, request IDs, ports, temporary paths, and line numbers. Group all rows sharing a signature.
 
-Allow at most one fresh Terra-medium, read-only diagnostician for the verifier task. Give it all normalized clusters together using `prompts/failure-cluster-diagnostician.md`; it prioritizes the highest-leverage cause and leaves unrelated clusters explicit. It may inspect the relevant code, test, logs, and artifacts. It must not edit product code or tests.
+Allow at most one fresh Sol-medium, read-only diagnostician for the verifier task. Give it all normalized clusters together using `prompts/failure-cluster-diagnostician.md`; it prioritizes the highest-leverage cause and leaves unrelated clusters explicit. It may inspect the relevant code, test, logs, and artifacts. It must not edit product code or tests.
 
 Return a product defect to the `build` phase with the signature, minimal reproduction, affected obligations, and likely owning seam. Do not spawn one agent per failing row. Do not launch a write-capable rescue lane or Sol rescue.
 

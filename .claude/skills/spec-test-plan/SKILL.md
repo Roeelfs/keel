@@ -20,7 +20,7 @@ Read `LEARNINGS.md` and the private overlay at `~/.claude/skills-overlay/spec-te
 
 For `moderate` and `critical`, the provisional default is no more than 12 unique proof obligations and 2 customer journeys. These are compression defaults, not safety caps. Exceed either only when `budget_override_reason` names the uncovered acceptance criterion or risk that requires the additional row.
 
-The root author writes the plan. Do not dispatch a mandatory child. A `critical` or genuinely ambiguous plan may receive one fresh Terra-medium, read-only coverage review using `prompts/critical-coverage-reviewer.md`. Use Sol only for one bounded unresolved security, irreversible-architecture, or trust-boundary dispute.
+The root author writes the plan. Do not dispatch a mandatory child. A `critical` or genuinely ambiguous plan may receive one fresh Sol-medium, read-only coverage review using `prompts/critical-coverage-reviewer.md`. Use Sol-high only for one bounded unresolved security, irreversible-architecture, or trust-boundary dispute.
 
 ## Read context: index, then select
 
