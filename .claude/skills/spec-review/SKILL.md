@@ -6,11 +6,11 @@ description: Multi-model spec verification pipeline. Linear flow (no compaction)
 
 # Spec Review — Multi-Agent Verification Pipeline
 
-12 focused reviewers run in parallel — 9 Claude agents (completeness, codebase, architecture, provider-fit, edge-case miner, security miner, observability auditor, **live-evidence premise auditor**, spec drift scout) + 3 Codex (standard + adversarial + industry research) — each with a tight prompt and one job, **plus the investigation skill's dynamic Workflow grounding the elevation lane** (it frames the spec's core themes against THIS codebase, fans out across sources, adversarially cross-verifies, and returns code-anchored industry-standard + best-in-class elevation evidence). Before the wave, a **Context Dossier Miner** walks the spec's full lineage (ticket, cited-ADR bodies, prior program sessions, project memory, known-error ledger, flow registry, open PRs) and GENERATES spec-specific review questions injected into every lane. After the wave, a **per-finding falsifier pass** attempts to refute every CRITICAL/MAJOR before it reaches the report. The drift lane scans sibling worktrees/specs/open PRs across the project scope so parallel work does not silently diverge. All Codex agents have web access enabled. The coordinator synthesizes and applies fixes.
+13 focused reviewers run in parallel — 9 Claude agents (completeness, codebase, architecture, provider-fit, edge-case miner, security miner, observability auditor, **live-evidence premise auditor**, spec drift scout) + 4 Codex (standard + adversarial + industry research + **Codex Frontier Judgment**) — each with a tight prompt and one job, **plus the investigation skill's dynamic Workflow grounding the elevation lane** (it frames the spec's core themes against THIS codebase, fans out across sources, adversarially cross-verifies, and returns code-anchored industry-standard + best-in-class elevation evidence). Before the wave, a **Context Dossier Miner** walks the spec's full lineage (ticket, cited-ADR bodies, prior program sessions, project memory, known-error ledger, flow registry, open PRs) and GENERATES spec-specific review questions injected into every lane. After the wave, a **per-finding falsifier pass** attempts to refute every CRITICAL/MAJOR before it reaches the report. The drift lane scans sibling worktrees/specs/open PRs across the project scope so parallel work does not silently diverge. All Codex agents have web access enabled. The coordinator synthesizes and applies fixes.
 
 **Trigger:** "review this spec", "verify the spec", "run spec review", "gap analysis"
 
-**Prompt templates:** `prompts/design-decisions-extractor.md`, `prompts/context-dossier-miner.md`, `prompts/completeness-reviewer.md`, `prompts/codebase-verifier.md`, `prompts/architecture-auditor.md`, `prompts/provider-fit-auditor.md`, `prompts/edge-case-miner.md`, `prompts/security-miner.md`, `prompts/observability-auditor.md`, `prompts/live-evidence-auditor.md`, `prompts/spec-drift-scout.md`, `prompts/spec-drift-investigator.md`, `prompts/finding-falsifier.md`, `prompts/codex-standard-reviewer.md`, `prompts/codex-adversarial-reviewer.md`, `prompts/codex-research-auditor.md`
+**Prompt templates:** `prompts/design-decisions-extractor.md`, `prompts/context-dossier-miner.md`, `prompts/completeness-reviewer.md`, `prompts/codebase-verifier.md`, `prompts/architecture-auditor.md`, `prompts/provider-fit-auditor.md`, `prompts/edge-case-miner.md`, `prompts/security-miner.md`, `prompts/observability-auditor.md`, `prompts/live-evidence-auditor.md`, `prompts/spec-drift-scout.md`, `prompts/spec-drift-investigator.md`, `prompts/finding-falsifier.md`, `prompts/codex-standard-reviewer.md`, `prompts/codex-adversarial-reviewer.md`, `prompts/codex-research-auditor.md`, `prompts/codex-frontier-judge.md`
 
 ## Skill Memory (LEARNINGS.md)
 
@@ -39,14 +39,7 @@ Research Auditor's **ELEVATE** and **CAUTION** tags are NOT in this scale — th
 A spec written in a long session accumulates blind spots. This skill breaks that with:
 1. **Session decision-mining** — recovers the design decisions, rejected alternatives, and user corrections from the session so reviewers judge against intent, not just the prose. Runs as a direct agent dispatch — **no compaction, no hooks, no resume dance.**
 
-> **"No compaction" describes this skill's MECHANISM, not the session it runs in.** The
-> pipeline does not orchestrate a compact-and-resume; it does not stop the harness from
-> AUTO-compacting underneath it, which is routine on a full run — one measured run
-> dropped ~448k tokens mid-wave, between the lanes returning and the report being
-> written. Consequence, and the reason the report file above is not optional: **a lane's
-> findings that exist only in conversation context are lost at the next compaction.**
-> Append each lane's findings to the report file as its notification arrives, and
-> assemble the Final Report by reading that file back — never from memory of the wave.
+> **"No compaction" describes this skill's MECHANISM, not the session it runs in** — auto-compaction still happens mid-wave. Append each lane's findings to the report file as its notification arrives and assemble the Final Report by reading that file back, never from memory of the wave. Incident rationale: see [`reference.md`](reference.md#why-no-compaction-means-append-as-you-go-incident-rationale).
 2. **11 parallel reviewers** — each with a focused prompt and one job
 3. **Multi-model** — Claude (Opus/Sonnet) + 3x Codex GPT-6-sol (standard + adversarial + industry research)
 4. **Web-enabled research** — all Codex agents run with network access so findings are grounded in real public implementations, CVEs, post-mortems, and RFCs — not just training-data recall
@@ -137,7 +130,7 @@ Read the spec with fresh eyes. Then dispatch ALL 13 primary reviewers simultaneo
 - **Job:** Cross-check dossier against spec. Decisions reflected? Rejected alternatives sneaking in? User corrections honored? Structural completeness. Requirements coverage.
 
 **Agent 2 — Codebase Verifier** (`prompts/codebase-verifier.md`):
-- **Type:** `Explore` | **Model:** default (sonnet)
+- **Type:** `general-purpose` | **Model:** default (sonnet)
 - **Input:** spec path, project root
 - **Job:** Do referenced files exist? Duplicates? Stale code? Repeat-fix hotspots? Dependency impact?
 
@@ -146,7 +139,7 @@ Read the spec with fresh eyes. Then dispatch ALL 13 primary reviewers simultaneo
 - **Input:** spec path, project root
 - **Job:** Architectural fit, abstraction level, peer consistency, simplicity, workaround detection, maintenance burden, **platform invariants compliance** (if the project has a `docs/PLATFORM-INVARIANTS.md` file, spec claims are cross-checked against every invariant — violations are CRITICAL/MAJOR by default), and **deep-module fit** — it invokes the `improve-codebase-architecture` + `codebase-design` rubric (reading their `SKILL.md`s directly rather than paraphrasing from memory — so future updates to them propagate) and audits the spec's proposed design against the deletion test, shallow-vs-deep modules, and testability-through-the-interface, naming the deeper shape where the spec bolts on a shallow layer — **plus a delete-legacy / one-architecture gate**: does the spec delete the code path it replaces in the same change, and how many architectures exist for the touched capability afterward? A shim / dual old-new path / "keep it just in case" flag is a CRITICAL FAIL.
 - **ADR-conformance lane:** in the same wave, dispatch the dedicated `adr-auditor` agent (Agent tool, `subagent_type: adr-auditor`) — it classifies every spec decision **CONFORMS | STRAYS | NEEDS-APPROVAL** against the Accepted ADRs and platform invariants, and hard-stops any spec that changes an Accepted ADR/invariant without an explicit founder-approval marker.
-- **Cutover-structure lane (3c) — gated, non-droppable across profiles:** dispatch the dedicated `cutover-architect` agent (Agent tool, `subagent_type: cutover-architect`) in the same wave when the spec (i) rewrites, replaces, migrates, or cuts over an existing capability, (ii) gives one a second plane/profile/twin/runtime (rehearsal vs live, SQL vs TS, oracle vs engine, store vs composition), or (iii) edits ONE representation of a contract that greppably has others — the drift-fix follow-up is the case that loops, so tripwire vocabulary in or near the touched files (`twin`, `mirror`, `parity`, `keep in sync`, `plane`, `profile`, `rehearsal`, `_v1`/`_v2` siblings) fires it. It builds the **Contract × Representation matrix** and counts hand-maintained representations per contract AFTER the change; every contract left at ≥2 without a fail-closed parity instrument invoked by the mandatory local gate is **CRITICAL**, and its MIGRATE ledger names what the old code knew that the owner must inherit. This is the coexistence the delete-legacy gate above cannot see: that gate asks whether the OLD path is deleted; this lane asks how many copies the NEW path ships (the agent's own `Why_This_Matters` carries the incident). The plan is spec-time only, so its probes need a consumer: the spec's acceptance criteria MUST include running the plan's HRC probes after implementation, and any INSTRUMENT the plan names lands in the mandatory gate in the SAME change. Ordering with 3b: if provider-fit rules ADOPT for the capability, the cutover plan targets the adoption seam and consolidation of the doomed copies is moot. Its rows classify with the defects (Step 5) but are not cross-examined — no Codex peer. Specs that touch no existing capability record `SKIPPED (greenfield)`.
+- **Cutover-structure lane (3c) — gated, non-droppable across profiles:** dispatch the dedicated `cutover-architect` agent (Agent tool, `subagent_type: cutover-architect`) in the same wave when the spec (i) rewrites, replaces, migrates, or cuts over an existing capability, (ii) gives one a second plane/profile/twin/runtime (rehearsal vs live, SQL vs TS, oracle vs engine, store vs composition), or (iii) edits ONE representation of a contract that greppably has others — the drift-fix follow-up is the case that loops, so tripwire vocabulary in or near the touched files (`twin`, `mirror`, `parity`, `keep in sync`, `plane`, `profile`, `rehearsal`, `_v1`/`_v2` siblings) fires it. It builds the **Contract × Representation matrix** and counts hand-maintained representations per contract AFTER the change; every contract left at ≥2 without a fail-closed parity instrument invoked by the mandatory local gate is **CRITICAL**, and its MIGRATE ledger names what the old code knew that the owner must inherit (why this is distinct from the delete-legacy gate: [`reference.md`](reference.md#cutover-structure-lane-3c--why-its-distinct-from-the-delete-legacy-gate)). The plan is spec-time only, so its probes need a consumer: the spec's acceptance criteria MUST include running the plan's HRC probes after implementation, and any INSTRUMENT the plan names lands in the mandatory gate in the SAME change. Ordering with 3b: if provider-fit rules ADOPT for the capability, the cutover plan targets the adoption seam and consolidation of the doomed copies is moot. Its rows classify with the defects (Step 5) but are not cross-examined — no Codex peer. Specs that touch no existing capability record `SKIPPED (greenfield)`.
 
 **Agent 3b — Provider-Fit Auditor** (`prompts/provider-fit-auditor.md`) — first-wave primary (co-dispatched with 1–9; the letter suffix groups it with the Architecture Auditor #3, its sibling — unlike the second-wave 6b):
 - **Type:** `general-purpose` | **Model:** `opus`
@@ -310,9 +303,8 @@ hours later on unrelated work. It is the pipeline's only false-positive filter a
 cheapest lane: where it ran properly it REFUTED 5 of 9 findings and 4 of 5 edge-case
 CRITICALs, and in one run it falsified the coordinator's *own briefed* finding.
 
-Before writing the Final Report, state one line in the report header:
-
-> `Falsifier wave: <N> dispatched over <M> CRITICAL/MAJOR — <R> REFUTED, <S> SURVIVES.`
+Before writing the Final Report, fill in its `### Falsifier wave:` line (Step 5c) — that
+line is the ONE canonical format; do not restate it differently here.
 
 If `N` is 0 while `M` > 0, **stop and run the wave** — do not write the report. Verify by
 **dispatch shape** (a post-classification lane whose prompt names specific finding IDs),
@@ -405,7 +397,7 @@ After cross-examination resolves (or goes to user), compile the full report:
 ### Spec: <filename>
 ### Profile: <full | focused | hotfix> — dropped lanes: <none | list, each `SKIPPED (<reason>)`>
 ### Reviewers: Completeness (Opus) + Codebase (Sonnet) + Architecture (Opus) + Cutover Architect (Opus | SKIPPED greenfield) + Provider-Fit (Opus) + Edge-Case Miner (Opus) + Security Miner (Opus) + Observability Auditor (Opus) + Live-Evidence (Opus | SKIPPED no-live-surface) + Spec Drift Scout (Sonnet) + Codex Standard (GPT-6-sol) + Codex Adversarial (GPT-6-sol) + Codex Industry Research (GPT-6-sol, web-enabled) + Investigation Workflow (code-grounded, verified)
-### Falsifier wave: <N findings falsified: K survived / M refuted / J needs-live-evidence>
+### Falsifier wave: <N> dispatched over <M> CRITICAL/MAJOR — <R> REFUTED, <S> SURVIVES.
 ### Codex Standard Verdict: <approve|needs-attention|timed-out>
 ### Codex Adversarial Verdict: <approve|needs-attention|timed-out>
 ### Codex Research Verdict: <N elevate suggestions / M cautions / timed-out>
@@ -414,18 +406,20 @@ After cross-examination resolves (or goes to user), compile the full report:
 ### Spec Drift Verdict: <clean|N candidates|N investigators|timed-out>
 
 ### Consensus Issues (2+ reviewers)
-1. [CRITICAL] <issue> — flagged by: <which reviewers>
+1. [F-1] [CRITICAL] <issue> — flagged by: <which reviewers>
    Codex confidence: <0.0-1.0> | File: <path>:<line>
    Recommendation: <specific fix>
 ...
 
 ### Codex-Only Findings (investigate — possible Claude blind spot)
 Category: Implementation (from standard) / Risk (from adversarial)
-1. [severity] <title>
+1. [F-2] [severity] <title>
    Body: <finding body>
    File: <path>:<line_start>-<line_end> | Confidence: <score>
    Recommendation: <recommendation>
 ...
+
+Every Consensus/Codex-Only finding carries a stable `F-N` ID (assigned once, at merge time — never renumbered across report revisions), the same way EC-/Sec-/Obs-/LE- rows carry theirs. The falsifier wave (Step 5a) and the validator (below) refer to findings by these IDs.
 
 ### Edge Cases (from Edge-Case Miner — semantic boundary enumeration)
 Kept in its own section — boundary enumeration is structurally different from
@@ -573,92 +567,32 @@ Kept in its own section on purpose — elevation suggestions are NOT severity-ra
 ### Changes Applied
 1. <what was changed and why>
 ...
+
+### Carried obligations
+One line per SURVIVING CRITICAL/MAJOR Obs-/Sec-/LE- finding, by ID — these are the
+findings that were real, not auto-applied as a spec-prose fix (a live-surface gap the
+spec's scope can't absorb, a policy violation routed to a follow-up issue, an
+observability gap left for the build to instrument), and so must not silently vanish
+when the review closes. Omit the section only when there are none.
+- Obs-2 — SURVIVES: <what remains true and why it wasn't fixed here> — tracked as: <follow-up issue / build-time proof obligation>
+...
 ```
+
+**Validate the report before Step 9's commit.** Run
+`python3 ~/.claude/skills/spec-review/scripts/validate_review_report.py <report.md>` against
+the written `.review.md`. It hard-fails on a missing/malformed `### Falsifier wave:` line,
+on `N==0` while `M>0`, on any CRITICAL/MAJOR EC-/Sec-/Obs-/LE-/F- ID left without a
+verdict anywhere in the report, and — when any Obs-/Sec-/LE- CRITICAL/MAJOR survived —
+on a missing or bare `### Carried obligations` section. Fix and re-run until it exits 0
+— do not commit a report the validator rejects.
 
 **Apply fixes — design defects only, in prose.** Apply CRITICAL and MAJOR consensus issues by **fixing the actual design problem in the spec's own prose** (correct the mechanism, the boundary, the auth rule, etc.). That is the only thing that gets written into the spec.
 
 **Never inject review scaffolding into the spec file.** Edge-case (EC-N), Security (Sec-N), Observability (Obs-N), and Drift (DRIFT-N) findings, traceability matrices, and "lanes" stay in the **review report** — they are NOT auto-applied as new tables/sections/checklists in the spec. When an EC/Sec/Obs/Drift finding reveals a genuine design defect, fix the design in prose (e.g. "deletes are idempotent" or "terminal status is persisted, not inferred from the ack" as a one-line behavioral statement) — do not paste the finding's table row into the spec. Present every EC/Sec/Obs/Drift/Industry finding to the user in the report and let them decide what, if anything, changes. Industry Insights and CAUTION items are never auto-applied. Out-of-scope findings → file a separate issue, don't expand the spec.
 
-### Step 6: Alignment Investigation (OPTIONAL — off by default)
+### Steps 6-8: Alignment Investigation (OPTIONAL — off by default)
 
-The core review ends at Step 5c. Alignment investigation is an **optional deep add-on, not part of the default linear flow** — it adds 15-30 min checking strategic drift between decisions and reality. **Do NOT run it by default and do NOT gate the review on it.** Skip straight to Step 9 (Commit) unless the user explicitly asked for alignment investigation (e.g. "also check alignment", or the trigger included it).
-
-Even when requested, skip if: the spec is trivial (<50 lines), no prior specs exist in `docs/specs/`, or no session decisions were mined in Step 2b.
-
-If the user explicitly wants it and it's not skippable, the Alignment Investigator (agent #12) runs as follows:
-
-This step is intentionally narrower than the Spec Drift Scout. Step 4 checks
-other worktrees/specs/recent changes for parallel drift. Step 6 checks whether
-the target spec's own key claims still match selected code reality after the
-review synthesis.
-
-1. Read the synthesis report from Step 5c
-2. Read the design decisions dossier from Step 3
-3. Check for existing acknowledged-divergence notes in project memory (if your
-   setup keeps them), otherwise skip:
-   ```bash
-   ls ~/.claude/projects/*/memory/*intentional*.md 2>/dev/null || true
-   ```
-4. **Build a focused prompt with INLINE content.** Codex wastes its entire budget reading codebase files if you tell it to "explore." Instead:
-   - **Inline the spec content** directly in the prompt (or the key sections)
-   - **Inline the synthesis summary** from Step 5c
-   - **List specific files to check** (from the codebase verifier's findings) — don't say "explore the codebase"
-   - Include acknowledged divergences as "known intentional — do not re-flag"
-   - Keep the prompt under ~50 lines. Plain language, no XML blocks, no JSON templates.
-5. Dispatch via the wrapper with `run_in_background: true` (no `&`):
-   ```bash
-   S=/tmp/alignment-$$; mkdir -p "$S"
-   cat > "$S/alignment.md" <<'PROMPT'
-Check if the following spec claims match reality in the codebase. <INLINE SPEC KEY CLAIMS>. Check these specific files: <LIST 5-10 FILES FROM CODEBASE VERIFIER>. For each claim that doesn't match, state: what the spec says, what the code does, which file:line, and severity. Do NOT read files beyond the ones listed.
-PROMPT
-   CODEX_SERVICE_TIER=fast \
-     ~/.claude/scripts/codex-dispatch.sh verify "$S/alignment.md" "$S/alignment.out.md" <PROJECT_ROOT>
-   ```
-   No `CODEX_NETWORK` — this lane checks the local codebase and needs no internet.
-
-**CRITICAL: Do NOT tell Codex to "explore the codebase" or "investigate drift."** That causes it to read every file it can find until budget exhaustion with zero synthesis. Give it specific claims to verify against specific files.
-
-When notified of completion, read the output file with Read tool.
-
-### Step 7: Present Alignment Findings
-
-When the investigation completes, read the output file and extract findings yourself.
-3. Filter out hypotheses matching known acknowledged divergences from memory
-4. Present ALL hypotheses to user in single-pass format:
-
-> **Misalignment detected:** [dimension]
-> **What Codex found:** [evidence with file:line]
-> **What was expected:** [from spec/decisions]
-> **The gap:** [divergence description]
-> **Confidence:** [high/medium/low]
-> **Your call:** intentional / problem / investigate later
-
-5. If user requests deeper investigation on any finding ("dig deeper"), escalate to adaptive interview:
-   - Capture the Codex thread ID from the dispatch output
-   - Feed user context via `resume <THREAD_ID>`
-   - Max 5 resume rounds
-6. Collect all user decisions
-
-### Step 8: Apply Alignment Fixes
-
-1. Append alignment findings to the Step 5c Final Report as a new section:
-
-```markdown
-### Alignment Findings
-**Model:** gpt-6-sol at high | **Mode:** single-pass [or adaptive]
-
-#### Confirmed Misalignments
-- [severity] <description> — Evidence: <files/lines>. Action: <fix>
-
-#### Acknowledged Divergences
-- <description> — User confirmed intentional. Reason: <context>
-
-#### Open Questions
-- <description> — Flagged for future investigation
-```
-
-2. Apply spec fixes for any findings marked "problem" with Critical/Major severity (same fix pattern as Step 5c)
-3. For each acknowledged divergence, save a memory note (if your setup keeps project memory) following the schema in the spec
+Optional deep add-on (strategic-drift check between decisions and code reality) — do NOT run by default, skip straight to Step 9 unless the user explicitly asked for it. Full procedure (dispatch, present-findings format, apply-fixes template) moved to keep this file lean: see [`reference.md`](reference.md#steps-6-8-alignment-investigation-optional-off-by-default).
 
 ### Step 9: Commit
 
@@ -669,29 +603,7 @@ git commit -m "docs(<scope>): spec review fixes — <N> issues from the multi-la
 
 ### Step 10: Visualize (optional)
 
-After fixes are applied and committed, offer to produce an interactive HTML dashboard of the spec via the `spec-visualization` skill.
-
-**When to offer:**
-- Spec status is Approved / Wave-N-ready (not Draft)
-- Spec is non-trivial (>200 lines) AND has waves OR a clear architectural model
-- User is at a desktop (visualization opens in a browser)
-
-**When to skip:**
-- Spec is still Draft / pre-review
-- Bug-fix or refactor spec with no architectural surface
-- User is in a headless / CI / no-display environment
-
-**How to invoke:**
-
-```
-Invoke the Skill tool with skill=spec-visualization. Pass the spec path
-plus any sibling .review*.md / *-decisions.md files. The skill handles
-data extraction, template render, and Chrome open.
-```
-
-The skill emits `<spec-path>.viz.html` next to the spec. The file is fully reproducible from the spec, so commit is optional — offer to commit it on the same review-fixes commit only if the user wants it tracked.
-
-This step is the "vision fitness check" — a single dashboard view of the spec's architecture, pipeline, rollout, review history, decisions, and open gates. It surfaces structural problems (missing waves, no clear data boundaries, pipeline gaps) faster than re-reading the markdown.
+Optional post-review dashboard step (`spec-visualization`, when-to-offer/skip criteria, invocation) — moved to keep this file lean: see [`reference.md`](reference.md#step-10-visualize-optional).
 
 ---
 
@@ -706,7 +618,7 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 | 2d | Coordinator | Mechanical pre-filter (merge-base pin, symbol greps, schema lookups, parity tests, open-PR list) | — |
 | 2e | Coordinator | Pick + log the review profile (full / focused / hotfix); non-droppable domain lanes | — |
 | 3 | Agent (haiku) | Decisions JSON → design decisions dossier | — |
-| 4 | **12 Reviewers + Investigation Workflow** | Completeness + Codebase + Architecture + **Cutover Architect (gated)** + **Provider-Fit** + Edge-Case Miner + Security Miner + **Observability Auditor** + **Live-Evidence Premise Auditor (gated)** + Spec Drift Scout + Codex Standard + Codex Adversarial + Codex Industry Research + **Investigation Workflow (elevation grounding)** | **ALL PARALLEL** |
+| 4 | **13 Reviewers + Investigation Workflow** | Completeness + Codebase + Architecture + **Cutover Architect (gated)** + **Provider-Fit** + Edge-Case Miner + Security Miner + **Observability Auditor** + **Live-Evidence Premise Auditor (gated)** + Spec Drift Scout + Codex Standard + Codex Adversarial + Codex Industry Research + **Codex Frontier Judgment** + **Investigation Workflow (elevation grounding)** | **ALL PARALLEL** |
 | 4b | Coordinator + optional agents | Progressive drift investigation from Scout candidates | Parallel when needed |
 | 4c | Coordinator | Wait for Codex reviews (Codex-down → Fable-critic substitute), the Investigation Workflow, and drift investigators | — |
 | 5 | Coordinator | Merge 13 primary reports plus drift investigations, classify findings | — |
@@ -721,14 +633,14 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 
 ## Agent Summary
 
-> Numbering: the **13 primary reviewers** are agents 1–10 **+ Provider-Fit (3b) + Observability Auditor (5b) + Live-Evidence (5c)** (the `Nx` suffix groups a reviewer with its sibling — 3b/3c with Architecture #3, 5b/5c with Security Miner #5, 6b with Drift Scout #6; 3c is a gated thirteenth reviewer when dispatched, non-droppable across profiles). Agents **11–12** are the non-reviewer lanes (Investigation Workflow, Alignment Investigator), so **no agent bears the number 10 by design** — it is not a gap. Agent 0b (Context Dossier Miner) and agent 13 (Finding Falsifiers) are the pre- and post-wave stages.
+> Numbering: the **13 primary reviewers** are agents 1–10 (agent **10 is Codex Frontier Judgment**) **+ Provider-Fit (3b) + Observability Auditor (5b) + Live-Evidence (5c)** (the `Nx` suffix groups a reviewer with its sibling — 3b/3c with Architecture #3, 5b/5c with Security Miner #5, 6b with Drift Scout #6; 3c is a gated thirteenth reviewer when dispatched, non-droppable across profiles). Agents **11–12** are the non-reviewer lanes (Investigation Workflow, Alignment Investigator) — every integer 0–13 is used, by design, with no gap. Agent 0b (Context Dossier Miner) and agent 13 (Finding Falsifiers) are the pre- and post-wave stages.
 
 | # | Agent | Prompt File | Type | Model | Focus |
 |---|-------|------------|------|-------|-------|
 | 0 | Design Decisions Extractor | `prompts/design-decisions-extractor.md` | general-purpose | haiku | JSONL → dossier |
 | 0b | **Context Dossier Miner** | `prompts/context-dossier-miner.md` | general-purpose | opus | **Pre-wave. Ticket body+comments+blockers, cited-ADR/doc BODIES (citation-inversion, zero-call-site primitives, numbered-artifact collisions), prior-session decisions via Session-Id trailers, project memory + known-error/RCA ledger + fix-cluster attribution, flow registry, sibling specs + open PRs → ground-truth dossier + 8-15 generated lane-tagged review questions injected into every reviewer** |
 | 1 | Completeness Reviewer | `prompts/completeness-reviewer.md` | general-purpose | opus | Dossier × spec cross-check |
-| 2 | Codebase Verifier | `prompts/codebase-verifier.md` | Explore | sonnet | File refs, duplicates, stale code |
+| 2 | Codebase Verifier | `prompts/codebase-verifier.md` | general-purpose | sonnet | File refs, duplicates, stale code |
 | 3 | Architecture Auditor | `prompts/architecture-auditor.md` | general-purpose | opus | Fit, simplicity, maintenance, **deep-module fit** (invokes the `improve-codebase-architecture` + `codebase-design` rubric by reading their SKILL.md: deletion test, shallow-vs-deep, testability-through-the-interface) **+ delete-legacy/one-architecture gate (CRITICAL if the spec keeps the replaced path alongside the new one)** |
 | 3b | **Provider-Fit Auditor** | `prompts/provider-fit-auditor.md` | general-purpose | opus | **First-wave. Provider ⋈ Technical-Architecture Alignment: ownership-inversion, access-pattern↔provider-class match, "nobody hand-builds this" as a field survey per use-case, build-vs-buy gradient, the BUILD-is-correct counter-check (wrongful-adopt = flatten boundary / duplicate live subsystem / regulated-data-upstream = CRITICAL), gate-don't-cutover, + the inherited-premise audit (PF-7: fires on pre-existing architecture the spec extends — fix-cluster ≥3, LOC ratio, invented vocabulary, unmeasured premise numbers, unwired vendor primitives). Balanced both ways — never an "always buy" bias. Feeds the Step 5 defect pipeline with Architecture.** |
 | 3c | **Cutover Architect** | `agents/cutover-architect.md` (dedicated agent) | cutover-architect | opus | **First-wave, gated to specs that rewrite / replace / migrate / cut over an existing capability or add a plane/profile/twin. Contract × Representation matrix; counts hand-maintained representations per contract AFTER the change; OWN / DERIVE / DELETE / MIGRATE / INSTRUMENT per copy; CRITICAL on any contract left at ≥2 without a gate-invoked parity instrument. The shape-B coexistence gate — new path shipping N mirrored copies — that the Architecture Auditor's old-vs-new delete-legacy check cannot see.** |

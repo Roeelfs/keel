@@ -2,7 +2,7 @@
 
 Checks whether the spec fits the product's architecture, uses the right abstractions, and isn't over-engineered. The "does this belong here and is it proportionate?" check.
 
-**Agent type:** `architect` (Opus, read-only)
+**Agent type:** `general-purpose` (Opus, read-only)
 **Model:** `opus`
 
 ```

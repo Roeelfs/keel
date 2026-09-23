@@ -42,7 +42,7 @@ Include the selected known limitations and operational gotchas in the plan. Read
 
 ## Build the proof-obligation ledger
 
-Map every acceptance criterion and material runtime risk to one unique row. Prefer existing tests and the narrowest proof that can fail for the intended reason. Add a customer journey only when a local seam check cannot establish the customer-visible outcome. Add a deployed bake only when the merged/deployed substrate is itself part of the claim.
+Map every acceptance criterion and material runtime risk to one unique row. Prefer existing tests and the narrowest proof that can fail for the intended reason. Add a customer journey only when a local seam check cannot establish the customer-visible outcome. Add a deployed bake only when the merged/deployed substrate is itself part of the claim. If the spec's `spec-review` report carries a `### Carried obligations` entry (a SURVIVING CRITICAL/MAJOR Obs-/Sec-/LE- finding the review didn't auto-fix), it is not optional background — map it to a mandatory `invariant` or `deployed-bake` row here (CYN-1663: an Obs- CRITICAL carried past review, then cost six fix-forward PRs on 2026-08-27 because nothing downstream proved it).
 
 Use these kinds:
 

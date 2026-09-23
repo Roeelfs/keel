@@ -2,7 +2,7 @@
 
 Checks the spec against the design decisions dossier for gaps, contradictions, and missing requirements. This is the "did we spec what we decided?" check.
 
-**Agent type:** `critic` (Opus, read-only, judgment-heavy)
+**Agent type:** `general-purpose` (Opus, read-only, judgment-heavy)
 **Model:** `opus`
 
 ```
