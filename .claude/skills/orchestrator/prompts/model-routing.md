@@ -8,55 +8,64 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 
 > Keep Fable + Opus in the deep-review panel for model diversity even though the vendor now documents Fable as the most capable widely released model.
 
-**Codex:** Sol is now both the everyday tier and the frontier judgment tier, split by effort — Medium for the everyday role (review/research/synthesis, replacing the retired Terra), High for judgment (adversarial/falsifier/judge/security). Luna is the cheap mining/census/trivial/procedural tier (replacing Terra-low). Native `spawn_agent` accepts gpt-6-astra, gpt-6-sol, and gpt-6-luna (plus gen-5.6 sol/terra) — verified live 2026-09-23. Native children default to Sol-medium for review/implementation and Luna-low for mining/procedure; Sol-high is always an explicit bounded escalation.
+**Codex:** model + effort per class is single-sourced in `~/.claude/scripts/codex-headroom.sh` — its case statement is **the one route table** ("THIS CASE STATEMENT IS THE ONE ROUTE TABLE: it owns model AND effort per class"). Ask it with `--route <class>` (echoes `<model> <effort>`), or dispatch directly with `codex-dispatch.sh <class> <promptfile> <outfile> [workdir]`. Never hardcode a `gpt-6-*` id or an effort level in this repo outside that script — the roster and the per-class effort can both change underneath a hardcoded copy. Native children default to Sol-medium for review/implementation and Luna-low for mining/procedure; Sol-high is always an explicit bounded escalation. The classes it accepts (any of these names routes the same way):
+
+| Class (any of) | Resolves to | Purpose |
+|---|---|---|
+| `frontier`, `astra`, `final-gate` | Astra · high | the ONE final-gate judgment lane per spec review, beside sol, never instead of it |
+| `falsifier`, `adversarial`, `verify`, `judge`, `security`, `sol` | Sol · high | adversarial/falsifier judgment, security/trust-boundary, hard RCA, irreversible architecture |
+| `review`, `research`, `synthesis`, `standard` | Sol · medium | everyday coding, review, research, synthesis (replaces the retired Terra) |
+| `mining`, `census`, `extract`, `locate`, `existence`, `trivial`, `mechanical`, `luna` | Luna · low | mechanical mining/census/extraction/procedure (replaces Terra-low) |
 
 ## Effort
 
 **Claude** — per-turn keyword in the lane's mission or wake prompt: `(none)` / `think` / `think hard` / `think harder` / `ultrathink`.
 
-**Codex** — session-level reasoning level (selectable mid-session via Codex menu): `Low` / `Medium` (default) / `High` / `Extra high`. Map approximately: Low↔standard, Medium↔think, High↔think hard, Extra high↔think harder.
+**Codex** — session-level reasoning level (selectable mid-session via Codex menu): `Low` / `Medium` (default) / `High` / `Extra high`. Map approximately: Low↔standard, Medium↔think, High↔think hard, Extra high↔think harder. The gate itself only ever returns `low` / `medium` / `high` (no distinct "extra high" rung) — see the Models table above for what each class resolves to.
 
 ## Matrix
 
-| Lane purpose | Claude | Codex | Effort |
+The Codex column names the **class** to pass to `codex-headroom.sh --route <class>` — the script resolves it to a model + effort; do not look up or restate that resolution here.
+
+| Lane purpose | Claude | Claude effort | Codex class |
 |---|---|---|---|
-| Define: spec + moderate proof ledger | Sonnet | gpt-6-sol | think / Medium |
-| Define: one critical coverage review | Sonnet | gpt-6-sol | think / Medium |
-| Define: unresolved security/irreversible dispute | Opus + Codex | gpt-6-sol | think harder / Extra high |
-| Build: implementation + targeted tests | Sonnet | gpt-6-sol | think / Medium |
-| Verify-release: finite execution | Sonnet | gpt-6-sol | think / Medium |
-| Procedural worker: deterministic command pass | Haiku | gpt-6-luna | standard / Low |
-| Verify-release: failure-cluster diagnosis | Sonnet | gpt-6-sol | think / Medium |
-| Bug fix < 200 LOC | Sonnet | gpt-6-sol | think / Medium |
-| Trivial < 50 LOC, docs | Haiku | gpt-6-luna | standard / Low |
-| Mining / surveys / parsing | Haiku | gpt-6-luna | standard / Low |
-| Soak observation | Haiku | gpt-6-luna | standard / Low |
-| Soak ESCALATE investigation | Sonnet | gpt-6-sol | think / Medium |
-| PR comment review | Sonnet | gpt-6-sol | think / Medium |
-| Refactor (no API change) | Sonnet | gpt-6-sol | think / Medium |
-| Refactor (API change) | Sonnet | gpt-6-sol | think / Medium |
-| Hard RCA / critical-path debugging | Opus | gpt-6-sol | think harder / Extra high |
-| Security review | Fable 5.1 + Opus 5.5 | gpt-6-sol | think harder / Extra high |
-| Irreversible architecture decision | Opus | gpt-6-sol | think hard / High |
-| Migration writing | Sonnet | gpt-6-sol | think / Medium |
-| Migration risk review | Sonnet | gpt-6-sol | think / Medium |
-| Self-managed interactive | Sonnet | gpt-6-sol | think / Medium |
-| Wake-driven soak watcher | Haiku | gpt-6-luna | standard / Low |
-| Orchestrator (Claude) | Opus | n/a | think / Medium |
-| Orchestrator (long-lived Codex root) | n/a | gpt-6-sol | Medium |
+| Define: spec + moderate proof ledger | Sonnet | think | standard |
+| Define: one critical coverage review | Sonnet | think | standard |
+| Define: unresolved security/irreversible dispute | Opus + Codex | think harder | security |
+| Build: implementation + targeted tests | Sonnet | think | standard |
+| Verify-release: finite execution | Sonnet | think | standard |
+| Procedural worker: deterministic command pass | Haiku | (none) | mining |
+| Verify-release: failure-cluster diagnosis | Sonnet | think | standard |
+| Bug fix < 200 LOC | Sonnet | think | standard |
+| Trivial < 50 LOC, docs | Haiku | (none) | mining |
+| Mining / surveys / parsing | Haiku | (none) | mining |
+| Soak observation | Haiku | (none) | mining |
+| Soak ESCALATE investigation | Sonnet | think | standard |
+| PR comment review | Sonnet | think | standard |
+| Refactor (no API change) | Sonnet | think | standard |
+| Refactor (API change) | Sonnet | think | standard |
+| Hard RCA / critical-path debugging | Opus | think harder | judge |
+| Security review | Fable 5.1 + Opus 5.5 | think harder | security |
+| Irreversible architecture decision | Opus | think hard | judge |
+| Migration writing | Sonnet | think | standard |
+| Migration risk review | Sonnet | think | standard |
+| Self-managed interactive | Sonnet | think | standard |
+| Wake-driven soak watcher | Haiku | (none) | mining |
+| Orchestrator (Claude) | Opus | think | n/a |
+| Orchestrator (long-lived Codex root) | n/a | n/a | standard |
 
 ## Subagent dispatch
 
-| Role | Claude `Agent` | Codex `spawn_agent` |
+| Role | Claude `Agent` | Codex `spawn_agent` class |
 |---|---|---|
-| State miner | Haiku | gpt-6-luna (low) |
-| Topical reviewers | Sonnet | gpt-6-sol (medium) |
-| Boundary / security / adversarial | Fable 5.1 + Opus 5.5 | gpt-6-sol (xhigh) |
-| Coverage verifier | n/a | gpt-6-sol (medium) |
-| Failure diagnostician | Sonnet | gpt-6-sol (medium) |
-| Failure-cluster diagnostician | Sonnet | gpt-6-sol (medium) |
-| Procedural worker | Haiku | gpt-6-luna (low) |
-| Doc writer / file search | Haiku | gpt-6-luna (low) |
+| State miner | Haiku | mining |
+| Topical reviewers | Sonnet | standard |
+| Boundary / security / adversarial | Fable 5.1 + Opus 5.5 | security |
+| Coverage verifier | n/a | standard |
+| Failure diagnostician | Sonnet | standard |
+| Failure-cluster diagnostician | Sonnet | standard |
+| Procedural worker | Haiku | mining |
+| Doc writer / file search | Haiku | mining |
 
 ## Rules
 
@@ -66,7 +75,7 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 4. An idle lane costs nothing; don't retire one to "save tokens."
 5. Cross-runtime second-opinion (flagship Claude + flagship Codex paired) is the one rational flagship double-up — different bug classes.
 6. Deep-review bucket (security review, adversarial review, final-gate critique) is split **Fable 5.1 + Opus 5.5** — model diversity beats a single-model monoculture; never route all deep-review lanes to one model.
-7. **Ad-hoc delegation defaults to `sonnet`.** Research / investigation / mining / exploration / execution dispatches route to `sonnet` or `haiku`; **`opus` requires a one-line justification in the dispatch**; `fable` (or `gpt-6-sol` at high effort on the Codex side) is reserved for the hardest verify / judge / adversarial reasoning. The Fable-pinned NAMED agents (critic, security-reviewer) stay Fable by design. A permissive default silently becomes an opus default — measured: 189 dispatches went opus 59 / sonnet ~80 / haiku 2.
+7. **Ad-hoc delegation defaults to `sonnet`.** Research / investigation / mining / exploration / execution dispatches route to `sonnet` or `haiku`; **`opus` requires a one-line justification in the dispatch**; `fable` (or Codex's `judge`/`security` class, which the gate resolves to Sol at high effort) is reserved for the hardest verify / judge / adversarial reasoning. The Fable-pinned NAMED agents (critic, security-reviewer) stay Fable by design. A permissive default silently becomes an opus default — measured: 189 dispatches went opus 59 / sonnet ~80 / haiku 2.
 8. **Bounded Codex children do not inherit the whole parent by default.** Give them a self-contained mission and `fork_turns: "none"` or the smallest positive slice that carries the evidence. Use `"all"` only when the whole conversation is genuinely load-bearing; full-history forks also inherit the parent's model and effort.
 9. **The long-lived Codex orchestrator root is Sol-medium.** Context accumulation is the root's dominant multiplier; do not pay frontier weight on coordination, waiting, integration, or routine execution.
 10. **Sol-high is a fresh bounded escalation, not a phase-spanning root.** Use it for irreversible architecture, security/trust boundaries, hard RCA, or final adversarial judgment. Return one decision artifact to the Sol-medium root, then stop the Sol-high lane.

@@ -16,10 +16,10 @@ Depth lives in `references/` and is **not** auto-loaded:
 
 ## Model topology — cheap root, intelligent escalations
 
-- **Long-lived Codex root:** use `gpt-6-sol` at Medium. The root pays for accumulated context on every turn, so it coordinates, integrates, and keeps state on the everyday tier.
-- **Sol-high escalation:** use a fresh, bounded `gpt-6-sol` lane at high effort only for architecture with irreversible consequences, security/trust boundaries, hard RCA, or final adversarial adjudication. Give it no history or the smallest evidence slice, one decision artifact, and a stop condition.
+- **Long-lived Codex root:** ask the gate for the `standard` class (`~/.claude/scripts/codex-headroom.sh --route standard` → Sol at Medium; see `prompts/model-routing.md` for the full class table). The root pays for accumulated context on every turn, so it coordinates, integrates, and keeps state on the everyday tier.
+- **Sol-high escalation:** use a fresh, bounded lane at the gate's `judge`/`security` class (Sol at high effort) only for architecture with irreversible consequences, security/trust boundaries, hard RCA, or final adversarial adjudication. Give it no history or the smallest evidence slice, one decision artifact, and a stop condition.
 - Return the decision artifact to the Sol-medium root. When a Sol-high planning phase ends, start or resume a fresh Sol-medium implementation task instead of extending the Sol-high session through execution and review.
-- Routine implementation and topical review stay on Sol-medium. Native mining, file search, and deterministic procedure use Luna-low instead — native `spawn_agent` accepts gpt-6-astra, gpt-6-sol, and gpt-6-luna (plus gen-5.6 sol/terra), verified live 2026-09-23. An explicit user model choice supported by the callable surface overrides this default.
+- Routine implementation and topical review stay on Sol-medium (gate class `standard`). Native mining, file search, and deterministic procedure use Luna-low instead (gate class `mining`) — the callable model roster and its verification date live in `codex-headroom.sh`, not here. An explicit user model choice supported by the callable surface overrides this default.
 
 ## Root control plane, worker execution plane
 
@@ -107,8 +107,9 @@ A lane goes interactive **only when it needs the human**; everything else runs p
 | **Chip session** | human judgment | `spawn_task` — **requires a human click** | grillings, decision gates, and resurrecting a parked lane the human will personally drive (`sessions-to-chips`) — never a substitute for a headless lane in an unattended stretch |
 
 ```bash
-cd <repo> && echo '' | codex exec --skip-git-repo-check -m gpt-6-sol \
-  -c model_reasoning_effort=medium -s read-only -o <outfile> -- "<prompt>"
+read -r MODEL EFFORT < <(~/.claude/scripts/codex-headroom.sh --route standard)
+cd <repo> && echo '' | codex exec --skip-git-repo-check -m "$MODEL" \
+  -c model_reasoning_effort="$EFFORT" -s read-only -o <outfile> -- "<prompt>"
 ```
 > **Grade this lane by its ARTIFACT before counting it** — exit 0 is not evidence. Invocation flags, the `wc -l` / severity-grep check, and the DEAD vs **BLOCKED-ON-QUOTA** vs REAL classification live in [`docs/codex-lane-contract.md`](../../../docs/codex-lane-contract.md). Measured 2026-08-02/03: 18 of 52 rollouts hit a quota wall while exiting normally; 20 of 52 completed fine, so a dead lane is never proof the runtime is down.
 
@@ -348,7 +349,7 @@ List which paths each in-flight lane owns and name them DO-NOT-TOUCH in the new 
 
 Backlog lives on the repo's tracker, named in its `AGENTS.md` `## Agent skills` block. For a huge/foggy multi-session effort run `/wayfinder` FIRST; to break a settled plan into tickets, `/to-tickets`.
 
-Per-lane model/effort recommendations: `prompts/model-routing.md`. A Codex orchestrator root defaults to **Sol-medium**; Sol-high is a bounded judgment escalation, never the context-accumulating execution loop. Ad-hoc Claude delegation defaults to **sonnet**; `opus` needs a one-line justification; the deep verify/judge/adversarial bucket is `fable` (Claude) or `gpt-6-sol` at high effort (Codex).
+Per-lane model/effort recommendations: `prompts/model-routing.md`. A Codex orchestrator root defaults to **Sol-medium**; Sol-high is a bounded judgment escalation, never the context-accumulating execution loop. Ad-hoc Claude delegation defaults to **sonnet**; `opus` needs a one-line justification; the deep verify/judge/adversarial bucket is `fable` (Claude) or Codex's `judge`/`security` class at high effort — `codex-headroom.sh --route` owns the model id, never restated here.
 
 ## Skill memory
 

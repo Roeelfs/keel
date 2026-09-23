@@ -80,6 +80,8 @@ const PLAN = { type:'object', additionalProperties:false,
   model_pin_edits:{type:'string',description:'only genuinely-stale ids; explicitly LIST the pins confirmed current so nobody churns them'},
   sequenced_execution:{type:'string',description:'cli-upgrades → plugin/marketplace → model pins → skill/agent edits → settings/hooks; each tagged surface + risk; MAJOR bumps isolated last with a bake flag'},
   open_questions:{type:'array',items:{type:'object',additionalProperties:false,required:['question','recommendation'],properties:{question:{type:'string'},recommendation:{type:'string'}}}} }}
+// opus: the terminal vendor-adoption plan — deciding what to adopt/adapt/skip against our own
+// architecture rules is judgment, not a restatement of the six research angles above.
 return await ctxAgent(`Synthesize ONE ready-to-execute vendor-adoption plan. Rules: (a) DROP anything rated refuted or could-not-confirm unless you restate it as an open question — never carry a claim above its evidence; (b) drop already-adopted items but LIST them in skip_or_watch so a future run does not re-research them; (c) prefer few high-leverage changes over a long churn list (fewer-bigger-changes, delete-legacy, one-architecture, and the skills repo stays public + marker-free); (d) every edit names an exact file and the exact text/flag/pin; (e) say plainly which pins you CONFIRMED already current. VERIFIED: ${JSON.stringify(verified.filter(Boolean))}\n\nLANE REPORTS: ${JSON.stringify(lanes.filter(Boolean).map(l => l.report_markdown))}`,
   {label:'vendor-plan', phase:'Plan', effort:'high', model:'opus', schema:PLAN, agentType:'general-purpose'})
 ```

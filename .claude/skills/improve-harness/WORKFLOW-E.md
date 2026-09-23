@@ -81,6 +81,8 @@ const REPORT = { type:'object', additionalProperties:false, required:['report_ma
     rank:{type:'number'}, change:{type:'string'}, surface:{enum:['settings','instructions-file','hook','skill','workflow-habit','plugin/mcp-roster']},
     expected_effect:{type:'string',description:'which measured number should move, and by how much'}, risk:{type:'string'} }}},
   failed_interventions:{type:'array',items:{type:'string'},description:'changes made last run whose target metric did NOT move — name them plainly'} }}
+// opus: the terminal report + TRENDS.md row — trades off measured numbers against each other and
+// calls prior interventions failed or not, a judgment call, not a data restatement.
 return await ctxAgent(`Write the dated context-economy report + ONE TRENDS.md row. Read the PREVIOUS report and TRENDS.md from the harness repo's analytics/context-economy/ first and diff against them — the trend is the product, not the snapshot. Every recommendation must name the specific measured number it should move and by roughly how much, so the NEXT run can falsify it. Call out any prior change whose target metric did not move as a FAILED intervention rather than silently re-tuning. Order by leverage: the fixed preamble and turn-count multipliers beat per-response savings. METRICS: ${JSON.stringify(m)} KNOBS: ${JSON.stringify(k)}`,
   {label:'report', phase:'Report', effort:'high', schema:REPORT, model:'opus', agentType:'general-purpose'})
 ```

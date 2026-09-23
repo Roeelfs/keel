@@ -62,7 +62,8 @@ design the plan, do not mutate. WebFetch / read-only gh / local reads only. No C
 loops."* — an explicit `model:`, and a `schema:`. **The model default is `sonnet`**; `opus` needs a
 reason in the label or the comment, and is justified on synthesis lanes, not on mining, census,
 existence-checking or per-item verification. An unpinned `agent()` call inherits the expensive tier by
-default, which is the exact pathology Workflow E's metric 6 exists to measure.
+default, which is the exact pathology Workflow E's metric 6 exists to measure. Every `agent()` sets
+`model` explicitly — an omitted model inherits the main loop's opus.
 
 **Ask the second-runtime gate BEFORE spending the primary window.** Mining, census, research,
 extraction, existence-checking and per-finding verification are exactly the classes that belong on

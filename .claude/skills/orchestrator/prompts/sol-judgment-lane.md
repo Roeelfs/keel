@@ -61,13 +61,15 @@ the question is itself false, say so and stop — that is a successful lane, not
 Return the deliverable and nothing else. Do not summarize your process.
 ```
 
-Spawn with `fork_turns: "none"`, `model: "gpt-6-sol"`, and the highest effort the question
-warrants. Native `spawn_agent` accepts gpt-6-astra, gpt-6-sol, and gpt-6-luna (plus gen-5.6 sol/terra)
-— verified live 2026-09-23; the CLI form for this Sol-high lane is:
+Spawn with `fork_turns: "none"` and the highest effort the question warrants. Ask the gate for the
+model rather than hardcoding it — `~/.claude/scripts/codex-headroom.sh` is the single owner of the
+model + effort ladder (`--route falsifier` resolves this lane to Sol at high effort); the CLI form
+for this Sol-high lane is:
 
 ```bash
-cd <repo> && echo '' | codex exec --skip-git-repo-check -m gpt-6-sol \
-  -c model_reasoning_effort=high -s read-only -o <outfile> -- "<mission>"
+read -r MODEL EFFORT < <(~/.claude/scripts/codex-headroom.sh --route falsifier)
+cd <repo> && echo '' | codex exec --skip-git-repo-check -m "$MODEL" \
+  -c model_reasoning_effort="$EFFORT" -s read-only -o <outfile> -- "<mission>"
 ```
 
 ## Grading

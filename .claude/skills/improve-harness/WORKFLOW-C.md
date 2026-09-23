@@ -30,5 +30,7 @@ const [subs, orch, frontier, gaps] = await parallel([
 phase('Recommend')
 const REC = { type:'object', additionalProperties:false, required:['recommendation','landscape_md','adoption_plan','what_to_borrow'], properties:{
   recommendation:{type:'string'}, landscape_md:{type:'string'}, adoption_plan:{type:'string'}, what_to_borrow:{type:'string'} }}
+// opus: the terminal stay/cherry-pick/adopt call against our own architecture rules — architecture
+// judgment, not synthesis of facts already gathered.
 return await ctxAgent(`Decide stay/cherry-pick/adopt for a solo operator under one-architecture + ownable-tooling rules. A wholesale parallel framework is almost always wrong (the standing competing-framework rejection); the realistic win is cherry-picking specific MISSING roles + borrowing prompt patterns, PORTED + owned + decoupled + re-model-pinned + domain-invariants-baked-in (a generic specialist ignorant of our invariants is net-negative). Streams: ${JSON.stringify([subs,orch,frontier,gaps].filter(Boolean))}`, {label:'stack-rec', phase:'Recommend', schema:REC, model:'opus', effort:'high', agentType:'general-purpose'})
 ```

@@ -56,6 +56,8 @@ const OUT = { type:'object', additionalProperties:false, required:['executive_su
   executive_summary:{type:'string'}, ship_list:{type:'string',description:'the surviving program, resequenced — each item with its target surface and the probe that cleared it'},
   did_not_survive:{type:'string',description:'one line per killed item WITH its verdict and probe, so the next run does not re-propose it'},
   unjudged:{type:'array',items:{type:'string'},description:'items whose lane died — carried forward UNVERIFIED, never as cleared'} }}
+// opus: the single adjudication call across the whole falsifier wave — deciding what ships is
+// architecture-adjacent judgment, distinct from the per-item falsifier lanes above (sonnet).
 return await ctxAgent(`Adjudicate the falsifier wave into the plan that actually ships. Build ONLY from survivors; a killed item is recorded with its probe and never re-enters. An item whose lane died is UNJUDGED — list it, do not ship it. Prefer a sharpened 'corrected' wording over the original. SURVIVORS: ${JSON.stringify(survivors)}\nKILLED: ${JSON.stringify(killed.map(k=>({item:k.item.title, verdict:k.verdict?.verdict, probe:k.verdict?.probe})))}\nUNJUDGED: ${JSON.stringify(dead.map(d=>d.item?.title))}`,
   {label:'adjudicate', phase:'Adjudicate', effort:'high', schema:OUT, model:'opus', agentType:'general-purpose'})
 ```

@@ -98,6 +98,8 @@ const REPORT = { type:'object', additionalProperties:false, required:['report_ma
     metric:{type:'string',description:'the falsifiable number this should move, and by how much, so the NEXT run can kill it'},
     risk:{type:'string'} }}},
   failed_interventions:{type:'array',items:{type:'string'},description:'prior adoptions whose target metric did not move — name them plainly, do not silently re-tune'} }}
+// opus: the terminal adoption report + TRENDS.md row — ranks recommendations by tier and rules on
+// failed interventions, a judgment call over the census+grade data, not a restatement of it.
 return await ctxAgent(`Write the dated adoption report + ONE TRENDS.md row. Read the previous report and TRENDS.md from the harness repo's analytics/harness-adoption/ and diff against them — the trend is the product. Rank recommendations by TIER (mechanism > mechanism-carrying-prose > subtraction > prose), never by appeal. A defect that ALREADY has a prose rule may not receive another prose rule: propose a tier change or an instrument. Phrase every instruction positively — the vendor's own guidance is that positive examples of the wanted behavior beat instructions about what not to do. If a recommendation's effect cannot be read off an existing log, its first step is a log-only instrument and the behavior change waits a cycle. CENSUS: ${JSON.stringify(c)} GRADES: ${JSON.stringify(g)}`,
   {label:'report', phase:'Report', effort:'high', schema:REPORT, model:'opus', agentType:'general-purpose'})
 ```
