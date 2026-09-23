@@ -58,11 +58,13 @@ This is a runtime continuation lease; the program manifest remains the cross-ses
 - **Boundary** — the root keeps small bounded read-only probes, judgment, edits, auth/target selection, and all production mutations. Source-mutating format/install/migration commands stay in build. A procedural worker never diagnoses, retries an unchanged failure, asks the user, or selects/mutates production.
 - **`wait_agent` polling — poll at the work's latency, not below it.** The minimum accepted is
   `timeout_ms: 10000` (a smaller value is rejected outright: `"timeout_ms must be at least 10000"`),
-  but the minimum is not the right value. For web-research-backed or falsifier fan-outs, poll at
-  **`timeout_ms: 60000` or higher**. Measured 2026-08-02 across the local rollouts: **24 of 37
-  `wait_agent` calls timed out (65% dead round-trips)** at 20,000–30,000 ms, worst case **14
-  identical polls in one session**. Each dead poll is a full turn that reads the whole context
-  again, so under-polling costs far more than waiting.
+  but the minimum is not the right value. For ANY native multi-agent wait — `wait_agent` or a
+  `list_agents` check — poll at **`timeout_ms: 180000`–`300000`**. Each dead poll is a full turn
+  that reads the whole context again, so under-polling costs far more than waiting. Measured
+  2026-09-10..21: **1,279 `wait_agent` + 248 `list_agents` calls across 58 session files**, and
+  71 `wait_agent` calls in 8 sessions all at 10000/60000 ms. This is the second prose attempt —
+  the 2026-08-02 version (a 60000 floor, after 24 of 37 polls at 20–30 s timed out) did not
+  change behavior. The mechanism owed is a Codex `pre_tool_use` clamp on `wait_agent`.
 - **Continuation** — no `ScheduleWakeup`, no `/loop`. Without an explicitly requested native goal, use the single-paste bounded-phase directive in `prompts/loop-directive.md` §Codex variant and end after the current `define`, `build`, or `verify-release` artifact. With an active native goal, automatic continuations remain inside its declared frontier; a later fresh task resumes broader program work from branch HEAD and the proof-obligation ledger.
 - **Human surfacing** — no `AskUserQuestion`/`PushNotification`. Contested claims and pre-authorization asks go in the reply text as an explicit numbered decision, and the turn ends there.
 - **Sandbox writes** — Codex defaults to `sandbox_mode = "workspace-write"`, which silently blocks writes to sibling worktrees and `~/.codex`. Run with `--add-dir <lane-worktree>` per lane, or set `danger-full-access` in `~/.codex/config.toml`. Otherwise workers fall back to `/tmp` and the work vanishes.
