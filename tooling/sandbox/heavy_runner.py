@@ -360,6 +360,23 @@ def observed_free_percent():
 SAMPLE_BLIND_SECONDS = 60
 
 
+def newer_job_running(directory, lease):
+    """Whether a job started after this one still has a live supervisor to stop it under pressure."""
+    try:
+        table = processes()
+        for slot in range(1, MAX_SLOTS + 1):
+            other = read_record(lease_path(directory, slot))
+            if not other or other.get('job_id') == lease['job_id']:
+                continue
+            supervisor = table.get(other.get('supervisor_pid'))
+            if (supervisor and supervisor.identity == other.get('supervisor_identity')
+                    and other.get('started_ns', 0) > lease['started_ns']):
+                return True
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False  # Unknown: stop this job, as a single job would be stopped.
+    return False
+
+
 def supervise(child, job, policy, max_seconds, directory, job_id, interruption):
     started = time.monotonic()
     peak = 0.0
@@ -388,6 +405,8 @@ def supervise(child, job, policy, max_seconds, directory, job_id, interruption):
         sample = observed_free_percent() if members and policy.run_min_free_percent else None
         low = sample is not None and sample < policy.run_min_free_percent
         low_since = (now if low_since is None else low_since) if low else None
+        if low and now - low_since >= policy.run_pressure_seconds and newer_job_running(directory, job.lease):
+            low_since = now  # The newest job is stopped first; this one gets a fresh window after it goes.
         reason = ('resource_limit' if rss > policy.max_rss_mb else
                   'wall_time_budget' if now - started > max_seconds else
                   'memory_pressure_during_run' if low and now - low_since >= policy.run_pressure_seconds
@@ -443,7 +462,8 @@ def run_job(command, directory, policy, job_id, stream, slot):
         lease = {'job_id': job_id, 'supervisor_pid': owner.pid,
                  'supervisor_identity': owner.identity, 'pgid': child.pid,
                  'cwd': os.getcwd(), 'executable': Path(command[0]).name, 'slot': slot}
-        job = Job(child.pid, lease_path(directory, slot), lease)
+        # The start time orders jobs for run-time pressure; the started event already has its own `ts`.
+        job = Job(child.pid, lease_path(directory, slot), {**lease, 'started_ns': time.time_ns()})
         job.members()  # Publishes the lease with the gated child's identity.
         if job.recorded is None:
             raise OSError('the resource lease could not be published')  # Never run a job without one.

@@ -46,6 +46,14 @@ SCRIPTED_FREE_PERCENT = (
 )
 
 
+# Replaces the host memory observer with a value the test sets. Read-only, so concurrent supervisors
+# cannot write back a stale value the way the scripted sequence's call counter can.
+FILE_FREE_PERCENT = (
+    "heavy_resources.free_percent = lambda path=Path(%r): float(path.read_text())\n"
+    "heavy_resources.total_memory_mb = lambda: 16384.0\n"
+)
+
+
 # Replaces the process sampler with one that fails the way `ps` does under load, but only once the
 # job holds the slot, so acquisition and the lease publish still see a real table.
 SCRIPTED_PROCESSES = (
@@ -646,22 +654,42 @@ class ResourceBudgetTests(unittest.TestCase):
         self.release(second, release_second)
         self.assertFalse(self.status()["live"])
 
+    def free_memory(self, percent):
+        path = os.path.join(self.tmp.name, "free-percent")
+        if not os.path.exists(path):  # Never rewrite the wrapper while jobs may be starting from it.
+            self.wrapper = isolated_wrapper(self.tmp.name, FILE_FREE_PERCENT % path)
+        with open(path + ".tmp", "w", encoding="utf-8") as handle:
+            handle.write(str(percent))
+        os.replace(path + ".tmp", path)  # Atomic: a supervisor never reads a half-written value.
+
     def test_a_second_job_needs_a_full_job_budget_of_headroom(self):
         # 6144 MiB of a 16384 MiB host is 37.5%: at 50% free a second job would leave 12.5%, under 20%.
         self.write_policy(slots=2, min_free_percent=20, max_rss_mb=6144)
-        script = self.scripted_pressure([50])
-        self.wrapper = isolated_wrapper(self.tmp.name, SCRIPTED_FREE_PERCENT % script
-                                        + "heavy_resources.total_memory_mb = lambda: 16384.0\n")
+        self.free_memory(50)
         first, release_first = self.gated_job("first")  # Alone, only min_free_percent applies.
         refused = self.invoke(["true"], env=self.env(KEEL_HEAVY_WAIT_MAX="0.3"),
                               capture_output=True, text=True, timeout=10)
         self.assertEqual(refused.returncode, 75, refused.stderr)
         self.assertIn("DEFERRED (memory_pressure)", refused.stderr)
-        with open(script, "w", encoding="utf-8") as handle:
-            json.dump({"values": [70], "calls": 0}, handle)  # 70 - 37.5 leaves 32.5% free.
+        self.free_memory(70)  # 70 - 37.5 leaves 32.5% free.
         admitted = self.invoke(["true"], capture_output=True, text=True, timeout=10)
         self.assertEqual(admitted.returncode, 0, admitted.stderr)
         self.release(first, release_first)
+
+    def test_run_pressure_stops_only_the_newest_job(self):
+        self.write_policy(slots=2, run_min_free_percent=20, run_pressure_seconds=1)
+        self.free_memory(50)
+        older, release_older = self.gated_job("older")
+        newer, _ = self.gated_job("newer")
+        self.free_memory(5)
+        self.assertEqual(newer.wait(timeout=15), 137, "the most recently started job is stopped")
+        self.free_memory(50)  # Stopping the newest relieved the host.
+        self.assertIsNone(older.poll(), "an older job must not stop while a newer one runs")
+        self.release(older, release_older)
+        stops = self.pressure_events()
+        self.assertEqual(len(stops), 1, stops)
+        started = {row["job_id"]: row["slot"] for row in self.event_rows() if row["event"] == "started"}
+        self.assertEqual(started[stops[0]["job_id"]], 2, stops)
 
     def test_one_slot_status_lists_its_single_slot(self):
         state = self.status()
