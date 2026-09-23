@@ -37,12 +37,19 @@
 # Usage:
 #   tooling/wire-skills.sh                      # sync skills + agents into all roots
 #   tooling/wire-skills.sh --dry-run            # show what would change; mutate nothing
-#   tooling/wire-skills.sh --kind agents        # only agents (or: skills | all — default all)
+#   tooling/wire-skills.sh --kind agents        # only agents (or: skills | scripts | all — default all)
 #   tooling/wire-skills.sh --src <dir>          # sync ONLY <dir> (implies --kind skills, no
 #                                               #   machine-local mirror); e.g. a project's
 #                                               #   .claude/skills — see docs/cross-runtime-skills.md
 #   KEEL_SKILL_ROOTS=/a:/b tooling/wire-skills.sh   # override skill roots (colon-separated)
 #   KEEL_AGENT_ROOTS=/a:/b tooling/wire-skills.sh   # override agent roots (colon-separated)
+#   KEEL_SCRIPT_ROOTS=/a:/b tooling/wire-skills.sh  # override script roots (colon-separated)
+#
+# SCRIPTS (2026-09-23): `<clone>/bin/` holds one symlink per cross-project script, pointing
+# into the skill that owns it (e.g. bin/spawn-lane.sh -> the orchestrator skill's copy), and
+# each entry is linked into `~/.claude/scripts/`. A REAL file at a script destination FAILS
+# the run: that is exactly how a second, hand-maintained copy survived for two months
+# (spawn-lane.sh, 07-29 → 09-23). Delete the copy, then re-run.
 #
 # Skills load at invocation time — a newly-wired skill is available on its next use.
 # AGENTS load at session start — a newly-wired agent needs a RESTART, so this script
@@ -59,19 +66,19 @@ KIND="all"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
-    --kind) KIND="${2:?--kind needs skills|agents|all}"; shift ;;
+    --kind) KIND="${2:?--kind needs skills|agents|scripts|all}"; shift ;;
     --kind=*) KIND="${1#--kind=}" ;;
     --src) SRC="${2:?--src needs a directory}"; SRC_OVERRIDDEN=1; shift ;;
     --src=*) SRC="${1#--src=}"; SRC_OVERRIDDEN=1 ;;
-    -h|--help) sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "wire-skills: unknown arg: $1" >&2; exit 2 ;;
   esac
   shift
 done
 
 case "$KIND" in
-  skills|agents|all) ;;
-  *) echo "wire-skills: --kind must be skills, agents or all (got: $KIND)" >&2; exit 2 ;;
+  skills|agents|scripts|all) ;;
+  *) echo "wire-skills: --kind must be skills, agents, scripts or all (got: $KIND)" >&2; exit 2 ;;
 esac
 # An explicit --src names a skills dir; agents have no equivalent opt-in source.
 [ -n "$SRC_OVERRIDDEN" ] && KIND="skills"
@@ -79,6 +86,7 @@ esac
 [ -d "$SRC" ] || { echo "wire-skills: source skills dir not found: $SRC" >&2; exit 1; }
 SRC="$(cd "$SRC" && pwd)"
 AGENT_SRC="$KEEL_DIR/.claude/agents"
+SCRIPT_SRC="$KEEL_DIR/bin"
 
 # Runtime roots. Override with KEEL_SKILL_ROOTS / KEEL_AGENT_ROOTS (colon-separated).
 # A root is synced only when its parent (the runtime's home) exists.
@@ -92,6 +100,11 @@ if [ -n "${KEEL_AGENT_ROOTS:-}" ]; then
 else
   AGENT_ROOTS=("$HOME/.claude/agents")
 fi
+if [ -n "${KEEL_SCRIPT_ROOTS:-}" ]; then
+  IFS=':' read -r -a SCRIPT_ROOTS <<< "$KEEL_SCRIPT_ROOTS"
+else
+  SCRIPT_ROOTS=("$HOME/.claude/scripts")
+fi
 
 # A dangling symlink is ours to prune only if it pointed at a source of the kind we are
 # syncing (keel-direct, a runtime-root hop, or the current --src). Real files/dirs and
@@ -103,6 +116,12 @@ is_managed_symlink() {
   if [ "$kind" = "agents" ]; then
     case "$tgt" in
       "$AGENT_SRC"/*|*/.claude/agents/*|*/code/keel/.claude/agents/*) return 0 ;;
+      *) return 1 ;;
+    esac
+  fi
+  if [ "$kind" = "scripts" ]; then
+    case "$tgt" in
+      "$SCRIPT_SRC"/*|*/code/keel/bin/*) return 0 ;;
       *) return 1 ;;
     esac
   fi
@@ -120,6 +139,8 @@ link_missing() {
   local -a entries=()
   if [ "$kind" = "agents" ]; then
     for s in "$src"/*.md; do [ -f "$s" ] && entries+=("$s"); done
+  elif [ "$kind" = "scripts" ]; then
+    for s in "$src"/*; do [ -f "$s" ] && entries+=("$s"); done
   else
     for s in "$src"/*/; do [ -e "$s" ] && entries+=("$s"); done
   fi
@@ -131,12 +152,14 @@ link_missing() {
       continue                                # already a symlink — leave it (resolves fine)
     elif [ -e "$dest" ]; then
       echo "  ! shadow  $dest is a real ${kind%s}, not a symlink — left as-is"
-      shadowed=$((shadowed + 1)); continue
+      shadowed=$((shadowed + 1))
+      if [ "$kind" = "scripts" ]; then script_shadows=$((script_shadows + 1)); fi
+      continue
     fi
     echo "  + link    $dest -> ${s%/}"
     [ -n "$DRY" ] || ln -s "${s%/}" "$dest"
     added=$((added + 1))
-    [ "$kind" = "agents" ] && agents_linked=$((agents_linked + 1))
+    if [ "$kind" = "agents" ]; then agents_linked=$((agents_linked + 1)); fi   # a bare `[ … ] &&` here made the loop return 1 whenever its last entry was a NEW skill/script link, and set -e then aborted before pruning and the remaining kinds (fresh root, pre-09-23: rc=1)
   done
 }
 
@@ -182,7 +205,7 @@ sync_kind() {
   done
 }
 
-total_added=0; total_pruned=0; total_roots=0; agents_linked=0
+total_added=0; total_pruned=0; total_roots=0; agents_linked=0; script_shadows=0
 added=0; pruned=0; shadowed=0
 
 if [ "$KIND" = "skills" ] || [ "$KIND" = "all" ]; then
@@ -191,9 +214,16 @@ fi
 if [ "$KIND" = "agents" ] || [ "$KIND" = "all" ]; then
   sync_kind agents "$AGENT_SRC" "${AGENT_ROOTS[@]}"
 fi
+if [ "$KIND" = "scripts" ] || [ "$KIND" = "all" ]; then
+  sync_kind scripts "$SCRIPT_SRC" "${SCRIPT_ROOTS[@]}"
+fi
 
 echo ""
 echo "done: +$total_added symlinks, -$total_pruned pruned across $total_roots root(s)${DRY:+ (dry-run)}"
 if [ "$agents_linked" -gt 0 ]; then
   echo "note: $agents_linked agent(s) newly wired — agents load at SESSION START, so restart before using them."
+fi
+if [ "$script_shadows" -gt 0 ]; then
+  echo "wire-skills: $script_shadows script destination(s) hold a REAL file, i.e. a second copy of a keel-owned script. Delete it, then re-run." >&2
+  exit 1
 fi

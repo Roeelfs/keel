@@ -101,7 +101,7 @@ A lane goes interactive **only when it needs the human**; everything else runs p
 
 | Runtime | Deliverable | Spawn | Reach for it when |
 |---|---|---|---|
-| **Headless lane** | a branch/PR | `scripts/spawn-lane.sh --mission <file> --cwd <worktree> [--runtime codex] --model <alias>` via Bash `run_in_background` | anything shippable; unattended stretches; work needing its own context window |
+| **Headless lane** | a branch/PR | `~/.claude/scripts/spawn-lane.sh --mission <file> --cwd <worktree> [--runtime codex] --model <alias>` via Bash `run_in_background` | anything shippable; unattended stretches; work needing its own context window |
 | **Background `Agent` / `Workflow`** | information: report, verdict, map | `Agent` / `Workflow` tools | mining, research, scope audit, cross-lane verification, judge panels |
 | **Codex lane** | an independent review/verify/research/census pass, or a bounded implementation from a written spec | see block below, via Bash `run_in_background` | the lane has a crisp contract and you want it **off the Claude 5-hour window** |
 | **Chip session** | human judgment | `spawn_task` — **requires a human click** | grillings, decision gates, and resurrecting a parked lane the human will personally drive (`sessions-to-chips`) — never a substitute for a headless lane in an unattended stretch |
@@ -328,7 +328,7 @@ Stale, contradicted, or absent input → STOP and re-verify. Never state a routi
 
 ## Spawning a headless lane
 
-`scripts/spawn-lane.sh` is the lane verb; the operator one-time allowlists it (a session may not invoke `--permission-mode bypassPermissions` directly). Rules, each earned by a real failure:
+`~/.claude/scripts/spawn-lane.sh` is the lane verb (a symlink wire-skills.sh keeps pointing at this skill's `scripts/spawn-lane.sh`); the operator one-time allowlists that path (a session may not invoke `--permission-mode bypassPermissions` directly). Rules, each earned by a real failure:
 
 - **Repo lane hook.** `<lane-cwd>/.claude/lane-env.sh` is sourced under the spawner's `set -euo pipefail` with `$RUNTIME` in scope; it may export `LANE_MCP_CONFIG` (passed to a Claude lane as `--mcp-config`). Export it only for `RUNTIME=claude` — a codex lane refuses MCP config with exit 2. The file must be TRACKED: a worktree lane sees only tracked files.
 - **Never pipe the spawn; detach stdin.** `spawn-lane.sh … | tail` can exit 0 with 0 bytes and zero work done. `claude -p --output-format json` ALWAYS emits a final JSON blob — **empty output + exit 0 is proof the lane never ran.**
