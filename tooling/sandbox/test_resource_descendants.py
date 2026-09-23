@@ -158,7 +158,7 @@ class DescendantBudgetTests(unittest.TestCase):
         stops = self.events("wall_time_budget")
         self.assertEqual(len(stops), 1, self.events())
         self.assertEqual(stops[0].get("survivors"), 1, stops[0])
-        self.assertTrue(os.path.exists(os.path.join(self.state, "lease.json")), "a survivor keeps the lease")
+        self.assertTrue(os.path.exists(os.path.join(self.state, "lease.1.json")), "a survivor keeps the lease")
         self.assertTrue(self.live())
         self.assertEqual(self.attempt().returncode, 75, "the next job must not run beside a survivor")
         os.kill(pid, signal.SIGKILL)
@@ -196,7 +196,7 @@ class DescendantBudgetTests(unittest.TestCase):
 
     def lease(self):
         try:
-            with open(os.path.join(self.state, "lease.json"), encoding="utf-8") as handle:
+            with open(os.path.join(self.state, "lease.1.json"), encoding="utf-8") as handle:
                 return json.load(handle)
         except (OSError, ValueError):
             return {}
@@ -206,7 +206,7 @@ class DescendantBudgetTests(unittest.TestCase):
 
     def write_lease(self, **fields):
         os.makedirs(self.state, exist_ok=True)
-        with open(os.path.join(self.state, "lease.json"), "w", encoding="utf-8") as handle:
+        with open(os.path.join(self.state, "lease.1.json"), "w", encoding="utf-8") as handle:
             json.dump({"job_id": "fixture", "cwd": "/", "executable": "python3", **fields}, handle)
 
     def attempt(self):

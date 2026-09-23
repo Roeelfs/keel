@@ -14,7 +14,8 @@ const name = path.basename(main);
 function policyWorkers() {
   try {
     const keel = path.join(process.env.KEEL_HEAVY_NODE_ACCOUNT_HOME || os.userInfo().homedir, '.keel');
-    const held = process.env.KEEL_HEAVY_LOCK_HELD === '1' || fs.existsSync(path.join(keel, 'heavy.slots', 'lease.json'));
+    const held = process.env.KEEL_HEAVY_LOCK_HELD === '1'
+      || fs.readdirSync(path.join(keel, 'heavy.slots')).some((file) => /^lease\.\d+\.json$/.test(file));
     const value = held && JSON.parse(fs.readFileSync(path.join(keel, 'resource-policy.json'), 'utf8')).max_workers;
     return Number.isInteger(value) ? value : 2;
   } catch {

@@ -1,4 +1,4 @@
-"""One machine-wide heavy job, observed as its complete process tree."""
+"""Up to `slots` machine-wide heavy jobs, each observed as its complete process tree."""
 from dataclasses import asdict
 import fcntl
 import json
@@ -10,8 +10,8 @@ import sys
 import time
 import uuid
 
-from heavy_resources import (account_home, ancestors, command_seconds, event, free_percent, job_members,
-                             load_policy, processes, read_record, write_record)
+from heavy_resources import (MAX_SLOTS, account_home, ancestors, command_seconds, event, free_percent,
+                             job_members, load_policy, processes, read_record, write_record)
 
 QUEUE_PROGRESS_SECONDS = 30
 
@@ -22,8 +22,16 @@ def state_directory():
     return path
 
 
-def lock_available(directory):
-    with (directory / 'slot.1').open('a') as stream:
+def slot_path(directory, slot):
+    return directory / f'slot.{slot}'
+
+
+def lease_path(directory, slot):
+    return directory / f'lease.{slot}.json'
+
+
+def lock_available(directory, slot):
+    with slot_path(directory, slot).open('a') as stream:
         try:
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return True
@@ -38,14 +46,18 @@ def lease_group_alive(lease):
 
 
 def valid_lease(directory):
-    lease = read_record(directory / 'lease.json')
-    if not lease or lease.get('job_id') != os.environ.get('KEEL_HEAVY_JOB_ID'):
+    # Every possible slot, not only the policy's: a lowered policy must not orphan a nested call.
+    for slot in range(1, MAX_SLOTS + 1):
+        lease = read_record(lease_path(directory, slot))
+        if lease and lease.get('job_id') == os.environ.get('KEEL_HEAVY_JOB_ID'):
+            break
+    else:
         return False
     table = processes()
     owner = table.get(lease.get('supervisor_pid'))
     return bool(owner and owner.identity == lease.get('supervisor_identity')
                 and owner.pid in ancestors(os.getpid(), table)
-                and not lock_available(directory))
+                and not lock_available(directory, slot))
 
 
 def pressure_reason(policy):
@@ -87,16 +99,24 @@ def live_tickets(queue):
     return live
 
 
-def holder_fields(directory):
+def first_lease(directory, policy):
+    for slot in range(1, policy.slots + 1):
+        lease = read_record(lease_path(directory, slot))
+        if lease:
+            return lease
+    return None
+
+
+def holder_fields(directory, policy):
     try:
-        lease = read_record(directory / 'lease.json')
+        lease = first_lease(directory, policy)
     except (OSError, ValueError):  # The lease can vanish or change during a handoff.
         return None
     return {'executable': lease.get('executable'), 'cwd': lease.get('cwd')} if lease else {}
 
 
-def holder_description(directory):
-    holder = holder_fields(directory)
+def holder_description(directory, policy):
+    holder = holder_fields(directory, policy)
     if holder is None:
         return 'slot holder unknown'
     if not holder:
@@ -135,8 +155,43 @@ def working_directory():
         return None
 
 
+def claim_slot(directory, policy, position):
+    """Lock the first free slot when no more waiters are ahead than there are free slots.
+
+    Returns (stream, slot) or (None, reason). A slot is free when its lock is available and no
+    job from a killed supervisor still runs in it.
+    """
+    free = []
+    orphaned = 0
+    try:
+        for slot in range(1, policy.slots + 1):
+            stream = slot_path(directory, slot).open('a')
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                stream.close()
+                continue
+            free.append((stream, slot))  # Closed by the finally below if the lease cannot be read.
+            if lease_group_alive(read_record(lease_path(directory, slot))):
+                free.pop()[0].close()
+                orphaned += 1
+        if position > len(free):
+            return None, 'previous_job_alive' if position <= len(free) + orphaned else 'resource_busy'
+        stream, slot = free.pop(0)
+        for other, _ in free:
+            other.close()
+        free = []
+        reason = pressure_reason(policy)
+        if reason:
+            stream.close()
+            return None, reason
+        return stream, slot
+    finally:
+        for stream, _ in free:
+            stream.close()
+
+
 def acquire(directory, policy, job_id, command):
-    stream = (directory / 'slot.1').open('a')
     queue = directory / 'queue'
     queue.mkdir(exist_ok=True, mode=0o700)
     started = time.monotonic()
@@ -147,7 +202,6 @@ def acquire(directory, policy, job_id, command):
     event(directory, 'queued', job_id=job_id, pid=os.getpid(), cwd=working_directory(),
           executable=Path(command[0]).name, args=event_args(command),
           wait_seconds=policy.wait_seconds, caller=caller_runtime())
-    acquired = False
     progress_at = None
     handlers = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
     def interrupted(signum, _frame):
@@ -169,22 +223,16 @@ def acquire(directory, policy, job_id, command):
             fresh_after = time.time() - max(3, 6 * policy.poll_seconds)
             position = 1 + sum(1 for path in live if path < ticket and heartbeat(path) >= fresh_after)
             reason = 'resource_busy'
-            if position == 1:  # Only the oldest live waiter may take the slot.
-                try:
-                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    alive = lease_group_alive(read_record(directory / 'lease.json'))
-                    reason = 'previous_job_alive' if alive else pressure_reason(policy)
-                    if not reason:
-                        acquired = True
-                        return stream
-                    fcntl.flock(stream, fcntl.LOCK_UN)
-                except BlockingIOError:
-                    reason = 'resource_busy'
+            if position <= policy.slots:  # A waiter behind every slot's worth of waiters cannot be next.
+                stream, claimed = claim_slot(directory, policy, position)
+                if stream:
+                    return stream, claimed
+                reason = claimed
             now = time.monotonic()
             if now >= deadline:
                 event(directory, 'deferred', job_id=job_id, reason=reason,
                       waited_seconds=round(now - started, 1), wait_seconds=policy.wait_seconds,
-                      position=position, holder=holder_fields(directory))
+                      position=position, holder=holder_fields(directory, policy))
                 print('with-heavy-lock: DEFERRED (' + reason + '); no command started. '
                       'Do not retry unchanged or treat this as test success. No CI push is authorized.',
                       file=sys.stderr)
@@ -193,14 +241,12 @@ def acquire(directory, policy, job_id, command):
                 label = 'QUEUED' if progress_at is None else 'still QUEUED'
                 waited = '' if progress_at is None else f' after {now - started:.0f}s'
                 print(f'with-heavy-lock: {label} at position {position}{waited}; '
-                      f'{holder_description(directory)}; waiting up to {policy.wait_seconds:g}s.',
+                      f'{holder_description(directory, policy)}; waiting up to {policy.wait_seconds:g}s.',
                       file=sys.stderr)
                 progress_at = now + QUEUE_PROGRESS_SECONDS
             time.sleep(min(policy.poll_seconds, max(0, deadline - time.monotonic())))
     finally:
         ticket.unlink(missing_ok=True)
-        if not acquired:
-            stream.close()
         for sig, handler in handlers.items():
             signal.signal(sig, handler)
 
@@ -364,7 +410,7 @@ def event_args(command):
     return ['<redacted>' if '=' in arg or len(arg) > 120 else arg for arg in command[1:4]]
 
 
-def run_job(command, directory, policy, job_id, stream):
+def run_job(command, directory, policy, job_id, stream, slot):
     child = None
     job = None
     gate_read, gate_write = os.pipe()
@@ -389,8 +435,8 @@ def run_job(command, directory, policy, job_id, stream):
         # The child is session and group leader: pgid and session id are both its pid.
         lease = {'job_id': job_id, 'supervisor_pid': owner.pid,
                  'supervisor_identity': owner.identity, 'pgid': child.pid,
-                 'cwd': os.getcwd(), 'executable': Path(command[0]).name}
-        job = Job(child.pid, directory / 'lease.json', lease)
+                 'cwd': os.getcwd(), 'executable': Path(command[0]).name, 'slot': slot}
+        job = Job(child.pid, lease_path(directory, slot), lease)
         job.members()  # Publishes the lease with the gated child's identity.
         if job.recorded is None:
             raise OSError('the resource lease could not be published')  # Never run a job without one.
@@ -422,7 +468,7 @@ def run_job(command, directory, policy, job_id, stream):
             child.wait(timeout=5)
         if survivors == []:
             try:
-                (directory / 'lease.json').unlink(missing_ok=True)
+                lease_path(directory, slot).unlink(missing_ok=True)
             except OSError as error:
                 print('with-heavy-lock: lease could not be removed: ' + str(error), file=sys.stderr)
         else:
@@ -441,10 +487,14 @@ def main():
         directory = state_directory()
         command = sys.argv[1:]
         if command == ['--status']:
-            lease = read_record(directory / 'lease.json')
-            live = not lock_available(directory) or lease_group_alive(lease)
-            print(json.dumps({**asdict(policy), 'live': live,
-                              'lease': lease, 'state_dir': str(directory)}))
+            leases = []
+            for slot in range(1, policy.slots + 1):
+                lease = read_record(lease_path(directory, slot))
+                live = not lock_available(directory, slot) or lease_group_alive(lease)
+                leases.append({'slot': slot, 'live': live, 'lease': lease})
+            print(json.dumps({**asdict(policy), 'live': any(entry['live'] for entry in leases),
+                              'lease': next((entry['lease'] for entry in leases if entry['lease']), None),
+                              'leases': leases, 'state_dir': str(directory)}))
             return 0
         if command == ['--check-lease']:
             return 0 if valid_lease(directory) else 75
@@ -457,11 +507,11 @@ def main():
             os.execvpe(command[0], command, child_environment(policy, os.environ['KEEL_HEAVY_JOB_ID']))
         job_id = uuid.uuid4().hex
         try:
-            stream = acquire(directory, policy, job_id, command)
+            claimed = acquire(directory, policy, job_id, command)
         except Interrupted as error:
             event(directory, 'interrupted', job_id=job_id, reason='signal', signal=error.args[0])
             return 128 + int(error.args[0])
-        return run_job(command, directory, policy, job_id, stream) if stream else 75
+        return run_job(command, directory, policy, job_id, *claimed) if claimed else 75
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print('with-heavy-lock: resource control unavailable; command refused: ' + str(error), file=sys.stderr)
         return 69

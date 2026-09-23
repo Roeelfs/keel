@@ -125,7 +125,7 @@ class CommandPolicyTests(unittest.TestCase):
         self.write_policy()
         self.assertEqual(self.run_wrapper(["--status"]).returncode, 0)  # Creates the state directory.
         state = os.path.join(self.keel, "heavy.slots")
-        with open(os.path.join(state, "lease.json"), "w", encoding="utf-8") as handle:
+        with open(os.path.join(state, "lease.1.json"), "w", encoding="utf-8") as handle:
             json.dump({"job_id": "fixture", "cwd": "/holder", "executable": "project-verify"}, handle)
         with open(os.path.join(state, "slot.1"), "a") as slot:
             fcntl.flock(slot, fcntl.LOCK_EX)

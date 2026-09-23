@@ -440,7 +440,7 @@ class ResourceBudgetTests(unittest.TestCase):
             self.write_policy(max_workers=5)
             self.assertEqual(workers(direct, stripped), ["--maxWorkers=2"], "no held slot keeps the default")
             os.makedirs(self.state, exist_ok=True)
-            lease = os.path.join(self.state, "lease.json")
+            lease = os.path.join(self.state, "lease.1.json")
             open(lease, "w").close()
             self.assertEqual(workers(direct, stripped), ["--maxWorkers=5"])
             self.write_policy(max_workers=12)
@@ -526,7 +526,7 @@ class ResourceBudgetTests(unittest.TestCase):
         counter = os.path.join(self.tmp.name, "process-samples.json")
         with open(counter, "w", encoding="utf-8") as handle:
             json.dump({"failures": 0}, handle)
-        lease = os.path.join(self.state, "lease.json")
+        lease = os.path.join(self.state, "lease.1.json")
         self.wrapper = isolated_wrapper(self.tmp.name, SCRIPTED_PROCESSES % (counter, lease, limit) + setup)
         return counter
 
@@ -584,6 +584,71 @@ class ResourceBudgetTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(os.path.exists(old))
         self.assertTrue(os.path.exists(fresh))
+
+    def gated_job(self, name, **extra):
+        """A job that holds its slot until the test creates its release file."""
+        started = os.path.join(self.tmp.name, name + "-started")
+        release = os.path.join(self.tmp.name, name + "-release")
+        job = self.popen([sys.executable, "-c", (
+            "import os,pathlib,time\npathlib.Path(%r).touch()\n"
+            "while not os.path.exists(%r): time.sleep(.02)" % (started, release))],
+            env=self.env(**extra), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        wait_for(started)
+        return job, release
+
+    def test_slots_policy_accepts_one_to_four(self):
+        self.write_policy(slots=4)
+        self.assertEqual(self.status()["slots"], 4)
+        for rejected in (0, 5, 1.5):
+            self.write_policy(slots=rejected)
+            result = self.invoke(["--status"], capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 69, (rejected, result.stderr))
+            self.assertIn("slots must be between 1 and 4", result.stderr)
+
+    def test_two_slots_admit_two_jobs_and_a_third_waits_in_order(self):
+        self.write_policy(slots=2)
+        first, release_first = self.gated_job("first")
+        second, release_second = self.gated_job("second")  # Admitted while the first still runs.
+        order = os.path.join(self.tmp.name, "order")
+        waiters = []
+        for position, label in enumerate(("third", "fourth"), start=1):
+            waiter = self.waiter([sys.executable, "-c", "open(%r, 'a').write(%r)" % (order, label + "\n")],
+                                 KEEL_HEAVY_WAIT_MAX="30")
+            self.assertIn("QUEUED at position %d;" % position, waiter.stderr.readline())
+            waiters.append(waiter)
+        time.sleep(0.3)
+        self.assertFalse(os.path.exists(order), "a third job must wait while both slots are held")
+        self.release(first, release_first)
+        for waiter in waiters:
+            self.assertEqual(waiter.wait(timeout=15), 0)
+        with open(order, encoding="utf-8") as handle:
+            self.assertEqual(handle.read().split(), ["third", "fourth"])
+        self.release(second, release_second)
+        started = [row for row in self.event_rows() if row["event"] == "started"]
+        self.assertEqual([row["slot"] for row in started[:2]], [1, 2], started)
+        self.assertEqual({row["slot"] for row in started[2:]}, {1}, "the freed slot is the one reused")
+
+    def test_status_lists_every_slot_holder(self):
+        self.write_policy(slots=2)
+        first, release_first = self.gated_job("first")
+        second, release_second = self.gated_job("second")
+        state = self.status()
+        self.assertTrue(state["live"], state)
+        self.assertEqual([entry["slot"] for entry in state["leases"]], [1, 2], state)
+        for entry in state["leases"]:
+            self.assertTrue(entry["live"], entry)
+            self.assertEqual(entry["lease"]["executable"], os.path.basename(sys.executable), entry)
+        self.assertEqual(state["lease"], state["leases"][0]["lease"], "the first holder keeps the single-slot key")
+        self.release(first, release_first)
+        state = self.status()
+        self.assertEqual([entry["live"] for entry in state["leases"]], [False, True], state)
+        self.assertIsNone(state["leases"][0]["lease"], state)
+        self.release(second, release_second)
+        self.assertFalse(self.status()["live"])
+
+    def test_one_slot_status_lists_its_single_slot(self):
+        state = self.status()
+        self.assertEqual(state["leases"], [{"slot": 1, "live": False, "lease": None}], state)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,8 @@ import re
 import subprocess
 import sys
 
+MAX_SLOTS = 4
+
 
 @dataclass(frozen=True)
 class Policy:
@@ -62,8 +64,9 @@ def load_policy():
         policy['min_free_percent'] = max(policy['min_free_percent'], float(os.environ['KEEL_HEAVY_MIN_FREE_PERCENT']))
     if any(not math.isfinite(value) for value in policy.values()):
         raise ValueError('resource policy values must be finite')
-    if policy['slots'] != 1:
-        raise ValueError('this supervisor admits exactly one aggregate-budgeted job')
+    if not 1 <= policy['slots'] <= MAX_SLOTS or policy['slots'] % 1:
+        raise ValueError(f'slots must be between 1 and {MAX_SLOTS}')
+    policy['slots'] = int(policy['slots'])
     if not 1 <= policy['max_workers'] <= 8 or policy['max_workers'] % 1:
         raise ValueError('max_workers must be between 1 and 8')
     if (not 0 <= policy['min_free_percent'] <= 100 or not 0 <= policy['run_min_free_percent'] <= 100
