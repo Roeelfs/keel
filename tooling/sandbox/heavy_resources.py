@@ -180,6 +180,17 @@ def free_percent():
     raise ValueError('resource admission requires a supported host memory observer')
 
 
+def total_memory_mb():
+    if sys.platform == 'darwin':
+        result = subprocess.run(['/usr/sbin/sysctl', '-n', 'hw.memsize'], capture_output=True,
+                                text=True, check=True, timeout=5)
+        return int(result.stdout) / 1024 / 1024
+    if sys.platform.startswith('linux'):
+        match = re.search(r'^MemTotal:\s*(\d+)', Path('/proc/meminfo').read_text(), re.M)
+        return int(match[1]) / 1024
+    raise ValueError('resource admission requires a supported host memory observer')
+
+
 def read_record(path):
     if not path.exists():
         return None

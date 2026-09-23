@@ -11,7 +11,7 @@ import time
 import uuid
 
 from heavy_resources import (MAX_SLOTS, account_home, ancestors, command_seconds, event, free_percent,
-                             job_members, load_policy, processes, read_record, write_record)
+                             job_members, load_policy, processes, read_record, total_memory_mb, write_record)
 
 QUEUE_PROGRESS_SECONDS = 30
 
@@ -60,8 +60,14 @@ def valid_lease(directory):
                 and not lock_available(directory, slot))
 
 
-def pressure_reason(policy):
-    if policy.min_free_percent and free_percent() < policy.min_free_percent:
+def pressure_reason(policy, others_held):
+    """A job alone needs min_free_percent; beside another it needs that much left after its full budget."""
+    if not policy.min_free_percent:
+        return None
+    free = free_percent()
+    if free < policy.min_free_percent:
+        return 'memory_pressure'
+    if others_held and free - 100 * policy.max_rss_mb / total_memory_mb() < policy.min_free_percent:
         return 'memory_pressure'
     return None
 
@@ -177,11 +183,12 @@ def claim_slot(directory, policy, position):
                 orphaned += 1
         if position > len(free):
             return None, 'previous_job_alive' if position <= len(free) + orphaned else 'resource_busy'
+        others_held = len(free) < policy.slots  # Read while every free slot is still locked here.
         stream, slot = free.pop(0)
         for other, _ in free:
             other.close()
         free = []
-        reason = pressure_reason(policy)
+        reason = pressure_reason(policy, others_held)
         if reason:
             stream.close()
             return None, reason

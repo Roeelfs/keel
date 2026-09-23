@@ -646,6 +646,23 @@ class ResourceBudgetTests(unittest.TestCase):
         self.release(second, release_second)
         self.assertFalse(self.status()["live"])
 
+    def test_a_second_job_needs_a_full_job_budget_of_headroom(self):
+        # 6144 MiB of a 16384 MiB host is 37.5%: at 50% free a second job would leave 12.5%, under 20%.
+        self.write_policy(slots=2, min_free_percent=20, max_rss_mb=6144)
+        script = self.scripted_pressure([50])
+        self.wrapper = isolated_wrapper(self.tmp.name, SCRIPTED_FREE_PERCENT % script
+                                        + "heavy_resources.total_memory_mb = lambda: 16384.0\n")
+        first, release_first = self.gated_job("first")  # Alone, only min_free_percent applies.
+        refused = self.invoke(["true"], env=self.env(KEEL_HEAVY_WAIT_MAX="0.3"),
+                              capture_output=True, text=True, timeout=10)
+        self.assertEqual(refused.returncode, 75, refused.stderr)
+        self.assertIn("DEFERRED (memory_pressure)", refused.stderr)
+        with open(script, "w", encoding="utf-8") as handle:
+            json.dump({"values": [70], "calls": 0}, handle)  # 70 - 37.5 leaves 32.5% free.
+        admitted = self.invoke(["true"], capture_output=True, text=True, timeout=10)
+        self.assertEqual(admitted.returncode, 0, admitted.stderr)
+        self.release(first, release_first)
+
     def test_one_slot_status_lists_its_single_slot(self):
         state = self.status()
         self.assertEqual(state["leases"], [{"slot": 1, "live": False, "lease": None}], state)
