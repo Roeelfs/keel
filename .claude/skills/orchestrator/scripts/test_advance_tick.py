@@ -38,7 +38,9 @@ class AdvanceTickTests(unittest.TestCase):
 
     def test_it_dispatches_one_forcing_function_under_the_caps(self):
         self.assertIn("Dispatch ONE forcing function", TICK)
-        self.assertIn("heavy", TICK)
+        # The heavy-lane cap was retired on purpose in de407e3 (2026-08-28); pin the
+        # budget that replaced it, not the word the retirement deleted.
+        self.assertIn("within the phase and review budget", TICK)
 
     def test_the_known_wrong_liveness_probe_is_named_as_wrong(self):
         # This probe returns 0 for HEALTHY lanes; believing it re-dispatches live work.
