@@ -691,6 +691,42 @@ class ResourceBudgetTests(unittest.TestCase):
         started = {row["job_id"]: row["slot"] for row in self.event_rows() if row["event"] == "started"}
         self.assertEqual(started[stops[0]["job_id"]], 2, stops)
 
+    def test_turbo_concurrency_policy_rewrites_the_turbo_flag(self):
+        for rejected in (0, 5, 1.5):
+            self.write_policy(turbo_concurrency=rejected)
+            result = self.invoke(["--status"], capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 69, (rejected, result.stderr))
+            self.assertIn("turbo_concurrency must be between 1 and 4", result.stderr)
+        with tempfile.TemporaryDirectory(dir=self.tmp.name) as work:
+            fake_turbo = os.path.join(work, "turbo")
+            output = os.path.join(work, "args.json")
+            with open(fake_turbo, "w", encoding="utf-8") as handle:
+                handle.write("require('node:fs').writeFileSync(process.env.OUT, JSON.stringify(process.argv.slice(2)));\n")
+            node = real_node()
+            preload = "--require=" + os.path.join(HERE, "heavy_node.cjs")
+            def concurrency(argv, env):
+                result = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                with open(output, encoding="utf-8") as handle:
+                    return [arg for arg in json.load(handle) if arg.startswith("--concurrency")]
+            through_runner = [self.wrapper, node, fake_turbo, "run", "test", "--concurrency=8"]
+            self.write_policy()
+            self.assertEqual(concurrency(through_runner, self.env(OUT=output)), ["--concurrency=1"],
+                             "the default keeps one turbo task")
+            self.write_policy(turbo_concurrency=3)
+            self.assertEqual(concurrency(through_runner, self.env(OUT=output)), ["--concurrency=3"])
+            self.assertEqual(concurrency([node, preload, fake_turbo, "run"],
+                                         self.env(OUT=output, KEEL_HEAVY_TURBO_CONCURRENCY="9")),
+                             ["--concurrency=4"])
+            # Turbo's strict environment drops KEEL_* variables: a held slot falls back to the policy file.
+            stripped = {"PATH": os.environ.get("PATH", ""), "OUT": output,
+                        "KEEL_HEAVY_NODE_ACCOUNT_HOME": self.tmp.name}
+            direct = [node, preload, fake_turbo, "run"]
+            self.assertEqual(concurrency(direct, stripped), ["--concurrency=1"], "no held slot keeps one")
+            os.makedirs(self.state, exist_ok=True)
+            open(os.path.join(self.state, "lease.2.json"), "w").close()
+            self.assertEqual(concurrency(direct, stripped), ["--concurrency=3"])
+
     def test_one_slot_status_lists_its_single_slot(self):
         state = self.status()
         self.assertEqual(state["leases"], [{"slot": 1, "live": False, "lease": None}], state)

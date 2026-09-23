@@ -17,6 +17,7 @@ MAX_SLOTS = 4
 class Policy:
     slots: int = 1
     max_workers: int = 2
+    turbo_concurrency: int = 1
     max_rss_mb: float = 6144
     min_free_percent: float = 20
     run_min_free_percent: float = 10
@@ -50,6 +51,7 @@ def load_policy():
     policy_max_seconds = policy['max_seconds']  # Commands are checked against the file, not a tightened run.
     # Runtime environment can tighten budgets, never grant extra slots or memory.
     variables = {'max_workers': 'KEEL_HEAVY_MAX_WORKERS',
+                 'turbo_concurrency': 'KEEL_HEAVY_TURBO_CONCURRENCY',
                  'max_rss_mb': 'KEEL_HEAVY_MAX_RSS_MB',
                  'max_seconds': 'KEEL_HEAVY_MAX_SECONDS'}
     for key, variable in variables.items():
@@ -69,6 +71,8 @@ def load_policy():
     policy['slots'] = int(policy['slots'])
     if not 1 <= policy['max_workers'] <= 8 or policy['max_workers'] % 1:
         raise ValueError('max_workers must be between 1 and 8')
+    if not 1 <= policy['turbo_concurrency'] <= 4 or policy['turbo_concurrency'] % 1:
+        raise ValueError('turbo_concurrency must be between 1 and 4')
     if (not 0 <= policy['min_free_percent'] <= 100 or not 0 <= policy['run_min_free_percent'] <= 100
             or policy['wait_seconds'] < 0):
         raise ValueError('invalid pressure or admission wait budget')

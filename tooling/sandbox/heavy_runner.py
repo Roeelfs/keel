@@ -268,6 +268,7 @@ def child_environment(policy, job_id):
     options = node_options if require in node_options else node_options + ' --max-old-space-size=2048 ' + require
     return {**os.environ, 'KEEL_HEAVY_LOCK_HELD': '1', 'KEEL_HEAVY_JOB_ID': job_id,
             'KEEL_HEAVY_MAX_WORKERS': str(int(policy.max_workers)),
+            'KEEL_HEAVY_TURBO_CONCURRENCY': str(int(policy.turbo_concurrency)),
             'NODE_OPTIONS': options.strip()}
 
 

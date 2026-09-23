@@ -9,24 +9,26 @@ const main = (process.argv[1] || '').replaceAll('\\', '/');
 const name = path.basename(main);
 
 // Turbo's strict environment drops KEEL_* but keeps NODE_OPTIONS, so this preload still runs.
-// While the slot is held, the runner's policy is the budget. KEEL_HEAVY_NODE_ACCOUNT_HOME points
-// tests at a fixture home; it grants nothing that KEEL_HEAVY_MAX_WORKERS does not.
-function policyWorkers() {
+// While a slot is held, the runner's policy is the budget. KEEL_HEAVY_NODE_ACCOUNT_HOME points
+// tests at a fixture home; it grants nothing that the KEEL_HEAVY_* variables do not.
+function policyValue(key, fallback) {
   try {
     const keel = path.join(process.env.KEEL_HEAVY_NODE_ACCOUNT_HOME || os.userInfo().homedir, '.keel');
     const held = process.env.KEEL_HEAVY_LOCK_HELD === '1'
       || fs.readdirSync(path.join(keel, 'heavy.slots')).some((file) => /^lease\.\d+\.json$/.test(file));
-    const value = held && JSON.parse(fs.readFileSync(path.join(keel, 'resource-policy.json'), 'utf8')).max_workers;
-    return Number.isInteger(value) ? value : 2;
+    const value = held && JSON.parse(fs.readFileSync(path.join(keel, 'resource-policy.json'), 'utf8'))[key];
+    return Number.isInteger(value) ? value : fallback;
   } catch {
-    return 2;
+    return fallback;
   }
 }
 
-function workers() {
-  const value = 'KEEL_HEAVY_MAX_WORKERS' in process.env ? Number(process.env.KEEL_HEAVY_MAX_WORKERS) : policyWorkers();
-  return Math.max(1, Math.min(8, value || 2));
+function budget(variable, key, fallback, max) {
+  const value = variable in process.env ? Number(process.env[variable]) : policyValue(key, fallback);
+  return Math.max(1, Math.min(max, value || fallback));
 }
+
+const workers = () => budget('KEEL_HEAVY_MAX_WORKERS', 'max_workers', 2, 8);
 
 function clamp(flags, additions) {
   const args = process.argv.slice(2);
@@ -47,5 +49,5 @@ if (/^vitest(?:\.m?js)?$/.test(name)) {
 } else if (/^jest(?:\.js)?$/.test(name) && !process.argv.includes('--runInBand')) {
   clamp(['--maxWorkers', '--max-workers', '-w'], [`--maxWorkers=${workers()}`]);
 } else if (/^turbo(?:\.exe)?$/.test(name) || main.endsWith('/turbo/bin/turbo')) {
-  clamp(['--concurrency'], ['--concurrency=1']);
+  clamp(['--concurrency'], [`--concurrency=${budget('KEEL_HEAVY_TURBO_CONCURRENCY', 'turbo_concurrency', 1, 4)}`]);
 }
