@@ -57,6 +57,8 @@ class RuntimeTests(unittest.TestCase):
         _, argv = self.spawn(self.base)
         self.assertIn("-p", argv)
         self.assertIn("--output-format", argv)
+        # A headless lane has no one to answer a prompt; without this a restrictive --mode hangs.
+        self.assertEqual(argv[argv.index("--permission-prompts") + 1], "none")
 
     def test_codex_runtime_grants_the_git_dir(self):
         _, argv = self.spawn(self.base, "--runtime", "codex")

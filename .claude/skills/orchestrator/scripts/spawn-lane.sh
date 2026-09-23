@@ -76,7 +76,7 @@ if [ "$RUNTIME" = codex ]; then
   # ---- parity: refuse options this path cannot honor, never accept-and-drop -------------
   # Accepting a capability-bearing option and then omitting the capability is a dead-lane
   # defect: a caller asking for a restrictive --mode would get Codex's unrelated defaults,
-  # and LANE_MCP_CONFIG (the documented product of .claude/lane-env.sh, SKILL.md:153) would
+  # and LANE_MCP_CONFIG (the documented product of .claude/lane-env.sh, SKILL.md "Repo lane hook") would
   # become dead data while the skill still promises the lane gets those MCPs.
   [ -n "$WORKTREE" ] && { echo "spawn-lane.sh: --worktree is claude-only; create it first and pass --cwd" >&2; exit 2; }
   [ -n "$MCP_CFG" ] && { echo "spawn-lane.sh: --mcp-config is claude-only; a codex lane gets no MCP servers. Keep this lane on claude." >&2; exit 2; }
@@ -173,7 +173,7 @@ fi
 ARGS=( --permission-mode "$MODE" --session-id "$(uuidgen | tr 'A-Z' 'a-z')" --model "$MODEL" )
 [ -n "$WORKTREE" ] && ARGS+=( --worktree "$WORKTREE" )
 [ -n "$MCP_CFG" ] && ARGS+=( --mcp-config "$MCP_CFG" )
-ARGS+=( -p --output-format json )
+ARGS+=( -p --output-format json --permission-prompts none )
 
 # Stdin discipline: an inherited pipe or tty makes `claude -p` wait on stdin and can
 # silently no-op the run (observed: exit 0, 0 bytes, zero work, locked empty worktree).

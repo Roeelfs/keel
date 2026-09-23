@@ -330,6 +330,7 @@ Stale, contradicted, or absent input → STOP and re-verify. Never state a routi
 
 `scripts/spawn-lane.sh` is the lane verb; the operator one-time allowlists it (a session may not invoke `--permission-mode bypassPermissions` directly). Rules, each earned by a real failure:
 
+- **Repo lane hook.** `<lane-cwd>/.claude/lane-env.sh` is sourced under the spawner's `set -euo pipefail` with `$RUNTIME` in scope; it may export `LANE_MCP_CONFIG` (passed to a Claude lane as `--mcp-config`). Export it only for `RUNTIME=claude` — a codex lane refuses MCP config with exit 2. The file must be TRACKED: a worktree lane sees only tracked files.
 - **Never pipe the spawn; detach stdin.** `spawn-lane.sh … | tail` can exit 0 with 0 bytes and zero work done. `claude -p --output-format json` ALWAYS emits a final JSON blob — **empty output + exit 0 is proof the lane never ran.**
 - **Chunk by lifecycle phase** — background Bash has a runtime cap; a full feature marathon gets killed or accumulates context. Use one fresh bounded task for each of `define`, `build`, and `verify-release`; each resumes from branch artifacts and the proof-obligation ledger.
 - **`--worktree` on first spawn only; `--cwd <existing-worktree>` on every continuation** — a second `--worktree` collides with the locked one.
