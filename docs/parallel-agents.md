@@ -10,8 +10,8 @@ eight sessions each launching a full build at the same instant.
 
 ## The shared heavy-job resource budget
 
-`tooling/sandbox/with-heavy-lock` supervises **one heavy job per user account**
-across repositories, worktrees, Claude Code, and Codex. It uses Python's kernel
+`tooling/sandbox/with-heavy-lock` supervises **up to `slots` heavy jobs per user
+account** (default one) across repositories, worktrees, Claude Code, and Codex. It uses Python's kernel
 file lock; a missing external `flock` executable cannot silently disable it.
 
 ```bash
@@ -20,12 +20,19 @@ with-heavy-lock npx cdk synth
 with-heavy-lock --status
 ```
 
-Defaults are one job, at most two Vitest/Jest workers (policy may allow up to
-eight), a 6 GiB aggregate resident memory budget, a 20% available-memory
-admission threshold, and a two-hour job limit. Vitest uses `forks`. Turbo's Node
-launcher receives concurrency one. Turbo's strict environment drops `KEEL_*`
-variables but keeps `NODE_OPTIONS`, so while a lease exists the Node preload reads
-`max_workers` from the policy file; an unreadable policy means two.
+Defaults are one job (`slots`, policy may allow up to four), at most two
+Vitest/Jest workers (policy may allow up to eight), a 6 GiB aggregate resident
+memory budget per job, a 20% available-memory admission threshold, and a two-hour
+job limit. Vitest uses `forks`. Turbo's Node launcher receives `--concurrency` of
+`turbo_concurrency` (default one, policy may allow up to four). Turbo's strict
+environment drops `KEEL_*` variables but keeps `NODE_OPTIONS`, so while a lease
+exists the Node preload reads `max_workers` and `turbo_concurrency` from the policy
+file; an unreadable policy means two workers and one turbo task.
+With more than one slot, each job holds one `slot.<n>` lock. A job admitted while
+another slot is held must leave the admission threshold free after its whole
+budget: free MiB minus `max_rss_mb` must stay at or above `min_free_percent` of
+total memory. Otherwise it waits with `memory_pressure`. A `min_free_percent` of 0
+disables both admission checks.
 The 2 GiB V8 heap setting is a per-process aid; aggregate RSS is measured every 0.5
 seconds across every process in the job's session: its process group plus any
 descendant that moved to its own group (Turbo's tasks do) or outlived its parent.
@@ -35,7 +42,10 @@ other member by pid.
 Free memory is sampled on the same interval. If it stays below
 `run_min_free_percent` (default 10%) for `run_pressure_seconds` (default 15) of
 continuous samples, the group is stopped with `memory_pressure_during_run`; a
-shorter dip does not stop it. A failed memory sample counts as not low.
+shorter dip does not stop it. A failed memory sample counts as not low. With
+several jobs running, only the most recently started one is stopped: an older
+job's supervisor restarts its pressure window while a newer job still has a live
+supervisor, so it stops only if pressure outlasts the newer job.
 A small startup gate publishes ownership before the command can execute.
 
 The host policy is `~/.keel/resource-policy.json`. Runtime environment can tighten
@@ -51,8 +61,10 @@ is skipped with a warning; only a `command_max_seconds` that is not an object
 refuses the policy. A stop records `wall_time_budget` with `budget_seconds`.
 `KEEL_HEAVY_SLOTS`, `KEEL_HEAVY_LOCK_DIR` and an overridden `HOME` no longer change
 admission. The account database determines the home for both policy and state.
-State is always `~/.keel/heavy.slots`, including an atomic lease and `events.jsonl` with
-job ids, terminal reasons and observed peak RSS. A `started` event records `args`, the
+State is always `~/.keel/heavy.slots`, including an atomic lease per slot
+(`lease.<n>.json`) and `events.jsonl` with job ids, terminal reasons and observed
+peak RSS. `--status` keeps `live` and `lease` (the lowest-numbered published lease) and lists every
+slot's holder under `leases`. A `started` event records its `slot` and `args`, the
 first three arguments after the executable; an argument containing `=` or longer
 than 120 characters is recorded as `<redacted>`. A `queued` event records the same
 `args` with `cwd`, `executable`, the effective `wait_seconds` and `caller` (`claude` or
@@ -87,7 +99,9 @@ Known follow-ups:
 ### Bounded admission and results
 
 Waiters queue in arrival order. Each writes a ticket under
-`~/.keel/heavy.slots/queue/`, and only the oldest live ticket may take the slot.
+`~/.keel/heavy.slots/queue/`. A waiter may claim a slot only when no more live
+waiters are ahead of it than there are free slots, so admission stays in arrival
+order; it takes the lowest free slot.
 A waiter that exits, is signalled, or is SIGKILLed stops holding its place: its
 own cleanup or the next waiter's process-identity check removes the ticket. Every
 waiter refreshes its ticket's modification time on each poll; a live waiter that
