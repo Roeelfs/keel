@@ -61,6 +61,8 @@ export const meta = {
   description: 'Census unadopted vendor surfaces, grade prior adoptions against their probes, rank fixes by tier',
   phases: [{ title: 'Census' }, { title: 'Grade' }, { title: 'Report' }],
 }
+const ARGS = typeof args === 'string' ? JSON.parse(args) : (args || {})  // REQUIRED: see the args-is-a-string trap in Launching
+const ctxAgent = (p, o) => agent(ARGS.runContext ? ARGS.runContext + '\n\n---\n\n' + p : p, o)  // carries the previous run's SKIP_OR_WATCH/DID_NOT_SURVIVE/OPEN + this run's constraints into every lane
 const PIN = 'You are a leaf agent: do NOT spawn sub-agents or Workflows; do the work inline and return. Investigation only — design the plan, do not mutate. WebFetch / read-only gh / local reads only. No CI polling, no sleep loops. Write analysis scripts to a scratchpad and run them by path (multi-line -c reliably breaks). Every absence claim prints the command that produced it.'
 
 const CENSUS = { type:'object', additionalProperties:false, required:['surfaces','probe_method','dropped'], properties:{
@@ -80,11 +82,11 @@ const GRADE = { type:'object', additionalProperties:false, required:['adoptions'
   instrument_health:{type:'string',description:'rows in reply-shape.jsonl and the window they cover; an empty log is a DEAD INSTRUMENT, not a quiet harness — say which'} }}
 
 phase('Census')
-const c = await agent(`${PIN}\nCensus the vendor surfaces this harness could use and does not. Resolve the REAL CLI binary first (readlink -f the shim) and sanity-control every strings probe with a string you know is present; read the surrounding context of any suspicious hit before calling it a config key. Read the previous run's program SKIP_OR_WATCH before starting. Drop any surface that maps to no recorded complaint — the product is the short list, not the catalogue.`,
+const c = await ctxAgent(`${PIN}\nCensus the vendor surfaces this harness could use and does not. Resolve the REAL CLI binary first (readlink -f the shim) and sanity-control every strings probe with a string you know is present; read the surrounding context of any suspicious hit before calling it a config key. Read the previous run's program SKIP_OR_WATCH before starting. Drop any surface that maps to no recorded complaint — the product is the short list, not the catalogue.`,
   {label:'census', phase:'Census', schema:CENSUS, model:'sonnet', agentType:'general-purpose'})
 
 phase('Grade')
-const g = await agent(`${PIN}\nGrade every adoption from prior runs by RE-RUNNING its recorded probe, and compute reply-shape metrics from ~/.claude/analytics/reply-shape.jsonl (fall back to transcript final turns for the historical baseline only). Baseline 2026-08-09: median 2,270 chars, p90 3,389, 61.0% >2,000, 26.4% with >=3 headers, 3.8% with >=3 questions. Grade VOLUME and FOLLOWABILITY separately — a header share that falls while the question share stays flat means replies got shorter without getting answerable, which is a failed intervention, not a win. An empty log means the hook never fired: report instrument-dead rather than a clean harness.`,
+const g = await ctxAgent(`${PIN}\nGrade every adoption from prior runs by RE-RUNNING its recorded probe, and compute reply-shape metrics from ~/.claude/analytics/reply-shape.jsonl (fall back to transcript final turns for the historical baseline only). Baseline 2026-08-09: median 2,270 chars, p90 3,389, 61.0% >2,000, 26.4% with >=3 headers, 3.8% with >=3 questions. Grade VOLUME and FOLLOWABILITY separately — a header share that falls while the question share stays flat means replies got shorter without getting answerable, which is a failed intervention, not a win. An empty log means the hook never fired: report instrument-dead rather than a clean harness.`,
   {label:'grade', phase:'Grade', schema:GRADE, model:'sonnet', agentType:'general-purpose'})
 
 phase('Report')
@@ -96,7 +98,7 @@ const REPORT = { type:'object', additionalProperties:false, required:['report_ma
     metric:{type:'string',description:'the falsifiable number this should move, and by how much, so the NEXT run can kill it'},
     risk:{type:'string'} }}},
   failed_interventions:{type:'array',items:{type:'string'},description:'prior adoptions whose target metric did not move — name them plainly, do not silently re-tune'} }}
-return await agent(`Write the dated adoption report + ONE TRENDS.md row. Read the previous report and TRENDS.md from the harness repo's analytics/harness-adoption/ and diff against them — the trend is the product. Rank recommendations by TIER (mechanism > mechanism-carrying-prose > subtraction > prose), never by appeal. A defect that ALREADY has a prose rule may not receive another prose rule: propose a tier change or an instrument. Phrase every instruction positively — the vendor's own guidance is that positive examples of the wanted behavior beat instructions about what not to do. If a recommendation's effect cannot be read off an existing log, its first step is a log-only instrument and the behavior change waits a cycle. CENSUS: ${JSON.stringify(c)} GRADES: ${JSON.stringify(g)}`,
+return await ctxAgent(`Write the dated adoption report + ONE TRENDS.md row. Read the previous report and TRENDS.md from the harness repo's analytics/harness-adoption/ and diff against them — the trend is the product. Rank recommendations by TIER (mechanism > mechanism-carrying-prose > subtraction > prose), never by appeal. A defect that ALREADY has a prose rule may not receive another prose rule: propose a tier change or an instrument. Phrase every instruction positively — the vendor's own guidance is that positive examples of the wanted behavior beat instructions about what not to do. If a recommendation's effect cannot be read off an existing log, its first step is a log-only instrument and the behavior change waits a cycle. CENSUS: ${JSON.stringify(c)} GRADES: ${JSON.stringify(g)}`,
   {label:'report', phase:'Report', effort:'high', schema:REPORT, model:'opus', agentType:'general-purpose'})
 ```
 

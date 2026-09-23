@@ -44,6 +44,8 @@ export const meta = {
   description: 'Measure context/compaction economics from local transcripts, audit the knobs, append a trend row',
   phases: [{ title: 'Measure' }, { title: 'Audit' }, { title: 'Report' }],
 }
+const ARGS = typeof args === 'string' ? JSON.parse(args) : (args || {})  // REQUIRED: see the args-is-a-string trap in Launching
+const ctxAgent = (p, o) => agent(ARGS.runContext ? ARGS.runContext + '\n\n---\n\n' + p : p, o)  // carries the previous run's SKIP_OR_WATCH/DID_NOT_SURVIVE/OPEN + this run's constraints into every lane
 const PIN = 'READ-ONLY. Write analysis scripts to a scratchpad and run them by path (multi-line -c reliably breaks). Persist big intermediate output to files; return only computed numbers. Never estimate a number you could compute — if a metric is uncomputable, say so.'
 
 const METRICS = { type:'object', additionalProperties:false,
@@ -64,11 +66,11 @@ const KNOBS = { type:'object', additionalProperties:false, required:['findings',
   conflicts:{type:'array',items:{type:'string'},description:'knobs that multiply/activate each other, or documented-vs-measured mismatches'} }}
 
 phase('Measure')
-const m = await agent(`${PIN}\nCompute the context-economy metrics from local transcripts (see the metric list in the skill's Workflow E). Cover BOTH runtimes if present. Report the Pareto (share of context from the heaviest turns), the fixed preamble floor, payload composition, compaction peak-before-reset, subagent peak distribution, model mix, and the worst sessions by turns x avg_ctx.`,
+const m = await ctxAgent(`${PIN}\nCompute the context-economy metrics from local transcripts (see the metric list in the skill's Workflow E). Cover BOTH runtimes if present. Report the Pareto (share of context from the heaviest turns), the fixed preamble floor, payload composition, compaction peak-before-reset, subagent peak distribution, model mix, and the worst sessions by turns x avg_ctx.`,
   {label:'measure', phase:'Measure', schema:METRICS, model:'sonnet', agentType:'general-purpose'})
 
 phase('Audit')
-const k = await agent(`${PIN}\nAudit the context/compaction knobs. Read the live settings + env, then ground EVERY claim in official docs or in strings from the installed CLI binary — state which. COMPOSE the effective threshold from all knobs TOGETHER (a window var and a percentage var multiply; setting one can activate a dormant other), then reconcile it against the MEASURED peak-before-reset: ${JSON.stringify(m?.compaction ?? {})}. A mismatch means a knob is not honored — report UNVERIFIED, do not assert the intended value. Mark each finding verified / inferred / could-not-confirm; "could not confirm" is a better answer than a plausible wrong config key.`,
+const k = await ctxAgent(`${PIN}\nAudit the context/compaction knobs. Read the live settings + env, then ground EVERY claim in official docs or in strings from the installed CLI binary — state which. COMPOSE the effective threshold from all knobs TOGETHER (a window var and a percentage var multiply; setting one can activate a dormant other), then reconcile it against the MEASURED peak-before-reset: ${JSON.stringify(m?.compaction ?? {})}. A mismatch means a knob is not honored — report UNVERIFIED, do not assert the intended value. Mark each finding verified / inferred / could-not-confirm; "could not confirm" is a better answer than a plausible wrong config key.`,
   {label:'audit', phase:'Audit', schema:KNOBS, model:'sonnet', agentType:'general-purpose'})
 
 phase('Report')
@@ -79,7 +81,7 @@ const REPORT = { type:'object', additionalProperties:false, required:['report_ma
     rank:{type:'number'}, change:{type:'string'}, surface:{enum:['settings','instructions-file','hook','skill','workflow-habit','plugin/mcp-roster']},
     expected_effect:{type:'string',description:'which measured number should move, and by how much'}, risk:{type:'string'} }}},
   failed_interventions:{type:'array',items:{type:'string'},description:'changes made last run whose target metric did NOT move — name them plainly'} }}
-return await agent(`Write the dated context-economy report + ONE TRENDS.md row. Read the PREVIOUS report and TRENDS.md from the harness repo's analytics/context-economy/ first and diff against them — the trend is the product, not the snapshot. Every recommendation must name the specific measured number it should move and by roughly how much, so the NEXT run can falsify it. Call out any prior change whose target metric did not move as a FAILED intervention rather than silently re-tuning. Order by leverage: the fixed preamble and turn-count multipliers beat per-response savings. METRICS: ${JSON.stringify(m)} KNOBS: ${JSON.stringify(k)}`,
+return await ctxAgent(`Write the dated context-economy report + ONE TRENDS.md row. Read the PREVIOUS report and TRENDS.md from the harness repo's analytics/context-economy/ first and diff against them — the trend is the product, not the snapshot. Every recommendation must name the specific measured number it should move and by roughly how much, so the NEXT run can falsify it. Call out any prior change whose target metric did not move as a FAILED intervention rather than silently re-tuning. Order by leverage: the fixed preamble and turn-count multipliers beat per-response savings. METRICS: ${JSON.stringify(m)} KNOBS: ${JSON.stringify(k)}`,
   {label:'report', phase:'Report', effort:'high', schema:REPORT, model:'opus', agentType:'general-purpose'})
 ```
 

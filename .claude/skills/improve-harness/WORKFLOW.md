@@ -30,10 +30,31 @@ on page 4 of 4 and lanes kept crashing on it.
 `.map` — or worse, does not die: on 2026-07-24 Workflow A crashed instantly on `BUCKETS.map` while
 Workflow B, with the identical bug, silently interpolated the literal text `undefined` into six
 already-dispatched research prompts and kept running until it was killed by hand (`TaskStop
-wdyqa23vz`). The same trap cost relaunches on 2026-07-06 and 2026-07-20. Every template opens with
-`const ARGS = typeof args === 'string' ? JSON.parse(args) : args`. Never read `args.foo` directly.
-This is stated on the first screen because it is the single most-repeated crash in this file's
-history.
+wdyqa23vz`). The same trap cost relaunches on 2026-07-06 and 2026-07-20. Every template opens with:
+
+```js
+const ARGS = typeof args === 'string' ? JSON.parse(args) : (args || {})
+```
+
+Never read `args.foo` directly. This is stated on the first screen because it is the single
+most-repeated crash in this file's history.
+
+**Every lane carries the previous run's context — through `ctxAgent`, not a bare `agent`.**
+SKILL.md step 1 requires every lane prompt to carry the previous run's `SKIP_OR_WATCH`,
+`DID_NOT_SURVIVE` and `OPEN` sections plus this run's hard constraints (e.g. a second-runtime
+weekly cap) — a run that starts every lane from zero pays twice for what the last run already
+answered. No template did this; it was patched into the prompts by hand at runtime. Define this
+second line right below `ARGS`, in every template, no exceptions:
+
+```js
+const ctxAgent = (p, o) => agent(ARGS.runContext ? ARGS.runContext + '\n\n---\n\n' + p : p, o)
+```
+
+The coordinator passes `args: { runContext: <text of a run_context.md> }`, where `run_context.md`
+holds the operator's ask, what is already done, hard constraints, and the previous program's
+`SKIP_OR_WATCH` / `DID_NOT_SURVIVE` / `OPEN` sections. Every lane dispatch — mining, survey,
+verify, synthesis, judge — goes through `ctxAgent(...)`, never a bare `agent(...)`; an unpinned
+call silently drops the context and re-does work the last run already paid for.
 
 **Every dispatch site carries these three or it is malformed:** the leaf-agent pin — *"You are a leaf
 agent: do NOT spawn sub-agents or Workflows; do the work inline and return. Investigation only —
