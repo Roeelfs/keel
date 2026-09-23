@@ -94,10 +94,17 @@ def mutate_claude(config, command):
             group["hooks"].append({"type": "command", "command": command, "async": False}); return True
     groups.append({"matcher": "Bash", "hooks": [{"type": "command", "command": command, "async": False}]}); return True
 
-def backup(path):
+def backup(path, home):
+    # Backups go to ~/.keel/backups, mirroring the path under home — never beside the live
+    # file, where a .bak is loaded by nothing and globbed by everything (19 had piled up in
+    # four live dirs by 2026-09-23). A symlink is re-pointed absolutely: a relative target
+    # would resolve somewhere else from the backup's directory.
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-    destination = path.with_name(path.name + ".resource-hooks." + stamp + ".bak")
-    if path.is_symlink(): destination.symlink_to(os.readlink(path))
+    try: rel = path.parent.relative_to(home)
+    except ValueError: rel = Path("_outside_home") / path.parent.relative_to(path.parent.anchor)
+    destination = home / ".keel" / "backups" / "resource-hooks" / rel / (path.name + ".resource-hooks." + stamp + ".bak")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink(): destination.symlink_to(os.path.normpath(path.parent / os.readlink(path)))
     else: shutil.copy2(path, destination)
     return destination
 
@@ -116,7 +123,7 @@ def file_current(source, destination, executable=False):
 def replace_file(source, destination, plan, executable=False):
     content = source.read_bytes()
     if file_current(source, destination, executable): return False
-    if destination.exists() or destination.is_symlink(): plan.setdefault("backups", []).append(str(backup(destination)))
+    if destination.exists() or destination.is_symlink(): plan.setdefault("backups", []).append(str(backup(destination, Path(plan["home"]))))
     atomic_bytes(destination, content, executable); return True
 
 def validate_sources():
@@ -151,11 +158,11 @@ def install(home, apply):
     for name in RUNTIME_FILES: replace_file(SOURCE_ROOT / name, runtime_dir / name, plan, executable=name == "with-heavy-lock")
     for path, value, changed in ((codex_path, codex, codex_changed), (claude_path, claude, claude_changed)):
         if changed:
-            if path.exists() or path.is_symlink(): plan.setdefault("backups", []).append(str(backup(path)))
+            if path.exists() or path.is_symlink(): plan.setdefault("backups", []).append(str(backup(path, home)))
             atomic_bytes(path, (json.dumps(value, indent=2, sort_keys=True) + "\n").encode())
     if not wrapper_valid:
         wrapper.parent.mkdir(parents=True, exist_ok=True)
-        if wrapper.exists() or wrapper.is_symlink(): plan.setdefault("backups", []).append(str(backup(wrapper)))
+        if wrapper.exists() or wrapper.is_symlink(): plan.setdefault("backups", []).append(str(backup(wrapper, home)))
         temporary = wrapper.with_name(wrapper.name + ".resource-hooks.new"); temporary.unlink(missing_ok=True)
         temporary.symlink_to(runtime_dir / "with-heavy-lock"); os.replace(temporary, wrapper)
     return plan

@@ -38,6 +38,25 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual((home / ".codex" / "hooks.json").read_bytes(), codex_bytes)
             self.assertEqual(wrapper.resolve(), (home / ".keel" / "resource-hooks" / "with-heavy-lock").resolve()); self.assertTrue(any("with-heavy-lock.resource-hooks" in item for item in result["backups"]))
 
+    def test_backups_leave_the_live_hook_directories(self):
+        # A .bak beside a live hook is loaded by nothing and read by everything that globs the
+        # directory; 19 had piled up across four live dirs by 2026-09-23.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp); self.write_json(home / ".codex" / "hooks.json", {"hooks": {}})
+            self.write_json(home / ".claude" / "settings.json", {"hooks": {}})
+            (home / "elsewhere").mkdir(); (home / "elsewhere" / "tool").write_text("legacy")
+            wrapper = home / ".local" / "bin" / "with-heavy-lock"; wrapper.parent.mkdir(parents=True)
+            wrapper.symlink_to(Path("..") / ".." / "elsewhere" / "tool")    # a RELATIVE link
+            result = installer.install(home, True)
+            root = home.resolve() / ".keel" / "backups" / "resource-hooks"   # install() resolves home
+            self.assertTrue(result["backups"])
+            for item in result["backups"]:
+                self.assertTrue(Path(item).is_relative_to(root), item)
+            for live in (".claude/hooks", ".claude", ".codex", ".local/bin", ".keel/resource-hooks"):
+                self.assertEqual(list((home / live).glob("*.bak")), [], live)
+            linked = next(Path(i) for i in result["backups"] if "with-heavy-lock" in i)
+            self.assertEqual(linked.resolve(), (home / "elsewhere" / "tool").resolve())
+
     def test_existing_claude_shell_guard_is_upgraded_without_a_duplicate(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
