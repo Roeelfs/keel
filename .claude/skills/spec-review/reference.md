@@ -133,3 +133,116 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 
 This is the coexistence the delete-legacy gate above cannot see: that gate asks whether the OLD path is deleted; this lane asks how many copies the NEW path ships (the agent's own `Why_This_Matters` carries the incident).
 
+
+## Why This Exists — full 10-point rationale (moved detail)
+
+A spec written in a long session accumulates blind spots. This skill breaks that with:
+1. **Session decision-mining** — recovers the design decisions, rejected alternatives, and user corrections from the session so reviewers judge against intent, not just the prose. Runs as a direct agent dispatch — **no compaction, no hooks, no resume dance.**
+
+> **"No compaction" describes this skill's MECHANISM, not the session it runs in** — auto-compaction still happens mid-wave. Append each lane's findings to the report file as its notification arrives and assemble the Final Report by reading that file back, never from memory of the wave. Incident rationale: see [`reference.md`](reference.md#why-no-compaction-means-append-as-you-go-incident-rationale).
+2. **11 parallel reviewers** — each with a focused prompt and one job
+3. **Multi-model** — Claude (Opus/Sonnet) + 3x Codex GPT-6-sol (standard + adversarial + industry research)
+4. **Web-enabled research** — all Codex agents run with network access so findings are grounded in real public implementations, CVEs, post-mortems, and RFCs — not just training-data recall
+5. **Semantic boundary mining** — the edge-case miner enumerates entity/state/value boundaries the spec is silent on (cardinality, lifecycle, tenancy, encoding, time, concurrency, permission, resource, schema-evolution, forbidden-but-syntactically-valid)
+6. **Project-policy security mining** — the security miner reads `docs/security-policy.md` (filled by the user from `templates/security-policy.example.md`) plus the project root `CLAUDE.md`/`AGENTS.md`, and audits the spec against your project's stated rules plus portable security categories (authN/authZ, secret/credential storage, tenant/org isolation, input validation & injection, data-boundary separation, privilege escalation, allowlist/denylist gaps, output sanitization). Cites the project's own policy in every finding — no inventing rules
+7. **Cross-worktree drift scouting** — the spec drift scout checks recently pushed changes, dirty worktrees, architecture changes, sibling specs, and in-progress parallel work across the same project scope, then dispatches narrow follow-up investigators only when material drift is found
+8. **Code-grounded industry elevation** — the **investigation skill** runs as a dynamic Workflow over the spec's core themes: it frames them against THIS codebase first (every claim cites a real `file:line`), fans out across primary sources, adversarially cross-verifies each load-bearing claim *in code* (refuted/unchecked claims are partitioned out before synthesis), and returns a verified industry-standard + best-in-class elevation brief. This **deepens the elevation lane** — it is the evidence-and-industry backbone that the Codex Industry Research Auditor's single-model external scan gets cross-checked against, so an ELEVATE suggestion two independent lanes agree on lands at high confidence, and an unverified one is flagged as such
+9. **Provider-fit auditing** — the **Provider-Fit Auditor** runs the **Provider ⋈ Technical-Architecture Alignment** check: does the spec hand-build an architecture a provider/platform-class already owns (an access-pattern↔class mismatch that ships as compensating glue — tomorrow's incident), *or* adopt a vendor where keeping it owned is the honest answer (adoption would flatten a data/compliance boundary, duplicate a live owned subsystem, or route regulated data upstream of redaction)? Balanced both ways — it flags hand-building-what-a-class-owns AND adopting-what-should-stay-owned, so the "should we build this at all?" question is answered *before* the design ships. And it fires on **inherited** architecture too (PF-7): when the spec extends an existing vendor-adjacent subsystem, it audits whether that subsystem exists only to *accommodate a provider mismatch* — tripwires: fix-cluster history ≥3, management-to-workload LOC ratio, invented vocabulary absent from the vendor's docs, premise numbers that trace to constants/models instead of measurements/invoices, and the vendor's canonical primitive defined with zero call sites
+10. **Observability & traceability auditing** — the **Observability & Traceability Auditor** audits whether the spec ships its own telemetry: named structured events with a request-threading correlation id + a release/version stamp, an **authoritative terminal status** for async work (never inferred from a dispatch/`202` ack), metrics emitted at a granularity their alarms can actually see, a stable PII-free error fingerprint, observable fail-open branches, and a nameable log/telemetry destination. Its premise: a change that ships without its instrumentation is a future RCA run blind — the false-positive, wrong-source, and "we can't tell what failed" incidents all trace back to a spec that never said how the thing would be seen. Distinct lane from the security miner (policy) and edge-case miner (semantic boundaries)
+
+## Step 4b — Progressive Drift Investigation (moved detail)
+
+### Step 4b: Progressive Drift Investigation
+
+When the **Spec Drift Scout** returns, read its report immediately. Do not wait for Codex if the scout has already finished — use that time to dispatch narrow second-wave investigators while the Codex reviews continue.
+
+**When to dispatch drift investigators:**
+- Scout reports `Needs Investigator: yes`
+- Any `DRIFT-N` finding is CRITICAL or MAJOR
+- Recommended action is `combine-specs`, `move-section`, `split-new-spec`, `create-missing-spec`, or `update-other-spec`
+- The scout found a dirty or recently pushed worktree that appears to own the same architecture boundary or feature surface
+
+**How to dispatch:**
+- Use `prompts/spec-drift-investigator.md`
+- One investigator per drift candidate or tightly related cluster
+- Max 5 investigators by default; if more are needed, group by feature surface and ask the user before expanding
+- Each investigator gets the target spec, the scout finding, exact paths/worktrees/specs to read, and one narrow question
+- They are read-only. They may propose patches or moves, but they do not edit sibling worktrees
+
+**How to handle results:**
+- `update-current-spec` with CRITICAL/MAJOR severity can be applied in Step 5c if evidence is clear and the change is within the target spec's scope
+- `update-other-spec`, `combine-specs`, `move-section`, `split-new-spec`, and `create-missing-spec` require an explicit user decision or a follow-up issue; do not silently edit other active worktrees
+- `mark-intentional` entries go into the report and, if confirmed by the user, into project memory as an acknowledged divergence
+- False positives go under Resolved with the scout/investigator evidence
+
+## Step 5b — Cross-Examination Debate Protocol (moved detail)
+
+### Step 5b: Cross-Examination — Claude vs Codex Debate
+
+For any MAJOR+ finding where Claude and Codex disagree, run an iterative debate so the user can see both perspectives and decide.
+
+**What triggers cross-examination:**
+- Codex flags something MAJOR+ that all 3 defect-hunting Claude agents (completeness, codebase, architecture) missed or dismissed (the Edge-Case Miner, Security Miner, and Drift lane do not participate in cross-examination — their findings have their own sections)
+- Claude agents (2+) flag something MAJOR+ that Codex approved
+- Claude and Codex propose **conflicting fixes** for the same issue
+- Codex adversarial flags a risk that Claude architecture agent explicitly called safe
+- **Codex Frontier (Astra) rules `redesign`, or names a wrong decision that no Claude lane flagged** — always cross-examined, never silently downgraded
+
+**How it works:**
+
+1. **Present the disagreement to the user** in a structured format:
+
+```markdown
+### Disagreement #N: <topic>
+
+**Codex (GPT-6-sol) says:** <summary of Codex position + severity + confidence>
+**Claude says:** <summary of Claude position + which agents>
+
+**Key question:** <the specific architectural/design question at the heart of the disagreement>
+```
+
+2. **Prompt Codex with Claude's counter-argument** via Bash (resume the session):
+
+```bash
+echo "This is Claude (Opus) following up on your review. Re: your finding about <TOPIC>.
+
+Our architecture auditor disagrees because: <CLAUDE_REASONING>
+Our codebase verifier found: <EVIDENCE_FROM_CODEBASE>
+
+Specific question: <TARGETED_QUESTION>
+
+Do you still hold your position? If so, what specific evidence would change your mind?" \
+  | CODEX_HOME="$HOME/.codex-lean" codex exec --skip-git-repo-check resume --last 2>/dev/null
+```
+
+**`CODEX_HOME` is load-bearing here, and this is the one lane that stays raw.** The wrapper has no
+resume mode — it always opens a fresh thread — so this follow-up calls the CLI directly. But the
+lanes it is resuming ran under the wrapper's lean profile, so a resume from the default profile
+finds the wrong thread or none at all and reads as "Codex declined to answer". If the CLI cannot be
+reached here at all (shim rc=126/127), skip the debate and record it as unavailable in the report
+rather than treating silence as a concession.
+
+3. **Evaluate Codex's response.** If Codex:
+   - **Concedes** → note as resolved, move on
+   - **Doubles down with new evidence** → present both positions to user with your assessment
+   - **Raises a point Claude missed** → investigate the new claim, update your position
+
+4. **Present the final positions to the user** and ask them to decide:
+
+```markdown
+### Decision needed: <topic>
+
+**Codex position:** <updated position after debate>
+**Claude position:** <updated position after debate>
+**My recommendation:** <which side you lean toward and why>
+
+Should I apply Codex's recommendation, Claude's recommendation, or something else?
+```
+
+**Rules for cross-examination:**
+- Max **2 rounds** per disagreement (initial + one follow-up) — don't let it spiral
+- Only for MAJOR+ disagreements — MINOR disagreements go to the report as-is
+- Always identify yourself as Claude when prompting Codex — it's a peer AI discussion
+- If Codex raises a genuinely new concern during debate, add it to the findings
+- If both models converge after discussion, note it as "resolved via cross-examination"
+- **Never auto-resolve a disagreement without user input** on CRITICAL issues

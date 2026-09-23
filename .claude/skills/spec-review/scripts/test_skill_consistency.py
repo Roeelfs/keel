@@ -18,10 +18,15 @@ PROMPTS_DIR = SKILL_DIR / "prompts"
 # had to grow (e.g. a new reviewer lane), never to silently re-absorb creep.
 # Recorded 2026-09-23: 74440B after the SR5 reference.md subtraction, then
 # 75842B after SR1/SR4 added the canonical falsifier-wave line, stable F-N
-# finding IDs, and the "## Carried obligations" report section (see
-# reference.md for the material SR5 moved out; those additions are real new
-# process, not creep, so the ceiling moved with them).
-MAX_SKILL_BYTES = 75842
+# finding IDs, and the "## Carried obligations" report section, then 66806B
+# after the lane-KA split moved the "Why This Exists" 10-point rationale,
+# Step 4b (Progressive Drift Investigation), and Step 5b (Cross-Examination
+# Debate Protocol) verbatim into reference.md behind one-line pointers, then
+# 67050B in the same change once SR2 added its one-line pointer to
+# plan_falsifier_batches.py at the Step 5a falsifier-wave step (see
+# reference.md for the material this and SR5 moved out; SR1/SR4's additions
+# were real new process, not creep, so the ceiling moved with them then too).
+MAX_SKILL_BYTES = 67050
 
 
 def declared_agent_types():
