@@ -200,8 +200,8 @@ flows (`/ask-matt` is the built-in router when you forget):
 | **Test & verify** | `spec-test-plan` · `spec-test-execute` · `flows` |
 | **Diagnose** | `diagnosing-bugs` · `root-cause-analysis` |
 | **Codebase health** | `improve-codebase-architecture` |
-| **Parallel sessions** | `orchestrator` · `claude-sessions` · `codex-sessions` · `sessions-to-chips` · `handoff` |
-| **Harness upkeep** | `improve-harness` · `harness-onboarding` · `writing-great-skills` · `free-resources` |
+| **Parallel sessions** | `orchestrator` · `codex` · `claude-sessions` · `codex-sessions` · `sessions-to-chips` · `handoff` |
+| **Harness upkeep** | `improve-harness` · `harness-onboarding` · `writing-for-agents` · `free-resources` |
 | **Utilities** | `work-report` · `design-taste-frontend` · `caveman` · `ask-matt` · `setup-matt-pocock-skills` |
 
 ## What's in here
@@ -285,7 +285,7 @@ adapted, with gratitude — from excellent open source:
 - **[Matt Pocock's skills](https://github.com/mattpocock/skills)** — the
   idea→ship engineering flow (`grilling`, `domain-modeling`, `codebase-design`,
   `diagnosing-bugs`, `triage`, `to-spec`, `to-tickets`, `wayfinder`, `implement`,
-  `prototype`, `handoff`, `improve-codebase-architecture`, `writing-great-skills`,
+  `prototype`, `handoff`, `improve-codebase-architecture`, `writing-for-agents`,
   `teach`). keel **tracks his canonical latest** and layers only specific,
   documented deltas (see [docs/vendor-upstreams.md](docs/vendor-upstreams.md)). Run
   `/setup-matt-pocock-skills` once to configure the issue tracker (GitHub / GitLab /
