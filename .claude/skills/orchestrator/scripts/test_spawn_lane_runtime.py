@@ -28,6 +28,13 @@ class RuntimeTests(unittest.TestCase):
         for name in ("codex", "claude"):
             p = self.bin / name
             p.write_text(STUB); p.chmod(0o755)
+        self.home = self.root / "home"
+        gate = self.home / ".claude/scripts/codex-headroom.sh"
+        gate.parent.mkdir(parents=True)
+        gate.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$STUB_GATE_ARGS"\nprintf "%s\\n" "${STUB_ROUTE:-gpt-6-sol medium}"\nexit "${STUB_GATE_RC:-0}"\n')
+        gate.chmod(0o755)
+        self.gate = gate
+        self.gate_env = {}
         self.out = self.root / "argv.txt"
         self.base = self.root / "base"; self.base.mkdir()
         git("init", "-q", ".", cwd=self.base)
@@ -40,7 +47,9 @@ class RuntimeTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def spawn(self, cwd, *extra):
-        env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", STUB_OUT=str(self.out))
+        env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", STUB_OUT=str(self.out),
+                   HOME=str(self.home), CODEX_HEADROOM_LOG="/dev/null",
+                   STUB_GATE_ARGS=str(self.root / "gate-args.txt"), **self.gate_env)
         r = subprocess.run([str(SCRIPT), "--mission", str(self.mission), "--cwd", str(cwd), *extra],
                            capture_output=True, text=True, env=env)
         argv = self.out.read_text().splitlines() if self.out.exists() else []
@@ -94,6 +103,7 @@ class RuntimeTests(unittest.TestCase):
         # own branch, gated only by prompt text. Denying egress removes the question.
         _, argv = self.spawn(self.base, "--runtime", "codex")
         self.assertNotIn("sandbox_workspace_write.network_access=true", argv)
+        self.assertIn("sandbox_workspace_write.network_access=false", argv)
 
     def test_network_is_opt_in_and_explicit(self):
         _, argv = self.spawn(self.base, "--runtime", "codex", "--allow-network")
@@ -145,6 +155,49 @@ class RuntimeTests(unittest.TestCase):
         # That wrapper strips git identity; a shipping lane must keep it.
         _, argv = self.spawn(self.base, "--runtime", "codex")
         self.assertNotIn("codex-dispatch.sh", " ".join(argv))
+
+    def test_class_effort_reaches_codex_and_explicit_model_is_preserved(self):
+        self.gate_env = {"STUB_ROUTE": "gpt-6-astra high"}
+        r, argv = self.spawn(self.base, "--runtime", "codex", "--class", "security",
+                             "--model", "gpt-6-sol")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(argv[argv.index("-m") + 1], "gpt-6-sol")
+        self.assertIn("model_reasoning_effort=high", argv)
+        self.assertEqual((self.root / "gate-args.txt").read_text().splitlines(), ["--route", "security"])
+
+    def test_warning_and_unknown_cap_routes_dispatch(self):
+        for rc in ("0", "1"):
+            with self.subTest(rc=rc):
+                self.gate_env = {"STUB_GATE_RC": rc}
+                r, argv = self.spawn(self.base, "--runtime", "codex")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("model_reasoning_effort=medium", argv)
+
+    def test_refusal_and_errors_prevent_even_explicit_model_launch(self):
+        for rc in ("2", "3", "127"):
+            with self.subTest(rc=rc):
+                self.gate_env = {"STUB_GATE_RC": rc}
+                r, argv = self.spawn(self.base, "--runtime", "codex", "--model", "gpt-6-astra")
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertEqual(argv, [])
+
+    def test_missing_gate_and_malformed_routes_refuse(self):
+        for route in ("CLAUDE high", "gpt-6-sol", "gpt-6-sol bogus", "gpt-6-sol medium extra",
+                      "gpt-6-sol medium\ngpt-6-astra high", ""):
+            with self.subTest(route=route):
+                self.gate.write_text('#!/bin/bash\nprintf "%s" ' + __import__("shlex").quote(route) + '\n')
+                r, argv = self.spawn(self.base, "--runtime", "codex")
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertEqual(argv, [])
+        self.gate.unlink()
+        r, argv = self.spawn(self.base, "--runtime", "codex")
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(argv, [])
+
+    def test_class_is_codex_only(self):
+        r, argv = self.spawn(self.base, "--class", "security")
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(argv, [])
 
     def test_an_unknown_runtime_is_rejected(self):
         r, _ = self.spawn(self.base, "--runtime", "bogus")

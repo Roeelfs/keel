@@ -30,7 +30,7 @@ class ModelRoutingContractTests(unittest.TestCase):
 
     def test_representative_codex_lane_asks_the_gate_not_a_hardcoded_tier(self):
         self.assertIn(
-            "read -r MODEL EFFORT < <(~/.claude/scripts/codex-headroom.sh --route standard)",
+            "~/.claude/scripts/codex-dispatch.sh standard <promptfile> <outfile> <repo>",
             SKILL,
         )
         self.assertNotIn("-m gpt-6-sol", SKILL)
@@ -91,7 +91,7 @@ class ModelRoutingContractTests(unittest.TestCase):
             self.assertIn("codex-headroom.sh", doc, name)
         self.assertIn("--route", SKILL)
         self.assertIn("--route <class>", ROUTING)
-        self.assertIn("--route falsifier", SOL_LANE)
+        self.assertIn("--route <class>", SOL_LANE)
         self.assertIn("the one route table", ROUTING)
 
     def test_no_restated_gen6_model_id_remains_outside_the_owner(self):
@@ -101,6 +101,14 @@ class ModelRoutingContractTests(unittest.TestCase):
         for doc, name in ((SKILL, "SKILL.md"), (ROUTING, "model-routing.md"), (SOL_LANE, "sol-judgment-lane.md")):
             for bad_id in RESTATED_GEN6_IDS:
                 self.assertNotIn(bad_id, doc, f"{name} must not restate {bad_id} — ask the gate by class")
+
+    def test_judgment_document_dispatch_honors_central_gate(self):
+        self.assertIn("codex-dispatch.sh <judgment-class>", SOL_LANE)
+        self.assertIn("unknown-cap routes dispatch", SOL_LANE)
+        self.assertIn("weekly refusal threshold remains 99%", SOL_LANE)
+        self.assertNotIn("codex exec --", SOL_LANE)
+        self.assertNotIn("90%", SOL_LANE)
+        self.assertNotIn("2x pace", SOL_LANE)
 
     def test_negative_control_the_restated_id_check_actually_fires(self):
         """Sanity-control: prove assertNotIn above is not vacuously true on this corpus."""
@@ -122,7 +130,7 @@ class SolJudgmentLaneTests(unittest.TestCase):
         for text in (
             "One question · fresh context · one document · stop",
             "research-as-retrieval is Sol-medium",
-            "codex-headroom.sh --model falsifier",
+            "codex-dispatch.sh <judgment-class> <promptfile> <outfile> <repo>",
             "You are a leaf agent",
         ):
             self.assertIn(text, lane)

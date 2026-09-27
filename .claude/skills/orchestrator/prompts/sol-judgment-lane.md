@@ -1,6 +1,6 @@
 # Sol judgment lane — bounded frontier escalation
 
-Sol-high is the frontier judgment effort. It earns its cost on **judgment**: investigation, grilling,
+Sol-high handles bounded adversarial judgment; Astra handles architecture, security, hard RCA and final adjudication through the central gate. It earns its cost on **judgment**: investigation, grilling,
 adversarial falsification, "is this reasoning actually sound?". It does not earn it on synthesis,
 summarizing, mining, or execution — those stay on Sol-medium or Luna.
 
@@ -25,7 +25,7 @@ one.**
 | "Grill this plan / find what I'm missing" | **Sol-high** | the value is in what a weaker model fails to notice |
 | "Investigate why X — competing hypotheses" | **Sol-high** | hypothesis discrimination, not retrieval |
 | "Falsify this finding" | **Sol-high** | the falsifier wave is the canonical Sol use |
-| "Security / irreversible-architecture judgment" | **Sol-high** | already the standing escalation |
+| "Security / irreversible-architecture judgment" | **Astra-high** | central gate classes `security` / `architecture` |
 | "Summarize these N documents" | Sol-medium | synthesis, not judgment |
 | "Research how library X's API works" | Sol-medium | retrieval; the answer is in the docs |
 | "Census / locate / extract / existence check" | Luna | mechanical |
@@ -61,16 +61,20 @@ the question is itself false, say so and stop — that is a successful lane, not
 Return the deliverable and nothing else. Do not summarize your process.
 ```
 
-Spawn with `fork_turns: "none"` and the highest effort the question warrants. Ask the gate for the
-model rather than hardcoding it — `~/.claude/scripts/codex-headroom.sh` is the single owner of the
-model + effort ladder (`--route falsifier` resolves this lane to Sol at high effort); the CLI form
-for this Sol-high lane is:
+Native children use `fork_turns: "none"` and the effort the question warrants. For a Claude-owned
+background document lane, select the judgment class: `falsifier` for adversarial falsification;
+`architecture`, `security`, `hard-rca`, or `adjudication` for the hardest decisions. The single
+model + effort owner is `~/.claude/scripts/codex-headroom.sh` (`--route <class>`).
+
+Write the mission to a prompt file and launch the managed document wrapper through
+harness-tracked background Bash (`run_in_background: true`):
 
 ```bash
-read -r MODEL EFFORT < <(~/.claude/scripts/codex-headroom.sh --route falsifier)
-cd <repo> && echo '' | codex exec --skip-git-repo-check -m "$MODEL" \
-  -c model_reasoning_effort="$EFFORT" -s read-only -o <outfile> -- "<mission>"
+~/.claude/scripts/codex-dispatch.sh <judgment-class> <promptfile> <outfile> <repo>
 ```
+
+Consume the completion notification and grade the artifact. The wrapper checks the central gate;
+raw CLI calls bypass that enforcement.
 
 ## Grading
 
@@ -82,11 +86,8 @@ because a frontier model's wrong answer is the most persuasive kind.
 
 ## Before dispatching
 
-Ask the gate — `codex-headroom.sh --model falsifier` — and honor it. The gate grades on **pace**
-(usage against the fraction of the weekly window elapsed), not on the absolute number: spending
-evenly reads as 1.0x and never degrades however high the total climbs, while a burst reads high
-immediately. The judgment class does not degrade — past ~2x pace or 90% used it answers `CLAUDE`,
-because a falsifier wave on a mining-tier model returns confident-wrong verdicts, and that is worse
-than no verdict. So a `CLAUDE` answer here means route to fable/opus, not "try again cheaper". The cap has saturated four times
-(2026-07-18, 2026-08-02..05, 2026-08-11, 2026-08-17); a fresh 0% window is as often the aftermath of
-a blowout as it is headroom.
+Honor the central gate's verdict; `codex-headroom.sh --route <class>` owns the current policy.
+The weekly refusal threshold remains 99%; warning routes and unknown-cap routes dispatch.
+Pace is measured as telemetry, not a separate refusal or model-degradation rule. The managed
+wrapper applies this gate before launching. A refusal means keep the lane on Claude rather than
+retrying at a cheaper Codex tier. Preserve the accepted finite review manifest and spent slots.

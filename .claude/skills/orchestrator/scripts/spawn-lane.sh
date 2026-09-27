@@ -6,7 +6,7 @@
 #
 # Usage:
 #   spawn-lane.sh --mission <file|-> [--cwd <worktree>] [--worktree <name>]
-#                 [--runtime claude|codex] [--model <alias>] [--mode <permission-mode>]
+#                 [--runtime claude|codex] [--model <alias>] [--class <task-class>] [--mode <permission-mode>]
 #                 [--mcp-config <file>]
 #
 #   --runtime codex   Spawn the lane on Codex instead of Claude. Separate billing pool.
@@ -41,7 +41,7 @@
 set -euo pipefail
 
 MISSION_SRC="" ; WORKTREE="" ; MODEL="" ; MODE="bypassPermissions" ; LANE_CWD="" ; MCP_CFG=""
-RUNTIME="claude" ; ALLOW_NETWORK=0
+RUNTIME="claude" ; ALLOW_NETWORK=0 ; CLASS="standard" ; CLASS_SET=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --mission)    MISSION_SRC="$2"; shift 2 ;;
@@ -49,6 +49,7 @@ while [ $# -gt 0 ]; do
     --worktree)   WORKTREE="$2"; shift 2 ;;
     --model)      MODEL="$2"; shift 2 ;;
     --runtime)    RUNTIME="$2"; shift 2 ;;
+    --class)      CLASS="$2"; CLASS_SET=1; shift 2 ;;
     --allow-network) ALLOW_NETWORK=1; shift 1 ;;
     --mode)       MODE="$2"; shift 2 ;;
     --mcp-config) MCP_CFG="$2"; shift 2 ;;
@@ -58,8 +59,10 @@ done
 
 [ -n "$MISSION_SRC" ] || { echo "spawn-lane.sh: --mission <file|-> required" >&2; exit 2; }
 case "$RUNTIME" in
-  claude) : "${MODEL:=sonnet}" ;;
-  codex)  : "${MODEL:=gpt-6-sol}" ;;
+  claude)
+    [ "$CLASS_SET" = 0 ] || { echo "spawn-lane.sh: --class is codex-only" >&2; exit 2; }
+    : "${MODEL:=sonnet}" ;;
+  codex) : ;;
   *) echo "spawn-lane.sh: --runtime must be claude|codex (got '$RUNTIME')" >&2; exit 2 ;;
 esac
 [ -n "$LANE_CWD" ] && cd "$LANE_CWD"
@@ -79,8 +82,32 @@ if [ "$RUNTIME" = codex ]; then
   # and LANE_MCP_CONFIG (the documented product of .claude/lane-env.sh, SKILL.md "Repo lane hook") would
   # become dead data while the skill still promises the lane gets those MCPs.
   [ -n "$WORKTREE" ] && { echo "spawn-lane.sh: --worktree is claude-only; create it first and pass --cwd" >&2; exit 2; }
-  [ -n "$MCP_CFG" ] && { echo "spawn-lane.sh: --mcp-config is claude-only; a codex lane gets no MCP servers. Keep this lane on claude." >&2; exit 2; }
+  [ -n "$MCP_CFG" ] && { echo "spawn-lane.sh: --mcp-config is claude-only; supplied MCP config is unsupported on codex. Keep this lane on claude." >&2; exit 2; }
   [ "$MODE" != bypassPermissions ] && { echo "spawn-lane.sh: --mode is claude-only; codex sandboxing is set by this script. Keep this lane on claude." >&2; exit 2; }
+
+  # All Codex launches, including explicit model overrides, consult the central cap gate.
+  # Unknown-cap routes intentionally dispatch; missing or malformed gate responses do not.
+  GATE="$HOME/.claude/scripts/codex-headroom.sh"
+  [ -x "$GATE" ] || { echo "spawn-lane.sh: missing executable headroom gate" >&2; exit 2; }
+  GATE_RC=0
+  ROUTE="$("$GATE" --route "$CLASS")" || GATE_RC=$?
+  case "$GATE_RC" in
+    0|1) ;;
+    *) echo "spawn-lane.sh: headroom gate refused or failed (rc=$GATE_RC); use Claude" >&2; exit 2 ;;
+  esac
+  read -r ROUTED_MODEL EFFORT EXTRA <<< "$ROUTE" || true
+  case "$ROUTED_MODEL" in
+    gpt-*) ;;
+    *) echo "spawn-lane.sh: unusable headroom model; refusing" >&2; exit 2 ;;
+  esac
+  case "$EFFORT" in
+    low|medium|high|xhigh|max) ;;
+    *) echo "spawn-lane.sh: unusable headroom effort; refusing" >&2; exit 2 ;;
+  esac
+  [ -z "$EXTRA" ] && [ "$ROUTE" = "$ROUTED_MODEL $EFFORT" ] || {
+    echo "spawn-lane.sh: malformed headroom route; refusing" >&2; exit 2;
+  }
+  : "${MODEL:=$ROUTED_MODEL}"
 
   # ---- writable roots: BOTH git dirs, and ENCODED, never interpolated -------------------
   # Both, because in a linked worktree --absolute-git-dir is .git/worktrees/<name> (HEAD,
@@ -131,9 +158,12 @@ print(json.dumps(roots))')" || exit 2
   # a vendor API). It confers push authority as a side effect. Do not use it to make a lane
   # "ship by itself"; use it when the WORK needs the network, and grade what it pushed.
   CARGS=( --skip-git-repo-check -m "$MODEL" -s workspace-write
+          -c "model_reasoning_effort=$EFFORT"
           -c "sandbox_workspace_write.writable_roots=$ROOTS_JSON" )
   if [ "$ALLOW_NETWORK" = 1 ]; then
     CARGS+=( -c "sandbox_workspace_write.network_access=true" )
+  else
+    CARGS+=( -c "sandbox_workspace_write.network_access=false" )
   fi
 
   # ---- dead-lane signal ----------------------------------------------------------------

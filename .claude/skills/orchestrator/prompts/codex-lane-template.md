@@ -19,7 +19,7 @@ Accepted build task group: <exact tasks; required for BUILD>
 
 The lifecycle is define → build → verify-release. This fresh bounded task owns only PHASE.
 
-DEFINE: make scope, acceptance criteria, mode, and the proof-obligation ledger durable. The root author writes the moderate plan. At most one fresh Sol-medium critical coverage reviewer; Sol-high only for a named security/irreversible/trust-boundary dispute.
+DEFINE: make scope, acceptance criteria, mode, and the proof-obligation ledger durable. The root author writes the moderate plan. At most one fresh Sol-medium critical coverage reviewer; Astra judgment classes for a named security/irreversible/trust-boundary dispute; fresh context, one decision artifact, then stop.
 
 BUILD: implement only the exact accepted task group from durable artifacts, run targeted changed-seam checks, and record changed seams. Do not absorb adjacent discovered work or repeatedly run the project gate; defer nonblocking discoveries with an owner.
 

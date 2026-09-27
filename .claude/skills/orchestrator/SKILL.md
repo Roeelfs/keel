@@ -17,8 +17,9 @@ Depth lives in `references/` and is **not** auto-loaded:
 ## Model topology — cheap root, intelligent escalations
 
 - **Long-lived Codex root:** ask the gate for the `standard` class (`~/.claude/scripts/codex-headroom.sh --route standard` → Sol at Medium; see `prompts/model-routing.md` for the full class table). The root pays for accumulated context on every turn, so it coordinates, integrates, and keeps state on the everyday tier.
-- **Sol-high escalation:** use a fresh, bounded lane at the gate's `judge`/`security` class (Sol at high effort) only for architecture with irreversible consequences, security/trust boundaries, hard RCA, or final adversarial adjudication. Give it no history or the smallest evidence slice, one decision artifact, and a stop condition.
-- Return the decision artifact to the Sol-medium root. When a Sol-high planning phase ends, start or resume a fresh Sol-medium implementation task instead of extending the Sol-high session through execution and review.
+- **Astra judgment escalation:** use a fresh, bounded lane at the gate's `architecture`, `security`, `hard-rca`, or `adjudication` class for irreversible architecture, security/trust boundaries, hard RCA, or final adjudication. Use these lanes whenever an accepted task needs that judgment, within its finite review manifest. Give it no history or the smallest evidence slice, one decision artifact, and a stop condition.
+- Return the decision artifact to the Sol-medium root. When a judgment lane ends, start or resume a fresh Sol-medium implementation task instead of extending it through execution and review.
+- **Sol-high escalation:** the `falsifier`/`adversarial` class covers bounded adversarial review and hypothesis falsification; use the same fresh-context decision-artifact contract.
 - Routine implementation and topical review stay on Sol-medium (gate class `standard`). Native mining, file search, and deterministic procedure use Luna-low instead (gate class `mining`) — the callable model roster and its verification date live in `codex-headroom.sh`, not here. An explicit user model choice supported by the callable surface overrides this default.
 
 ## Root control plane, worker execution plane
@@ -107,9 +108,7 @@ A lane goes interactive **only when it needs the human**; everything else runs p
 | **Chip session** | human judgment | `spawn_task` — **requires a human click** | grillings, decision gates, and resurrecting a parked lane the human will personally drive (`sessions-to-chips`) — never a substitute for a headless lane in an unattended stretch |
 
 ```bash
-read -r MODEL EFFORT < <(~/.claude/scripts/codex-headroom.sh --route standard)
-cd <repo> && echo '' | codex exec --skip-git-repo-check -m "$MODEL" \
-  -c model_reasoning_effort="$EFFORT" -s read-only -o <outfile> -- "<prompt>"
+~/.claude/scripts/codex-dispatch.sh standard <promptfile> <outfile> <repo>
 ```
 > **Grade this lane by its ARTIFACT before counting it** — exit 0 is not evidence. Invocation flags, the `wc -l` / severity-grep check, and the DEAD vs **BLOCKED-ON-QUOTA** vs REAL classification live in [`docs/codex-lane-contract.md`](../../../docs/codex-lane-contract.md). Measured 2026-08-02/03: 18 of 52 rollouts hit a quota wall while exiting normally; 20 of 52 completed fine, so a dead lane is never proof the runtime is down.
 
@@ -117,7 +116,7 @@ Then read a **slice** of `<outfile>`. Codex starts **cold** — a lane needing a
 
 ### Which runtime a SHIPPABLE lane gets
 
-The headless row takes `--runtime codex`. Codex is a separate billing pool and Claude time is
+The headless row takes `--runtime codex --class <task-class>` (default `standard`). It consults the central headroom gate even with an explicit `--model` override, and applies the class effort. Claude leads user interaction, task acceptance and integration while independent bounded Codex lanes run through harness-tracked background Bash. Codex is a separate billing pool and Claude time is
 the scarce one, so reach for it whenever the lane's work fits — but it is **not** an
 unconditional default, and the seam is narrower than "it ships":
 
@@ -127,8 +126,8 @@ division the advance tick already uses for deploys. `--allow-network` re-opens e
 the WORK needs it (a package install, a vendor API); it confers push authority as a side
 effect, so grade what such a lane pushed.
 
-**Keep a lane on Claude when it needs:** MCP servers (a Codex lane gets none — the launcher
-refuses `--mcp-config` rather than dropping it), a permission mode other than the sandbox
+**Keep a lane on Claude when it needs:** MCP servers (the launcher
+refuses supplied `--mcp-config` rather than dropping it; the normal Codex profile remains loaded), a permission mode other than the sandbox
 this script sets, accumulated conversation, or interactive judgment.
 
 **Two contracts a Codex lane must satisfy, both handled by the launcher:** every commit
@@ -330,7 +329,7 @@ Stale, contradicted, or absent input → STOP and re-verify. Never state a routi
 
 `~/.claude/scripts/spawn-lane.sh` is the lane verb (a symlink wire-skills.sh keeps pointing at this skill's `scripts/spawn-lane.sh`); the operator one-time allowlists that path (a session may not invoke `--permission-mode bypassPermissions` directly). Rules, each earned by a real failure:
 
-- **Repo lane hook.** `<lane-cwd>/.claude/lane-env.sh` is sourced under the spawner's `set -euo pipefail` with `$RUNTIME` in scope; it may export `LANE_MCP_CONFIG` (passed to a Claude lane as `--mcp-config`). Export it only for `RUNTIME=claude` — a codex lane refuses MCP config with exit 2. The file must be TRACKED: a worktree lane sees only tracked files.
+- **Repo lane hook.** `<lane-cwd>/.claude/lane-env.sh` is sourced under the spawner's `set -euo pipefail` with `$RUNTIME` in scope; it may export `LANE_MCP_CONFIG` (passed to a Claude lane as `--mcp-config`). Export it only for `RUNTIME=claude` — a codex lane refuses supplied MCP config with exit 2. The file must be TRACKED: a worktree lane sees only tracked files.
 - **Never pipe the spawn; detach stdin.** `spawn-lane.sh … | tail` can exit 0 with 0 bytes and zero work done. `claude -p --output-format json` ALWAYS emits a final JSON blob — **empty output + exit 0 is proof the lane never ran.**
 - **Chunk by lifecycle phase** — background Bash has a runtime cap; a full feature marathon gets killed or accumulates context. Use one fresh bounded task for each of `define`, `build`, and `verify-release`; each resumes from branch artifacts and the proof-obligation ledger.
 - **`--worktree` on first spawn only; `--cwd <existing-worktree>` on every continuation** — a second `--worktree` collides with the locked one.
@@ -350,7 +349,7 @@ List which paths each in-flight lane owns and name them DO-NOT-TOUCH in the new 
 
 Backlog lives on the repo's tracker, named in its `AGENTS.md` `## Agent skills` block. For a huge/foggy multi-session effort run `/wayfinder` FIRST; to break a settled plan into tickets, `/to-tickets`.
 
-Per-lane model/effort recommendations: `prompts/model-routing.md`. A Codex orchestrator root defaults to **Sol-medium**; Sol-high is a bounded judgment escalation, never the context-accumulating execution loop. Ad-hoc Claude delegation defaults to **sonnet**; `opus` needs a one-line justification; the deep verify/judge/adversarial bucket is `fable` (Claude) or Codex's `judge`/`security` class at high effort — `codex-headroom.sh --route` owns the model id, never restated here.
+Per-lane model/effort recommendations: `prompts/model-routing.md`. A Codex orchestrator root defaults to **Sol-medium**; Sol-high is a bounded judgment escalation, never the context-accumulating execution loop. Ad-hoc Claude delegation defaults to **sonnet**; `opus` needs a one-line justification; the deep verify/judge/adversarial bucket is `fable` (Claude) or Codex's bounded `adjudication`/`security` class at high effort — `codex-headroom.sh --route` owns the model id, never restated here.
 
 ## Skill memory
 
