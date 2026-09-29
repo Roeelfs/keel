@@ -198,6 +198,30 @@ def claim_slot(directory, policy, position):
             stream.close()
 
 
+def announce_governor_context(directory, reason, command, policy):
+    """The whole reclaim interface (2026-09-29 founder rescope): a compact CONTEXT block to stderr
+
+    plus one instruction line, on every deny/defer. Read-only and best-effort: any failure here
+    (missing governor package, a slow probe, a permission error) is swallowed so a deferral is
+    never turned into a crash. No kill or delete ever happens as a result of this call.
+    """
+    try:
+        from governor import admission, context
+        from governor.state import governor_directory
+        from governor.snapshot import take as take_snapshot
+        governor_dir = governor_directory()
+        snapshot = take_snapshot(governor_dir, directory)
+        job_class = Path(command[0]).name if command else 'other-heavy'
+        built = context.build(reason, job_class, snapshot, policy)
+        print(context.render_stderr_block(built), file=sys.stderr)
+        context.write_last_context(governor_dir, built)
+        event(directory, 'governor_decision', job_id=None, reason=reason,
+              floors_fired=built['floors_fired'], d_rule=built['d_rule'], enforced=False)
+    except Exception as error:  # noqa: BLE001 - this path must never turn a deferral into a crash
+        print(f'with-heavy-lock: governor context unavailable ({type(error).__name__}: {error})',
+              file=sys.stderr)
+
+
 def acquire(directory, policy, job_id, command):
     queue = directory / 'queue'
     queue.mkdir(exist_ok=True, mode=0o700)
@@ -243,6 +267,7 @@ def acquire(directory, policy, job_id, command):
                 print('with-heavy-lock: DEFERRED (' + reason + '); no command started. '
                       'Do not retry unchanged or treat this as test success. No CI push is authorized.',
                       file=sys.stderr)
+                announce_governor_context(directory, reason, command, policy)
                 return None
             if progress_at is None or now >= progress_at:
                 label = 'QUEUED' if progress_at is None else 'still QUEUED'
@@ -509,6 +534,36 @@ def run_job(command, directory, policy, job_id, stream, slot):
             signal.signal(sig, handler)
 
 
+def run_broker_if_wrapper(directory, policy, command):
+    """Runs `command` with no slot when it is a top-level shell/`.sh` wrapper (spec §6).
+
+    Only reached in `governor_mode=enforce` (§13's rollout marks the broker phase-1, not shadow).
+    Returns the exit code, or None when `command` is not a wrapper (the caller falls through to
+    the normal `acquire()` path).
+    """
+    from governor.broker import is_wrapper
+
+    if not is_wrapper(command, policy, cwd=working_directory()):
+        return None
+    shim_dir = account_home() / '.keel' / 'resource-hooks' / 'shims'
+    env = {**os.environ, 'PATH': str(shim_dir) + os.pathsep + os.environ.get('PATH', '')}
+    started = time.monotonic()
+    event(directory, 'broker_started', executable=Path(command[0]).name, args=event_args(command),
+          cwd=working_directory())
+    child = subprocess.Popen(command, env=env, start_new_session=True)
+    try:
+        code = child.wait(timeout=command_seconds(policy, command))
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(child.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+        code = child.wait(timeout=10)
+    event(directory, 'broker_completed', executable=Path(command[0]).name, exit_code=code,
+          duration_seconds=round(time.monotonic() - started, 1))
+    return code
+
+
 def main():
     try:
         policy = load_policy()
@@ -533,6 +588,10 @@ def main():
             return 64
         if valid_lease(directory):
             os.execvpe(command[0], command, child_environment(policy, os.environ['KEEL_HEAVY_JOB_ID']))
+        if policy.governor_mode == 'enforce':
+            broker_result = run_broker_if_wrapper(directory, policy, command)
+            if broker_result is not None:
+                return broker_result
         job_id = uuid.uuid4().hex
         try:
             claimed = acquire(directory, policy, job_id, command)
