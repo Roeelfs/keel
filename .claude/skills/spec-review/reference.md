@@ -134,6 +134,18 @@ This step is the "vision fitness check" — a single dashboard view of the spec'
 This is the coexistence the delete-legacy gate above cannot see: that gate asks whether the OLD path is deleted; this lane asks how many copies the NEW path ships (the agent's own `Why_This_Matters` carries the incident).
 
 
+## Runtime-wiring lane — consumer-side reachability
+
+**Fires** when the spec introduces a new env var, secret, credential ARN, feature flag, or downstream URL that deployed runtime code will READ — or adds a new deployed function, or moves code that reads one into a module shared by several functions. Gated but non-droppable across profiles; record `SKIPPED (no new runtime dependency)` otherwise.
+
+**Dispatch** the project's IaC/wiring agent in the same wave if the repo defines one (an agent in `.claude/agents/` whose description claims env/IAM/secret wiring); else `general-purpose` with this brief.
+
+**Job — consumer-side, never stack-side.** For each new name, enumerate every deployed entry point whose call graph can EXECUTE the read (bundle presence is not reachability — bundlers include shared modules everywhere), and return the consumer list the spec's infra section must wire: env key + permission grant on each function's ACTUAL execution role, plus the same-change standing gate that pins it.
+
+**Why a separate lane.** Measured 2026-09-21→29: one shared-code secret read was wired into 1 of the 4 functions that execute it; every conversational bot failed for 8 days. Every other lane missed it because no line in the diff was wrong — the defect was an ABSENT line in a stack file the change never touched. A stack-side review cannot see an absence; only a walk from the consumer can.
+
+Rows classify with the defects in Step 5 (like 3c), no Codex peer. Wired into fewer functions than execute it = **CRITICAL**.
+
 ## Why This Exists — full 10-point rationale (moved detail)
 
 A spec written in a long session accumulates blind spots. This skill breaks that with:

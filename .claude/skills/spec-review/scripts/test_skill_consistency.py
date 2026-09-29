@@ -26,7 +26,8 @@ PROMPTS_DIR = SKILL_DIR / "prompts"
 # plan_falsifier_batches.py at the Step 5a falsifier-wave step (see
 # reference.md for the material this and SR5 moved out; SR1/SR4's additions
 # were real new process, not creep, so the ceiling moved with them then too).
-MAX_SKILL_BYTES = 67050
+# 2026-09-29: +438B for the gated runtime-wiring lane (one pointer line; detail in reference.md).
+MAX_SKILL_BYTES = 67488
 
 
 def declared_agent_types():
