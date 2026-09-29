@@ -1,10 +1,22 @@
-# SPEC — Machine governor: contended admission, local-vs-CI routing, delegated reclaim, red-main coordination
+# SPEC — Machine governor: contended admission, local-vs-CI routing, a CONTEXT interface to machine-steward
 
-> Status: DRAFT r2 for implementation, 2026-09-29. r1 (650 lines) is preserved at `/tmp/governor/rev/SPEC.v1.md`.
-> Design of record: founder-approved "machine governor" plus the founder rulings of 2026-09-29 (in-session), applied in r2.
-> Evidence: brief `docs/investigations/2026-09-29-design-an-intelligent-local-vs-ci.md` (cynap worktree `bridge-cse_01Fq6LrfJHPYvR2d28ZhPqFs`), stall report `/tmp/verify-stall/REPORT.md`, critiques `/tmp/governor/critiques.md`, probes `/tmp/governor/design-review-lane/probe{,2}.py`, r2 probes `/tmp/governor/rev/stats2.py` and `/tmp/governor/q1probe/`.
-> `/tmp` is volatile. Before implementation, copy this file, `/tmp/governor/spec-author/{req4.json,resp4.json,chains.py}`, `/tmp/governor/rev/stats2.py` and `/tmp/governor/design-review-lane/probe*.py` into keel under `docs/specs/2026-09-29-machine-governor/`.
-> §17 maps every critique id to its resolution. V6 (ETA error) moved to phase 2 (§16).
+> Status: r3, as-built 2026-09-29. r2 (this file's prior revision) is preserved in git history at
+> commit `0c37b01`. r1 (650 lines) is preserved at `/tmp/governor/rev/SPEC.v1.md` (`/tmp` is volatile).
+> Design of record: founder-approved "machine governor" plus the founder rulings of 2026-09-29
+> (in-session, r2), plus a same-day founder rescope during phase-1 implementation (r3): the
+> headless reclaim/red-main lane, the tick LaunchAgent, the mission-template lane and the
+> multi-case `governor-act` executor (§9-§11 of r2) are **dropped, not phase-2'd**. Killing,
+> archiving, storage reclaim and red-main coordination move to a single always-on **desktop**
+> session named `machine-steward` (charter: `docs/machine-steward.md`). keel's job shrinks to: (1)
+> decide contended admission (rule D, floors, JEV in shadow), (2) the wrapper broker, (3) print a
+> compact machine CONTEXT block on every deny/defer and hand it to machine-steward. keel never
+> kills or deletes on its own initiative in phase 1, except through the one safety-checked
+> `governor_kill()` helper machine-steward (or a human) can call.
+> Evidence: brief `docs/investigations/2026-09-29-design-an-intelligent-local-vs-ci.md` (cynap
+> worktree `bridge-cse_01Fq6LrfJHPYvR2d28ZhPqFs`), stall report `/tmp/verify-stall/REPORT.md`,
+> critiques `/tmp/governor/critiques.md`, r2 probes `/tmp/governor/rev/stats2.py`, phase-0 live
+> evidence `docs/specs/2026-09-29-machine-governor.phase0.md` (Keychain + one live JEV call).
+> §17 maps every r1→r2 critique id to its resolution; this header records the r2→r3 rescope.
 
 ---
 
@@ -32,8 +44,8 @@
 | V2 | Retry chains: a deferral followed by an unchanged re-queue ≤ 15 min later that is itself deferred again | 61 / 114 re-queued | 0 | `governor grade` → `retry_chains` |
 | V3 | p90 time from the first feature-branch `cynap-sandbox verify` to a local `started` or a CI route receipt | UNPROVEN; phase 0 measures it | ≤ 600 s | `governor grade` joined with `.cynap/verify-route.jsonl` |
 | V4 | Free disk on `/System/Volumes/Data` | 42 GiB free | never < 10 GiB; snapshot p10 ≥ 25 GiB | `governor grade` → `disk_free_gib_min`, `p10` |
-| V5 | Kills of an active session's work, from **every** kill engine (§9.6) | n/a | **0, hard.** A violation flips shadow inline (§9.5). | `governor audit-kills` plus the inline check |
-| V7 | Red-main episodes where more than one session pushed a fix for the same failing run | 1 (2026-09-29) | 0. Every episode has an owner notice within 10 min of detection and one all-clear. | `governor grade` → `redmain` from `redmain/receipts.jsonl` joined with `gh pr list --search <sinceSha>` |
+| V5 | Kills of an active session's work, from **every** kill path (`governor_kill`, and whatever `machine-steward` does per its own charter) | n/a | **0, hard.** | `governor_kill`'s own gate refusals (§9.2) are unconditional, not a post-hoc audit; `machine-steward` keeps its own receipt ledger outside this repo. No `governor audit-kills` CLI is built (§10). |
+| V7 | Red-main episodes where more than one session pushed a fix for the same failing run | 1 (2026-09-29) | 0. Every episode has an owner notice within 10 min of detection and one all-clear. | Now `machine-steward`'s charter to run and grade (§9.5), not a keel `governor grade` CLI. |
 
 ## 2. Non-goals
 
@@ -48,33 +60,31 @@
 
 | Concern | Owner repo | File | Ship verb |
 |---|---|---|---|
-| Snapshot, admission (fast path, D rule, floors, JEV on contended acquires only) | keel | `tooling/sandbox/governor/{snapshot,admission,jev_client}.py` (new), called from `heavy_runner.acquire()` | direct commit to `master`, gated by `python3 -m unittest tooling/sandbox/test_*.py` |
-| Wrapper broker and heavy-tool shims | keel | `tooling/sandbox/governor/broker.py`, `resource-hooks/shims/*` (new) | same |
-| Tick agent (reclaim trigger, red-main detector, single-flight, rate limits, lane spawn) | keel | `tooling/sandbox/governor/tick.py`, LaunchAgent `ai.keel.governor.tick` (new) | same |
-| Executor: closed verb set, re-validation, receipts | keel | `tooling/sandbox/governor/act.py`, CLI `governor-act` | same |
-| Grading and kill audit | keel | `tooling/sandbox/governor/grade.py`, CLI `governor grade\|audit-kills\|replay` | same |
-| Lane spawn primitive (`--effort`, `--allowed-tools`) | keel | `bin/spawn-lane.sh` (the `~/.claude/scripts/spawn-lane.sh` symlink target) | same |
+| Snapshot, admission (fast path, D rule, floors, JEV on contended acquires only) | keel | `tooling/sandbox/governor/{snapshot,admission,jev_client}.py`, called from `heavy_runner.acquire()` | direct commit to `master`, gated by `python3 -m unittest tooling/sandbox/test_*.py` |
+| Wrapper broker and heavy-tool shims | keel | `tooling/sandbox/governor/broker.py`, `~/.keel/resource-hooks/shims/*` | same |
+| Session-registry join (owner pid/cwd/name/idle for the CONTEXT block) | keel | `tooling/sandbox/governor/registry.py` | same |
+| The CONTEXT interface: on a deny/defer, print a compact snapshot+floors+d_rule+candidates block to stderr, hand it to `machine-steward`, persist `last-context.json` | keel | `tooling/sandbox/governor/context.py`, called from `heavy_runner.announce_governor_context()` | same |
+| Read-only admission preview for `verify-route` (never queues, never claims a slot, never makes a fresh live JEV call) | keel | `heavy_runner.admit_preview()`, CLI `with-heavy-lock --admit-preview --class <c> --json` | same |
+| The one safety-checked kill helper | keel | `tooling/sandbox/governor/act.py`, CLI `governor-kill <pid> <lstart>` | same |
 | Deferral-retry guard | keel | `.claude/hooks/serialize-heavy-ops.py` | same, plus the Codex re-trust step (§13) |
-| Build-output strip (Pass A only) | claude-harness | `scripts/worktree-reaper.sh` | commit to `main` |
-| Cache/tmp sweep; absorbs `disk-clean`'s unique rows | claude-harness | `scripts/disk-keeper.sh` | same |
-| Storage discipline and target table (the lane *invokes* this) | claude-harness | `skills/macos-storage-reclaim/SKILL.md` | same |
-| Verify route | cynap | `tooling/sandbox/verify-route` (new `.mjs`), folded into `cynap-sandbox verify` | PR → merge (prod-class, needs explicit go-ahead) |
-| Red-main registration and signal source | cynap | `.claude/governor/red-main.json` (new) pointing at the existing `tooling/sandbox/lib/main-deploy-health.mjs` | same PR |
-| vitest watchdog kill path | cynap | `tooling/process-watchdog/vitest-watchdog.mjs` → `governor-act` | same PR |
+| **Everything else that acts** (kill orphans/duplicates/idle trees, remove worktrees, reclaim storage, archive sessions, red-main coordination) | **the always-on desktop session `machine-steward`**, not keel automation | `docs/machine-steward.md` (charter) | a human starts the session once; it runs the charter, not a ship |
+| Verify route | cynap | `tooling/sandbox/verify-route.mjs`, folded into `cynap-sandbox verify` | PR → merge (prod-class, needs explicit go-ahead) |
+| vitest watchdog kill path | cynap | `tooling/process-watchdog/vitest-watchdog.mjs` -> `governor-kill`, or reports to `machine-steward` | same PR |
 
 - **Why admission lives in keel.** `heavy_runner.py` is the single chokepoint that Claude and Codex callers both pass through.
-- **Why the tick is a LaunchAgent and not the caller.** B3 showed that doing reclaim inside `acquire()` runs under the caller's signal handlers (`heavy_runner.py:213-217` raise `Interrupted`) and without single-flight. The tick runs detached, every 300 s. `acquire()` only *requests* a tick early (§9.1).
-- **Global-layer rule.** keel names no repo. A repo opts into red-main coordination with its own `.claude/governor/red-main.json`, and the machine list of opted-in repos lives in `~/.keel/governor/repos.json`.
+- **Why there is no tick, no lane, no multi-case executor (2026-09-29 rescope).** A detached LaunchAgent doing reclaim on its own initiative, and a headless `claude -p` lane it spawns to do the reasoning, both add a second unattended actor with kill/delete authority -- exactly the surface B1-B3/M1-M6 (§17) spent r1->r2 hardening. The founder's simpler ruling: one always-on **desktop** session (`machine-steward`) is that actor, full stop. keel's only remaining job on the reclaim side is to *tell* it what it's looking at (the CONTEXT block) and to expose one safety-checked verb (`governor_kill`) it can call -- never to decide or act on its own.
+- **Global-layer rule.** keel names no repo. `context.py`'s registry join reads `~/.claude/sessions` and `~/.claude/projects`, which are machine-wide, not repo-scoped.
 
 ```
 agent Bash ─► serialize-heavy-ops.py ─► (retry guard §8) ─► with-heavy-lock
-   with-heavy-lock: wrapper? ─yes─► broker (§6): no slot; PATH shims route heavy children back into with-heavy-lock
+   with-heavy-lock: wrapper? ─yes─► broker (§6, governor_mode=enforce only): no slot; PATH shims route heavy children back into with-heavy-lock
                     else ─► acquire(): fast path (free slot within policy.slots AND pressure_reason() is None) ─► admit, no JEV
-                                       contended ─► floors ─► arbiter = JEV (after promotion, cached 20 s) | D rule (fallback + comparator)
-                                       deny/defer ─► write reclaim.request; `launchctl kickstart` the tick (async, never waits)
-ai.keel.governor.tick (300 s, detached) ─► reclaim tier 0 ─► sonnet/low lane ─► governor-act …
-                                        └► red-main check per opted-in repo ─► sonnet/low lane ─► SendMessage / gh pr comment
-cynap-sandbox verify ─► verify-route ─► with-heavy-lock --admit-preview --class cynap-verify-<mode> --json
+                                       contended ─► floors ─► arbiter = JEV (shadow, cached 20 s) | D rule (fallback + comparator)
+                                       deny/defer ─► announce_governor_context(): print CONTEXT block, write last-context.json
+                                                      ─► "SendMessage to machine-steward" (the session decides and acts, keel does not)
+machine-steward (always-on desktop session) ─► refresh state ─► kill/archive/reclaim/red-main per docs/machine-steward.md
+                                             └► governor_kill(pid, lstart) when it needs the one safety-checked kill verb
+cynap-sandbox verify ─► verify-route ─► with-heavy-lock --admit-preview --class cynap-verify-<mode> --json (read-only; never queues, never claims a slot, never a fresh live JEV call)
 ```
 
 ## 4. Snapshot (`snapshot.take()`)
@@ -139,7 +149,11 @@ admit_D      = no floor fires AND running < slots_now_D
 
 - A floor whose signal is `unknown` does not fire.
 - Any unknown machine signal routes the decision to D and never to JEV, so a partial snapshot never reaches the model.
-- A contended DENY caused by a floor also writes a reclaim request (§9.1). So does the soft `disk_reclaim_gib = 25` threshold, which never denies.
+- A contended DENY (from a floor or from D/JEV) triggers `announce_governor_context()` (§9.1) -- the
+  CONTEXT block, not a reclaim request file. There is no `~/.keel/governor/reclaim.request` and no
+  detached tick to consume one; that mechanism was r2's, dropped by the 2026-09-29 rescope. The
+  soft `disk_reclaim_gib = 25` threshold (`admission.needs_reclaim()`) never denies; it is available
+  for a future CONTEXT-block field but is not yet surfaced there.
 
 ### 5.4 JEV (contended acquires only; decides only after beating D in shadow)
 
@@ -164,7 +178,8 @@ admit_D      = no floor fires AND running < slots_now_D
   - `admit.p < 0.40` OR (`saturation ≥ 3.5` with confidence ≥ 0.6) → deny.
   - Anything in between → D.
 - **Fallback is D.** An error, a 1,500 ms deadline breach, an open breaker, a missing credential, or a contract error each produce `source=fallback:<reason>` and D's verdict. The call has 0 retries.
-- **Promotion gate: JEV must beat D, not today's flat budget.** `governor grade` compares the two arms on contended decisions where they disagreed (n ≥ 30 in each direction):
+- **Promotion gate: JEV must beat D, not today's flat budget.** A future `governor grade` CLI (not
+  built in this phase; §10, §11 item 2) would compare the two arms on contended decisions where they disagreed (n ≥ 30 in each direction):
   - *JEV-less*: D admitted and JEV would have denied. The observed outcome is the admitted job's fate: `memory_pressure_during_run`, `resource_limit`, a budget kill, or `mem_pressure_level == 4` or the swap floor firing during its run. JEV wins this side if the bad-outcome rate on these jobs is ≥ 2× the rate on jobs where both arms agreed to admit.
   - *JEV-more*: JEV admitted and D denied. This outcome is counterfactual, so it is projected from the recorded snapshots over the next `run_p90_s`: `used_mb + class rss_p90` must stay below `(100 − min_free_percent)%` and no floor may fire. JEV wins this side if ≥ 95% of these admissions are projected safe.
   - JEV is promoted to arbiter only if it wins both sides. **If it has not won by 2026-11-15, the JEV admission code is deleted** (jev_client, questions, the breaker, the cache and the Keychain read). That removes about a third of the design and avoids a permanent dual path.
@@ -175,13 +190,15 @@ admit_D      = no floor fires AND running < slots_now_D
 |---|---|---|
 | `governor_mode` | `shadow` (`shadow` \| `enforce`) | **Deleted on 2026-11-15.** After that date the governor is the only behavior and a rollback is `git revert` of the keel commit. If phase 1 has not been promoted by then, the governor code is deleted instead. `KEEL_GOVERNOR_MODE` may only move enforce → shadow and is deleted with the field. There is no `off` value: `shadow` enforces today's fixed policy verbatim. |
 | `jev_admission` | `shadow` (`shadow` \| `enforce`) | Same deletion date. See §5.4. |
-| `max_slots` | 6 (replaces `MAX_SLOTS = 4`, `heavy_resources.py:13`) | `§14.2` lock-only replay must show that the peak RSS sum at k=6 fits in RAM before phase 1. Otherwise lower it. |
+| `max_slots` | 6 | Governor-side ceiling for the D/JEV arbiter on the contended path. **Not a full replacement for `MAX_SLOTS = 4`** (`heavy_resources.py:13`) -- that constant still bounds the fast-path `claim_slot` loop; the rename to one policy-driven ceiling is a real gap, not done in this change (§13). `§12.2` lock-only replay (unbuilt) would show whether the peak RSS sum at k=6 fits in RAM. |
 | `cheap_rss_seconds` | 131072 | §5.2 |
 | `disk_floor_gib` / `disk_reclaim_gib` / `swap_growth_floor_mb_per_min` | 10 / 25 / 256 | env overrides may only tighten |
 | `jev_deadline_ms` / `decision_ttl_s` / `admit_p_hi` / `admit_p_lo` / `saturation_deny` | 1500 / 20 / 0.60 / 0.40 / 3.5 | |
-| `idle_kill_hours` | 6 | K3 (§9.3) |
-| `reclaim_min_interval_s` / `reclaim_daily_max` / `reclaim_max_runtime_s` | 1800 (600 for `urgent_disk`) / 6 / 1200 | §9.2 |
 | `broker_shells` | `["bash","zsh","sh","dash"]` | §6 |
+
+**Removed from r2's field list** (2026-09-29 rescope): `idle_kill_hours`, `reclaim_min_interval_s`,
+`reclaim_daily_max`, `reclaim_max_runtime_s` -- these rate-limited the tick/lane reclaim engine,
+which no longer exists. `Policy()` has no fields for them; nothing reads them.
 
 Invariant tests read these defaults from `Policy()`, never from a literal.
 
@@ -223,7 +240,16 @@ A wrapper runs in **broker mode**:
 
 **Exit codes.** A child deferral exits 75 inside the wrapper, and the wrapper's own exit code propagates. The §8 guard then matches on the child's cwd and executable.
 
-## 7. Verify route (cynap `tooling/sandbox/verify-route`)
+## 7. Verify route (cynap `tooling/sandbox/verify-route.mjs`, PR #3499)
+
+**Keel side implemented and verified 2026-09-29**: `heavy_runner.admit_preview()`, wired to
+`with-heavy-lock --admit-preview --class <c> --json`. Confirmed live, end to end, against cynap's
+own `admitPreview()`/`decideRoute()` (imported directly from `verify-route.mjs`, not reimplemented):
+a real `with-heavy-lock --admit-preview` call parses cleanly (`ok:true`) and routes R5 (LOCAL,
+`decision=admit`) on an idle machine. Read-only throughout -- it writes no queue ticket and no
+lease -- and never triggers a fresh live JEV call (it reads a cached JEV decision if one exists
+from a real contended acquire; see §5.4). Any internal failure exits non-zero, which is what
+verify-route's own contract reads as R4 ("preview unavailable").
 
 `cynap-sandbox verify` calls `verify-route --mode <quick|full> [--after-deferral] --json` exactly once, where the CYN-1951 reroute block is today (`cynap-sandbox:891-908`). `verify-route` reads the governor through `with-heavy-lock --admit-preview --class cynap-verify-<mode> --json` under a 3 s timeout.
 - `--admit-preview` runs the §5 decision for a hypothetical job without enqueuing and without requesting reclaim. It returns `{decision, source, slots_now, running, queued, eta_wait_p90_s, eta_run_p50_s, eta_total_s}`.
@@ -265,260 +291,223 @@ A wrapper runs in **broker mode**:
 - This is V2's mechanism. `governor replay` asserts that the matcher intercepts all 61 re-queues in the frozen corpus.
 - Codex callers are covered only after the Codex `/hooks` re-trust (§13).
 
-## 9. Reclaim
+## 9. The CONTEXT interface, and the one safety-checked kill helper (2026-09-29 rescope)
 
-### 9.1 Trigger: detached, single-flight, never in the caller
+**There is no tick, no lane, no multi-case executor, no red-main automation in keel.** r2 built a
+detached LaunchAgent that spawned a headless `claude -p` lane with kill/delete authority (K1-K6,
+`worktree-remove`, storage rows S1-S8, red-main coordination). The founder replaced all of it,
+same day, before any of it shipped: one always-on **desktop** session, `machine-steward`
+(charter: `docs/machine-steward.md`), is now the only thing on the machine that kills a process,
+removes a worktree, reclaims storage, archives a session, or coordinates a red `main`. keel's job
+shrank to two things: tell that session what it is looking at, and give it (or a human) one
+safety-checked verb to act with.
 
-- **In `acquire()`.** A contended DENY or deferral does two things and returns:
-  1. It appends `{ts, reason, class}` to `~/.keel/governor/reclaim.request` with `O_APPEND`.
-  2. It runs `launchctl kickstart gui/<uid>/ai.keel.governor.tick` with `Popen`, without waiting.
-- Nothing else happens in the caller: no kills, no deletes, no lane. `--admit-preview` never writes a request (B3 d).
-- **In the tick** (`ai.keel.governor.tick`, `StartInterval 300`, plus kickstarts):
-  - It takes `flock(LOCK_EX|LOCK_NB)` on `~/.keel/governor/reclaim.lock`. A second tick that finds the lock held exits at once.
-  - It consumes the requests.
-  - It evaluates the reasons:
-    - `denial_streak`: ≥ 3 distinct job_ids denied in 15 min;
-    - a floor: `urgent_disk` or `memory`;
-    - `disk`: free < `disk_reclaim_gib`.
-  - It enforces `reclaim_min_interval_s` for **both** tiers, not just for lanes.
-  - The tick process ignores SIGINT and SIGHUP, so a user cancel in some session cannot land mid-delete.
+### 9.1 The CONTEXT block: `heavy_runner.announce_governor_context()`
 
-### 9.2 Tier 0 (deterministic, in the tick) then tier 1 (lane)
+- **When.** Every contended DENY or deferral in `acquire()` calls this, after the existing
+  `deferred` event is written. It is called nowhere else -- `--admit-preview` never triggers it
+  (a preview must never have a side effect).
+- **What it does, and nothing else:**
+  1. Takes a snapshot (`governor.snapshot.take(..., persist=False)`), builds the session registry
+     (`governor.registry.build()` -- `~/.claude/sessions/*.json`, cross-checked live via `kill -0`
+     + `procStart`, joined to idle-minutes via the matching transcript's mtime under
+     `~/.claude/projects/`), and evaluates the §5 floors and rule D.
+  2. Joins each of the top-RSS live leases to its owning session by ancestry (walk `ppid` to a
+     registered pid) or, failing that, a cwd/worktree match (`governor.context.top_candidates`).
+     An unmapped pid still gets a candidate row with owner fields `None` -- `unknown` never means
+     dead.
+  3. Prints a compact block to stderr (reason, floors, d_rule, the JEV verdict if one is cached,
+     the candidate list with pid/identity/cwd/session/session_name/idle_minutes/rss) plus exactly
+     one instruction line naming `machine-steward` as the sole actor, and persists the identical
+     JSON to `~/.keel/governor/last-context.json`.
+  4. Emits a `governor_decision` event to `events.jsonl` (for §12 grading).
+- **Never kills or deletes.** This call is read-only and exception-swallowing end to end: any
+  internal failure (missing governor package, a slow probe, a permission error) is caught, logged
+  to stderr as `governor context unavailable`, and the deferral proceeds exactly as it would have
+  before this feature existed. It never makes a fresh live JEV call (§5.4's cache/decide.lock
+  already bound that traffic; a deny/defer is not itself a trigger for a new JEV call).
+- **Live-measured cost** (this machine, 2026-09-29): snapshot ~65ms, a 49-entry registry join
+  ~237ms, total ~330ms end to end -- comfortably inside the caller's tolerance for a rare
+  (~1.8% of acquires) event.
 
-**Tier 0.** `governor-act sweep --auto` runs K1, K2 and K4 (§9.3), then the storage rows marked auto (§9.4). It runs **one action at a time, re-measuring container free after each one**. It is capped at 60 s. If the condition clears, it stops.
+### 9.2 `governor_kill`: the one tiny, always-safe verb
 
-**Tier 1.** If the condition persists, and the rate limits allow (at most 6 per 24 h; back-off doubles to a 4 h cap after a lane that freed < 1 GiB and killed nothing), the tick spawns a lane in a detached supervisor.
-- The lane runs under `setsid`.
-- `reclaim.lease.json` records `{pid, procStart, run_id}`. It is stale when the pid is dead or `procStart` does not match.
-- The lane gets SIGTERM at `reclaim_max_runtime_s` and SIGKILL 30 s later.
-- The run is graded by its receipts, never by its exit envelope.
+`tooling/sandbox/governor/act.py`, CLI `governor-kill <pid> <lstart> [--why STR] [--live]`.
+Dry-run by default (`--live` is required to actually signal). It is the *only* code path in keel
+that can send a signal to another process's tree, and it re-derives its safety gates every call
+(B1, §17):
 
-```
-spawn-lane.sh --runtime claude --model sonnet --effort low --mode dontAsk --cwd ~/.keel/governor/lanes/<run_id> \
-  --allowed-tools "Skill,Read,Grep,Glob,Bash(~/.keel/resource-hooks/governor-act:*),Bash(~/.keel/resource-hooks/governor-snapshot:*),Bash(diskutil info:*),Bash(du -shx:*),Bash(tmutil listlocalsnapshots:*),Bash(find:*)" \
-  --mission ~/.keel/governor/lanes/<run_id>/mission.md
-```
+1. Re-samples `heavy_resources.processes()`. Refuses if the target pid's identity (`ps lstart`)
+   does not match the caller-supplied `lstart` -- this closes the pid-reuse TOCTOU.
+2. Builds the victim set via `job_members` (a leased/brokered job's whole session), falling back
+   to the pid's own entry if it is not a session leader.
+3. Refuses if any victim's pgid, or the target's own pgid, is shared with a live registry session
+   (`~/.claude/sessions/*.json`, cross-checked via `kill -0`) -- this is the `spawn-lane.sh`/bridge
+   pgid-sharing case that caused r1's near-miss.
+4. On `--live`: TERM, a 10 s wait, then KILL on survivors, via `signal_members` (never the caller's
+   own group).
 
-- `spawn-lane.sh` gains `--effort` and `--allowed-tools`, which pass straight through to `claude -p`. Today any unknown argument exits 2 (`spawn-lane.sh:56`). `claude --help` (2.1.284) lists both `--effort <level>` and `--allowedTools, --allowed-tools <tools...>`.
-- The lane's `cwd` is its own run directory, so the lane-env hook is inert.
-- In shadow, the supervisor exports `GOVERNOR_ACT_FORCE_DRY_RUN=1`, and `governor-act` honours it unconditionally.
-- **Mission (template; any leftover `{{…}}` placeholder refuses the spawn):**
+`machine-steward`'s charter (`docs/machine-steward.md`) calls this verb (or the CLI directly) for
+every kill it decides to make; it keeps its own receipt ledger
+(`~/.keel/governor/steward-receipts.jsonl`), which is outside keel's code.
 
-```markdown
-GOAL: restore headroom. Trigger {{reason}} at {{ts}}. Victory: `governor-snapshot --admit-preview --class {{blocked_class}}`
-says admit AND disk_free_gib ≥ {{disk_reclaim_gib}}.
-STATE: snapshot {{snapshot_path}}; tier-0 receipts {{tier0_receipts}}; inventory {{inventory_path}}.
-STORAGE: invoke Skill(macos-storage-reclaim) and follow its Diagnostic Flow, Enlisting, target table and Verification.
-Where the skill says to delete, call `governor-act storage --row <skill row id>` instead (the executor measures the
-container-free delta per the skill). Where the skill says ASK, or names a row the executor lacks, write a proposal.
-PROCESSES: `governor-act kill --class K1|K2|K3|K4 --pid <pid> --identity <lstart> --why "…"`. A refusal is final.
-One action, then re-measure. Never batch. Stop at victory.
-FINISH: {{run_dir}}/summary.json = {freed_mib, killed[], refused[], proposals[], victory}.
-```
+### 9.3 What moved to `machine-steward`, verbatim
 
-- **Why not Codex.** The lane mutates machine state and reads the harness session registry, so it fails the global offload test (a)/(c).
-- **Why not `bypassPermissions`.** The executor is the policy. The lane cannot run `kill`, `rm` or `git worktree remove` directly.
+Everything r2 specified as K1-K4/K6 (orphan trees, same-worktree duplicates, idle-session heavy
+trees, orphan dev servers, unleased runaway vitest), `worktree-remove`'s ignored-files gate, the
+S1-S8 storage rows (via `Skill(macos-storage-reclaim)`), session archiving (§10's answer below is
+unchanged: no supported local-archive path exists, so the session works from a candidates list
+instead), and red-main coordination (§11's design below is unchanged in substance, only in
+*owner*) are now `machine-steward`'s job, described in its own charter rather than duplicated
+here. That charter is the living document; this spec records only the keel-side contract it
+depends on (`last-context.json`, `governor_kill`, `main-deploy-health.mjs`'s TSV contract).
 
-### 9.3 Kill policy (executor re-derives every gate at kill time)
+### 9.4 Session archiving (unchanged answer, different actor)
 
-**Mechanism (B1).** `governor-act kill` never calls a bare `killpg`.
-1. It re-samples `heavy_resources.processes()`.
-2. It refuses if the target pid's `Process.identity` (lstart, `heavy_resources.py:119-140`) differs from the `--identity` the lane recorded. This closes the pid-reuse TOCTOU.
-3. It builds the victim set:
-   - For a leased job or a brokered tree (both are session leaders; `heavy_runner.py:458` uses `start_new_session=True`), the set is `job_members(root, identity, table)` (`heavy_resources.py:158-169`).
-   - For any other root, the set is the root's descendant subtree by ppid.
-4. It signals through `signal_members` (`heavy_runner.py:339-350`). That function signals a whole group only when the group's leader is a member, and never signals its own process group. Any other member is signalled by pid.
-5. The signal sequence is TERM, a 10 s wait, then KILL.
-6. It refuses when any member's pgid equals the pgid of a live registry session or bridge process. Measured case: `claude.exe` pid 48648 had pgid 44317, which is its `claude rc` bridge, and `spawn-lane.sh:213-216` `exec`s `claude -p` in the caller's group.
+**Answer, unchanged from r2: a headless `claude -p` lane cannot archive a desktop session.** No
+supported path exists (`archive_session` is a desktop-injected `ccd_session_mgmt` tool; the CLI
+binary never lists it as available in `-p`). This no longer matters to keel's own scope -- disk
+does not depend on archiving (S6 recovers those bytes via PR-state-gated worktree removal, which
+`machine-steward` does directly), and sidebar hygiene is `machine-steward`'s to run from **its
+own** desktop context, where `archive_session` *is* available to it.
 
-**Never-kill set.** This set is computed first. The protected-tree logic moves from `free-resources.py` into `act.py`: the self tree, busy session trees, `/Applications/Claude.app`, the heavy-op veto, and the rule that ppid==1 is not a licence to kill.
+### 9.5 Red-main coordination (unchanged design, `machine-steward` is now the actor)
 
-| Class | Detection (all must hold) | Auto? |
-|---|---|---|
-| **K1 orphan tree** | The owner is **positively dead on two samples ≥ 5 min apart**: the registry pid is gone or its `procStart` mismatches, AND that registry file's mtime did not advance between the samples. The samples are kept in `~/.keel/governor/owner-samples.json`. No live registry session has a cwd inside the tree's worktree. The tree is **not progressing** (§9.3.1). **Churn guard:** if > 25% of registry pids are dead in the current sample (a desktop restart, crash or update), the cycle makes no K1 kills. | tier 0 |
-| **K2 same-worktree duplicate** | ≥ 2 trees with the same worktree and the same normalized command. The victim is not the newest, is not progressing, and its owner is the same live session or dead. | tier 0 |
-| **K3 idle session's heavy tree** | Deterministic; **no JEV and no transcript text leaves the machine** (M1). All of these must hold: the tree is **not progressing** per §9.3.1 (not merely "holds no progressing lease", M4); there is **no pending background tool_use** in the owner's transcript tail (a `tool_use` with `run_in_background` and no matching `task-notification` or result); the worktree branch's PR is `MERGED` or `CLOSED` (`gh pr list --state all --head <b> --json state`, cached 15 min); the owner's transcript has been idle ≥ `idle_kill_hours` (6); and the worktree is not shared with another live session. It kills the heavy tree only, never the session process. | lane, phase 1 |
-| **K4 orphan dev server** | ppid==1; `next dev`, `\bvite\b` or `nodemon`; nothing heavy in its subtree | tier 0 |
-| **K6 unleased runaway vitest** (from the watchdog, §9.6) | A vitest with RSS ≥ 2 GiB that is **not** a member of any lease's `members`. Leased jobs are already budgeted by `supervise()`. | watchdog |
-| N1 active | registry `busy`, OR transcript mtime < 5 min, OR an unmatched tool_use in the tail | **never** |
-| N2 progressing | §9.3.1 | **never** |
-| N3 | self, the desktop app, MCP children of live sessions, launchd, non-user processes | **never** |
-| N4 | a Codex tree whose owner is not positively dead (the Codex transcript location is unverified) | report only |
-| N5 | whole Claude session processes | out of scope; interactive `free-resources` only |
+`machine-steward`'s charter runs this on its own refresh loop, not a keel LaunchAgent: read
+`main-health` (`main-deploy-health.mjs`'s TSV contract, unchanged from r2), map the owner PR to a
+live session by branch or by a `gh pr create` transcript hit, message the owner directly if live,
+broadcast to every other live session in the repo, comment on the PR if the owner is dead, and
+send one all-clear on the first green after a red episode. None of this is keel code; keel's only
+remaining contribution is that `main-deploy-health.mjs` itself lives in cynap, unchanged.
 
-#### 9.3.1 Progressing
 
-A tree is progressing if any of these held in the last 5 min:
-- its summed CPU time advanced by more than 5 s, measured as the `ps time=` delta across two samples 30 s apart, taken inside `governor-act`;
-- any file under its cwd changed, excluding `node_modules`, `.git` and `.turbo`;
-- it is younger than `run_p90_s(class) × 1.5`.
+## 10. Telemetry and grading (phase 1 scope; logging only -- **no `governor` CLI is built in this phase**)
 
-### 9.4 Storage and worktree rows (gates live in the executor; the skill supplies yields and discipline)
+**Events, as built.** These go through `heavy_resources.event()` into `events.jsonl`:
+- `governor_decision`: `{job_id, reason, floors_fired, d_rule, enforced}` -- emitted once per
+  `announce_governor_context()` call (i.e. once per contended deny/defer), not the richer r2 shape
+  (`contended, source, slots_now, jev{...}`); extending it is straightforward but not yet done.
+- `broker_started` and `broker_completed` (§6).
 
-The yields are the skill's measured, dated figures (`SKILL.md` "Reclaim Target Table", L76-104). Every action is sized by the `diskutil info /` container-free delta, one action at a time.
-
-| Row | Target | Executor gate | Tier |
-|---|---|---|---|
-| S1 | leaked `$(getconf DARWIN_USER_TEMP_DIR)` prefixes (`lambda-asset-size-*`, `deploy-parity-*`, `ci-parity-*`, `handler-size-*`); +18,125 MiB on 09-29 | `-mmin +120` and no holder (`lsof +D`) | auto |
-| S2 | repo-root `.turbo/cache`; +6,775 MiB | no live heavy tree in that repo | auto |
-| S3 | `~/.cache/uv`, `~/.npm/_cacache`, `~/Library/Caches/Google`. `~/.npm/_npx` is **excluded** (it holds MCP server code). | none | auto |
-| S4 | worktree build output via **`worktree-reaper.sh --apply --pass A`** (new selector; today `--apply` runs Pass A, Pass B and `worktree prune` over every repo, `worktree-reaper.sh:21-22,255-302`) | the reaper's own liveness and coverage gates | auto |
-| S5 | `~/.codex/logs_2.sqlite` + WAL | no `lsof` holder | auto |
-| S6 | `worktree-remove` | See below. | auto from phase 1 |
-| S7 | Colima `docker image prune -a -f` then `colima ssh -- sudo fstrim -av` | profile running; no container started in the last 10 min | lane |
-| S8+ | unused Colima profiles, abandoned desktop profiles, OS assets | **proposal only** | human |
-
-**`worktree-remove` gate (M2).** All of these must hold:
-- The worktree is **not locked**. This is absolute and no flag overrides it.
-- No live session has its cwd in the worktree, and no file is younger than 60 min.
-- The branch's PR is `MERGED` or `CLOSED`. PR state is used rather than ancestry, because squash merges never pass `merge-base --is-ancestor` (`worktree-reaper.sh:288`).
-- `git status --porcelain --ignored` is empty **after removing entries under the regenerable allowlist**: `node_modules/`, `.turbo/`, `.next/`, `dist/`, `coverage/` and `cdk.out/`.
-- It refuses outright if any of these exist: `WORKING.md`, `.env*`, `.cynap/`, `.claude/workflow-state/` or `.claude/settings.local.json`.
-- A plain `git worktree remove` would silently delete ignored files. This gate matters because this very worktree holds `apps/{backend,portal}/.env.local`.
-- The executor then runs plain `git worktree remove` against the worktree's own repo. The branch is kept.
-
-### 9.5 Receipts and inline halt (M5)
-
-- Every attempt appends to `~/.keel/governor/receipts.jsonl`. A `pending` line is written before the side effect and a final line after, both with the same `receipt_id`.
-  - Fields: `{verb, class, target{pid, identity, pgid, cmd, cwd}, session{id, status, idle_s}, gates{…}, result, bytes{before, after, delta_mib} | rss_freed_mb}`.
-  - Receipts carry no message text.
-- **Inline halt.** `governor-act kill` re-reads the owner's transcript tail for N1 at kill time. It re-reads it again 60 s after each `done` kill. If a user or assistant record is timestamped within 5 min before the kill, or if a new record appears within 60 s after it, it rewrites `governor_mode=shadow` in `~/.keel/resource-policy.json` at once and records `halt:late_activity`.
-- The daily `audit-kills` run is only the backstop.
-
-### 9.6 One kill policy for every engine (M3)
-
-| Engine | Today | r2 |
-|---|---|---|
-| `ai.cynap.vitest-watchdog` (60 s) | kills any vitest with RSS ≥ 2 GiB regardless of owner or lease, and orphans ≥ 600 s (`vitest-watchdog.mjs:150-155`) | The RSS arm calls `governor-act kill --class K6`, which refuses lease members. The orphan arm calls `--class K1`, which applies the two-sample dead-owner rule. Its own `process.kill` is deleted. Its kills land in `receipts.jsonl`, so V5 sees them. |
-| `ai.cynap.workflow.reaper` | its plist points at `.claude/hooks/heartbeat-reaper.sh`, which does not exist in the main checkout or on `origin/main`; the plist is not loaded (`launchctl list`, 2026-09-29) | delete the plist |
-| `free-resources.py` | its own kill loop (`free-resources.py:328-340`) | becomes a thin CLI over `governor-act`, keeping the interactive whole-session close (N5) |
-| `heavy_runner.supervise()` | budget kills of the job it owns | unchanged. It kills only its own job's members. |
-
-## 10. Session archiving (§18 Q1 answered 2026-09-29, read-only)
-
-**Answer: a headless `claude -p` lane cannot archive a desktop session. No supported path exists.** Evidence:
-- `archive_session` is a tool of **`ccd_session_mgmt`**, an in-process server that the desktop app serves. It is defined in `/Applications/Claude.app/Contents/Resources/app.asar` alongside `list_sessions`, `unarchive_session`, `stop_session` and others.
-- The CLI binary (2.1.284, `readlink -f $(which claude)` → `…/@anthropic-ai/claude-code/bin/claude.exe`) lists `ccd_session_mgmt` only in the set of **desktop-injected** server names. The server type is `"sdk"`, which only the desktop host supplies.
-- `strings -a <binary> | grep -ci archive_session` → 3 hits. All three are the telemetry name `fleet_view_archive_session`, which is `claude agents` view archiving a *remote/cloud* session through `archiveRemoteSession` → `POST /v1/sessions/<id>/archive`. None is a local-session tool.
-- Sanity control: `--effort` → 21 hits.
-- `claude --help` lists no archive command. `claude rm <id>` deletes *background* sessions only. `spawn-lane.sh:39-40` already records that interactive MCPs do not load in `-p`.
-- UNPROVEN residue: a one-turn live lane listing `ccd_session*` tools was not run, because this lane was barred from spawning. It is phase-0 item 3 and is expected to confirm the answer.
-
-**Safe equivalent.**
-- (a) **Disk** does not depend on archiving. The skill's 7,173 MiB came from removing 33 worktrees; archiving only hides sidebar rows (`SKILL.md` L141-166). S6's gate is PR state plus cleanliness, not archive state, so the lane recovers the bytes without archiving anything.
-- (b) **Sidebar hygiene.** The lane writes `~/.keel/governor/archive-candidates/<date>.tsv` with columns `sessionId, cwd, branch, pr_state, idle_days, worktree_state`. It lists sessions that are not running, idle ≥ 7 d, and have a clean or gone worktree with no OPEN PR. The founder, or any **desktop-hosted** session, then runs the skill's step 4 on that file. The skill's "ALWAYS ASK" stays intact, so SKILL.md needs no consent amendment and r1's §12 consent change is dropped.
-- (c) **Transcript compression is not built.** Top-level transcripts total 2.46 GiB across 713 files, and only 0.22 GiB (76 files) have been idle for more than 30 d. That is not worth breaking `--resume` or the `/rp` and `/work-report` miners (`SKILL.md` Common Mistakes). The decision is recorded in §16.
-
-## 11. Red-main coordination (Job 4)
-
-**Registration.** cynap adds `.claude/governor/red-main.json`:
-
-```json
-{"repo": "Cynap-ai/cynap-monorepo-next", "status_context": "main-health",
- "health_cmd": ["node", "tooling/sandbox/lib/main-deploy-health.mjs", "--repo", "Cynap-ai/cynap-monorepo-next", "--out", "{out}"]}
-```
-
-`~/.keel/governor/repos.json` lists the repo root.
-
-**Detection (the tick, every 300 s).**
-1. Make one cheap call: `gh api repos/<repo>/commits/main/status`, and read the `main-health` context (`main-health.mjs:33`).
-2. Only when that context is red or missing, run `health_cmd`. Its TSV contract is `RED\t<wf>\t<conclusion>\t<run url>\t<sha>\t<since>\t<owner>\t<context>`, with exit 0 green, 1 red, 2 unknown (`main-deploy-health.mjs:28-32`). `owner` is `#<PR>`, taken from the first red commit's subject (`:156-162`).
-3. Exit 2 (unknown) never triggers a message.
-4. The **episode key** is `<repo>@<sinceSha>`. Its state lives in `~/.keel/governor/redmain/<key>.json`: `{detected_at, owner_pr, owner_session, notified_at, broadcast_at, commented_at, allclear_at}`.
-
-**Lane.** This is the same sonnet/low spawn as §9.2, with the same single-flight lease (`redmain.lock`). Its tools are `ListAgents,SendMessage,Read,Bash(gh pr view:*),Bash(gh run view:*),Bash(gh pr comment:*),Bash(governor redmain-record:*)`. The tick puts **only the steps that are due** into the mission, so each step happens once per episode:
-- **(a) Map the owner.** Run `gh pr view N --json headRefName`. Find a live registry entry (`kill -0` and `procStart` both pass) whose `git -C <cwd> branch --show-current` equals `headRefName`. If none is found, use jq over transcripts for a `gh pr create` tool_use whose result contains `/pull/N`, and take that transcript's sessionId if it is live.
-- **(b) Owner live.** Use `SendMessage` to the owner with the failing run URL, a ≤ 40-line `gh run view --log-failed` excerpt, and a likely fix. Record `notified_at`.
-- **(c) Broadcast.** Send one line to every other live session whose cwd is under the repo root: `main red since <since>, #<N> owns it (<run url>); don't pile on — merges wait via main-health.` Record `broadcast_at`.
-- **(d) Owner dead or unmappable.** Run `gh pr comment N` with the run URL, the excerpt and the fix recipe. Record `commented_at`. The broadcast still goes out.
-- **(e) All-clear.** On the first green `main-health` after the episode, send one all-clear to the same audience. Record `allclear_at`, then close the episode.
-
-**Rules.**
-- Messages use the supported `ListAgents`/`SendMessage` tools. ListAgents' own description reads "Lists agents you can SendMessage to — … other local Claude sessions on this machine", found in binary 2.1.284. The registry's undocumented `messagingSocketPath` is never used.
-- Rate limits: at most one lane per episode step and at most 6 red-main lanes per day.
-- The lane never pushes, merges or edits code.
-
-**UNPROVEN.** It is not yet known whether a `-p` lane's `ListAgents` returns *local desktop* sessions. That is phase-0 item 4. If it does not, steps (b), (c) and (e) degrade to (d) plus a line in `~/.keel/governor/redmain/broadcast.log`, and the grade reports `redmain_channel=pr_comment_only`.
-
-## 12. Telemetry and grading (phase 1 scope)
-
-**Events.** These go through `heavy_resources.event()` into `events.jsonl`:
-- `governor_decision`: `{job_id, class, contended, source, enforced, slots_now, d_rule{slots_now, admit}, jev{latency_ms, admit_p, headroom, saturation, provider, tokens}|null, floors_fired[]}`;
-- `broker_started` and `broker_completed`;
-- `reclaim_triggered`, `reclaim_lane_{started,finished}`;
-- `redmain_{detected,step,closed}`.
-
-**`governor grade --since <d>`** reports:
-- V1–V5 and V7;
-- the D-vs-JEV disagreement table and the promotion verdict (§5.4);
-- `unslotted_heavy_per_1k`;
-- reclaim yield (container-free MiB), refusals by gate, and proposals.
-
-The grade reads and writes nothing else and always prints the size of the set it scanned.
+**Not built in this phase:** `reclaim_triggered`/`reclaim_lane_{started,finished}` and
+`redmain_{detected,step,closed}` events (there is no keel-side reclaim/red-main engine to emit
+them; `machine-steward` keeps its own receipt ledger, `~/.keel/governor/steward-receipts.jsonl`,
+outside this repo's telemetry), and a `governor grade`/`governor audit-kills`/`governor replay` CLI
+(V1-V5/V7 are each individually computable from `events.jsonl` and the (unbuilt) replay corpus, but
+no single command does it yet -- §11 phase-0 item 2, §12.2, §16 UNPROVEN (a)-(d)).
 
 **`governor audit-kills`.** It fails on any `done` kill receipt where a user or assistant transcript record falls within 5 min before the kill. It also covers watchdog receipts. On an empty input it prints `0 kills examined`. (The "user mentions the killed command later" heuristic moved to phase 2.)
 
-## 13. Rollout
+## 11. Rollout
 
-| Phase | Exit criterion | Admission | Route | Reclaim | Red-main |
-|---|---|---|---|---|---|
-| **0 — shadow + probes** | ≥ 7 d AND ≥ 1,000 acquires AND ≥ 30 contended decisions; all phase-0 items done | fast path plus today's fixed policy enforced; D and JEV logged; floors logged | live R1–R7 (it selects only among existing gates) | tier 0 and lane run under `FORCE_DRY_RUN`; receipts are `would_do` | detection live; lane runs; messages sent (they are advisory, not mutations) |
-| **1 — enforce D + safe reclaim** | the phase-0 grade shows D's contended admits have a bad-outcome rate ≤ the fixed policy's (replayed) AND no `would_do` kill is flagged by `audit-kills --dry` | **D arbitrates contended acquires**; floors enforced; broker live; `max_slots` up to 6 | unchanged | K1, K2, K4, K6, S1–S7 apply; K3 applies; S8+ are proposals | unchanged |
-| **1b — JEV arbiter** | §5.4 promotion gate passed before 2026-11-15 | JEV arbitrates contended acquires; D is the fallback | — | — | — |
+| Phase | Exit criterion | Admission | Route | Reclaim / red-main |
+|---|---|---|---|---|
+| **0 — shadow + probes** | ≥ 7 d AND ≥ 1,000 acquires AND ≥ 30 contended decisions; all phase-0 items done | fast path plus today's fixed policy enforced; D and JEV logged; floors logged | live R1–R7 (it selects only among existing gates) | CONTEXT block fires on every deny/defer; `machine-steward` acts on its own judgment per its charter -- this was always advisory to keel, never a keel-owned gate |
+| **1 — enforce D + broker** | the phase-0 grade shows D's contended admits have a bad-outcome rate ≤ the fixed policy's (replayed) | **D arbitrates contended acquires**; floors enforced; broker live (`governor_mode=enforce`); `max_slots` up to 6 | unchanged | unchanged -- `machine-steward` is a human-run desktop session, not a keel rollout phase |
+| **1b — JEV arbiter** | §5.4 promotion gate passed before 2026-11-15 | JEV arbitrates contended acquires; D is the fallback | — | — |
 
-**Phase-0 items** (each writes its evidence to `~/.keel/governor/phase0/`):
-1. Keychain pre-grant and `probe-credential` from both contexts (§5.6).
-2. `governor replay --mode lock-only` for k = 2..6. It must reproduce the observed deferrals within ±5% at k = 2, and it reports the peak RSS sum per k, which sets `max_slots`.
-3. A one-turn lane listing `ccd_session*` tools, to confirm §10.
-4. A one-turn lane calling `ListAgents` and recording whether local desktop sessions appear (§11).
-5. `governor-snapshot --json` run 10×, with p95 `took_ms ≤ 300`.
-6. `spawn-lane.sh` argv test for `--effort`/`--allowed-tools`.
+**Phase-0 items** (each writes its evidence to `~/.keel/governor/phase0/`; live results for items 1
+and 5 are recorded in `docs/specs/2026-09-29-machine-governor.phase0.md`):
+1. **Done, 2026-09-29.** Keychain pre-grant and `probe-credential` from both a bare Bash context
+   and `governor.jev_client`'s own code path (§5.6) -- no prompt either way. One live smoke call
+   through the corrected `ai-gateway.vercel.sh` endpoint succeeded (`source=jev`, 1159ms).
+2. `governor replay --mode lock-only` for k = 2..6 -- **not built**; there is no `governor` grading
+   CLI in this phase (§10 is logging-only; grading itself is deferred). `test_governor_replay.py`
+   proves rule D is well-behaved over real class-stats from the 7-day corpus, which is a weaker
+   claim than a per-deferral counterfactual.
+3. The `ccd_session*` archive-tool probe and the `ListAgents` local-session-visibility probe are
+   both moot: neither a keel lane nor keel code calls either tool anymore. `machine-steward` runs
+   on the desktop, where both `archive_session` and `ListAgents` are natively available to it.
+4. **Done, 2026-09-29 (live).** `governor.snapshot.take()` measured `took_ms=65.5` (budget 300ms)
+   and the registry join (`governor.registry.build()`) added ~237ms for a 49-entry registry, one
+   sample, not the 10x p95 this item originally asked for.
+5. `spawn-lane.sh --effort`/`--allowed-tools` -- moot; lane spawning was dropped.
 
 **Halt rule.**
-- An inline V5 hit (§9.5) sets shadow at once.
-- If V1 per 1,000 over a 3-day window exceeds 1.25× baseline with ≥ 1,000 acquires, the daily grade sets shadow. Normalizing per 1,000 acquires removes r1's workload false triggers.
-- A rollback is a one-field edit of `~/.keel/resource-policy.json`, effective on the next acquire.
+- A rollback is a one-field edit of `~/.keel/resource-policy.json` (`governor_mode`/`jev_admission`
+  back to `shadow`), effective on the next acquire.
+- There is no keel-side kill/delete rate to halt in this phase -- `governor_kill` is a manually
+  invoked, dry-run-by-default helper, not an automated engine with its own halt condition.
 
-**Install.** `install-resource-hooks.py` adds `governor/*`, the shims, `governor-act`, `governor-snapshot` and the tick plist to `RUNTIME_FILES`. Codex does not pick up hook changes (`mutate_codex`), so the install prints the Codex `/hooks` re-trust as a required step. `grade` reports `codex_guard_active=false` until a Codex-caller retry has been denied.
+**Install.** `install-resource-hooks.py`'s `RUNTIME_FILES` includes `governor/*` (nine modules,
+listed as `GOVERNOR_MODULES`); `test_governor_package_is_installed_as_a_runnable_subpackage`
+proves the installed copy is importable from its destination the same way `heavy_runner` imports
+it from the source tree. Codex does not pick up hook changes (`mutate_codex`), so the install
+prints the Codex `/hooks` re-trust as a required step.
 
-## 14. Test plan
+## 12. Test plan
 
-keel's gate is `python3 -m unittest tooling/sandbox/test_*.py`. cynap's is `cynap-sandbox verify --quick` + `wt-verify.sh`, with CI authoritative.
+keel's gate is `python3 -m unittest tooling/sandbox/test_*.py` (run from `tooling/sandbox/`, matching
+the existing convention -- every prior test file already assumes that cwd). cynap's is
+`cynap-sandbox verify --quick` + `wt-verify.sh`, with CI authoritative.
 
-### 14.1 keel unit tests (stdlib only; every gate test has a mutant that removes the gate and must fail)
+### 12.1 keel unit tests, as built (176 new tests across 12 files, plus the pre-existing suite)
 
-- **Fast path.** When a free slot exists and `pressure_reason()` is None, admission makes zero snapshot, D or JEV calls (a sentinel raises if any runs).
-- **Hot loop.** `claim_slot` never calls admission. The arbiter runs with every slot flock already taken by the test.
-- **D rule.** The formula rows are tested, including `reserve_mb`. So is the cheap-class `+1`, using the measured `rss_s_p90` of wt-verify (27,704) and cynap-sandbox (2,372,241). All inputs are read from `Policy()` and a fixture `class-stats.json`.
-- **Floors beat everything.** Each of the 4 floors is tested with a stub JEV that returns `admit.p=0.99`.
-- **JEV.** It is never called when uncontended. The fallback matrix (timeout, breaker-open from `breaker.json` written by another process, no credential, contract error, grey band) each produce exactly D's verdict. Five concurrent contended `decide()` calls make ≤ 1 JEV call. The contract test parses `resp4.json` and rejects 4 mutants.
-- **Broker.** `bash x.sh`, whose body runs a shimmed `vitest`, holds 0 slots while the child holds 1. `wt-verify.sh` and self-locking scripts are not brokered. A child's exit 75 propagates. A nested call under a lease is unchanged.
-- **Kill mechanism (B1).**
-  - A victim whose pgid equals a live session's pgid is refused.
-  - An identity mismatch is refused.
-  - `signal_members` never signals the caller's group.
-  - A fixture tree with a `spawn-lane`-style shared pgid is killed by pid only.
-- **K1 (B2).** One dead sample is refused. Two samples 5 min apart succeed. At 30% dead registry pids, nothing is killed.
-- **K3.** A pending background tool_use is refused. PR `OPEN` is refused. Idle 5 h is refused. A tree that is not leased but is burning CPU is refused. The receipt contains no message text.
-- **`worktree-remove` (M2).** An ignored `.env.local`, `WORKING.md` or `.cynap/` refuses. An ignored `node_modules` alone passes. A locked worktree refuses, with no override flag.
-- **Tick (B3).** A second tick exits on `reclaim.lock`. `acquire()` never imports `act`. SIGINT during tier 0 is ignored. `--admit-preview` writes no request. `worktree-reaper.sh --apply --pass A` runs no Pass B and no prune (fixture home).
-- **Inline halt (M5).** A transcript record 2 min before a kill flips `governor_mode` to shadow in the fixture policy.
-- **Red-main.**
-  - Episode dedupe: the same `sinceSha` twice gives one notify step.
-  - An unknown health result (exit 2) gives no lane.
-  - Green after red gives exactly one all-clear.
-  - The owner mapping works both through the registry branch and through the transcript `gh pr create` fallback, using jq over fixture JSONL.
-- **Retry guard.** A deferred event for (cwd, exe) denies within 15 min while the preview says deny. It allows when the preview says admit. It fails open on an unreadable log.
+- **Fast path / rule D / floors** (`test_governor_admission.py`). The formula rows are tested,
+  including `reserve_mb`, the `slots_now` clamp, and the class-with-n<10-falls-back-to-other-heavy
+  rule. The cheap-class `+1` is tested against the measured `rss_s_p90` of wt-verify (27,704) and
+  wt-setup (67,631) qualifying and cynap-sandbox (2,372,241) not qualifying. Each of the 4 floors
+  fires independently and an unknown signal never fires one. All inputs are read from `Policy()`
+  and a fixture `class_stats` -- there is no literal in the assertions that isn't also a literal in
+  the fixture.
+- **JEV** (`test_governor_jev_client.py`, 16 tests). Never called when `jev_admission` is off. The
+  fallback matrix (timeout, breaker-open written by another process, no credential, contract error
+  incl. a `{"answers": null}` mutant, grey band) each produce exactly D's verdict. Five concurrent
+  contended `decide()` calls make ≤ 1 live call (thread-based test). The contract test parses the
+  real `/v1/evaluate` response shape (captured live, §16 "Proven now") and rejects malformed-answer
+  mutants. The breaker correctly closes 15 min after opening even if all 3 failures are still
+  inside the 30-min count window (a bug caught and fixed by this same test). An endpoint-regression
+  test pins `ENDPOINT` to the verified live value (§7, the api.digitalocean.com guess 404'd).
+- **Snapshot** (`test_governor_snapshot.py`). A failed probe never raises, only appends to
+  `unknown[]`. A missing hang-report directory is `0`, not `unknown`. Persistence is throttled to
+  once per 10s.
+- **Broker** (`test_governor_broker.py`). `is_wrapper()` on bash/zsh/`.sh` names, exempted by a
+  custom rule or a `# keel:self-locking` marker. `shim_is_heavy()` on the always-heavy names
+  (tsc/turbo/cdk/next/node), test runners, and package-manager heavy verbs.
+- **`governor_kill`** (`test_governor_act.py`). An identity mismatch is refused. A shared live
+  registry pgid is refused. Dry-run reports the victim set without signalling. A real subprocess
+  kill signals only the target, never its sibling, via a live TERM-then-KILL cycle.
+- **Session-registry join** (`test_governor_registry.py`, 12 tests). A live entry (pid alive AND
+  `procStart` matches) is reported live; a stale `procStart` is not live but is still recorded. A
+  malformed session file or a missing pid field is skipped, not fatal. Idle-minutes comes from the
+  matching transcript's mtime; a missing transcript is `None`, not fatal. The whole build is
+  time-boxed (`budget_s`) and never raises on a missing sessions directory. `owner_of()` walks
+  ancestry first, falls back to a cwd/worktree match, and returns `None` (never raises) on no match.
+- **CONTEXT block** (`test_governor_context.py`, `test_governor_heavy_runner_wiring.py`). The
+  rendered block and its JSON never contain the string `"kill"`, and the instruction line names
+  `machine-steward` by name. `heavy_runner.announce_governor_context()` never raises even when
+  `governor.snapshot.take` itself raises, and it emits exactly one `governor_decision` event.
+- **`--admit-preview`** (`test_governor_admit_preview.py`, 8 tests -- see §7). No leases admits via
+  the fast path and writes no ticket or lease. A full slot set denies with numeric `eta_*` fields.
+  A disk floor always denies even when D would admit. A cached JEV decision can flip a D-rule deny
+  to admit **without triggering a live call** (mocked `_default_http_post` asserted at 0 calls).
+  End to end through the real CLI: exit 0 with parseable JSON on success, non-zero on a missing
+  `--class`, and no queue ticket or lease is left behind as a side effect.
+- **Policy invariants** (`test_governor_policy.py`). `governor_mode`/`jev_admission` reject any
+  value other than `shadow`/`enforce` (no `off`). `KEEL_GOVERNOR_MODE` may only move enforce ->
+  shadow. An unknown policy field is still rejected.
+- **Install** (`test_install_resource_hooks.py`, extended). `governor/*` lands under the runtime
+  dir intact and is importable from there exactly as it is from the source tree; a second `install`
+  over the same governor tree is a no-op.
 
-### 14.2 Replay and live probes
+### 12.2 Replay and live probes
 
-- **Corpus.** `governor/testdata/deferrals-2026-09-29.jsonl` is frozen, observed data. Replay asserts the matcher catches 61 re-queues. It reports the D-rule counterfactual deferrals per 1,000 (V1's comparator) and the lock-only k-sweep.
-- **Live.**
-  - `with-heavy-lock --admit-preview --class cynap-verify-quick --json` answers in ≤ 2 s.
-  - `governor-act sweep --auto --dry-run` prints K1 candidates, each with two dead samples, and S-rows with container-free sizes.
-  - `governor audit-kills --since 30d` on an empty file prints `0 kills examined`.
+- **Corpus.** `test_governor_replay.py` copies the real `~/.keel/heavy.slots/events.jsonl`
+  **read-only** to a tempfile, builds real `class_stats` from its `queued`/`started`/`completed`
+  events, and checks rule D stays monotonic in `mem_free_percent` and bounded by `[1, max_slots]`
+  over those real numbers. **What this does not prove**, stated plainly: a byte-for-byte
+  per-deferral counterfactual against the historical corpus, because that corpus predates the
+  snapshot module and carries no memory/lease state at each deferral's moment. That replay is
+  future work, not phase 1.
+- **Live, done 2026-09-29** (see `docs/specs/2026-09-29-machine-governor.phase0.md` for the full
+  record): the Keychain credential probe (no prompt, either context); one live JEV call through the
+  corrected `ai-gateway.vercel.sh` endpoint (1159ms, `source=jev`); one live run of the whole
+  CONTEXT pipeline against this machine's real leases and session registry (330ms end to end,
+  printed to the phase-0 doc); and one live round-trip of `with-heavy-lock --admit-preview` through
+  cynap's actual `admitPreview()`/`decideRoute()` (imported directly from `verify-route.mjs`,
+  routing R5 on an idle machine).
 
-### 14.3 cynap tests
+### 12.3 cynap tests (owned by cynap's PR #3499, not this repo)
 
 - `tooling/sandbox/__tests__/verify-route.test.mjs` has one test per rule R1–R7 and per CI action (a)–(c). This includes the case "an existing dispatch run for headSha → no second dispatch". `with-heavy-lock` is stubbed on PATH. Confirm that the `--quick` glob matches `.mjs`.
 - Invariant tests:
@@ -528,31 +517,31 @@ keel's gate is `python3 -m unittest tooling/sandbox/test_*.py`. cynap's is `cyna
   - `vitest-watchdog.mjs` has no `process.kill`.
 - `wt-verify.sh` and `wt-setup` self-lock: run under a fake lease they exec directly, and without one they re-exec through the stub.
 
-## 15. Delete-legacy (same change)
+## 13. Delete-legacy (same change)
 
 | Replaced | Where | Deletion |
 |---|---|---|
-| `MAX_SLOTS = 4` and the flat second-job charge as the *contended* authority | `heavy_resources.py:13`; `heavy_runner.py:63-72` | `MAX_SLOTS` becomes `max_slots`. `pressure_reason()` survives only as the fast-path check. |
+| The flat second-job charge as the *contended* authority | `heavy_runner.py:63-72` (`pressure_reason`) | **Partial.** `Policy.max_slots` (new, default 6) now exists and is read by rule D on the contended path. `pressure_reason()`/`MAX_SLOTS` (`heavy_resources.py:13`) are unchanged and still bound the fast path's `claim_slot` loop -- a full rename of `MAX_SLOTS` to a policy-driven ceiling is **not done** in this change; flagged as a real gap, not a completed migration. |
 | The "defer, exit 75, agent retries" advice | `heavy_runner.py:242-245`; `cynap-sandbox:77-92` (`_report_lock_deferral`), `CYNAP_VERIFY_HEAVY_WAIT_MAX` (L49) | Rewrite the keel message to name the router. Delete the knob and the three "options" lines. |
 | The CYN-1951 reroute block and `gh run watch` | `cynap-sandbox:892-908`, `:792` | Delete both. The rationale moves into the `verify-route` header. |
 | Duplicated headSha resolution | `cynap-sandbox:779-787` | Extract it into `resolve_ci_run`. |
-| Kill engines outside the policy | `free-resources.py:328-340`; `vitest-watchdog.mjs` kill calls; `ai.cynap.workflow.reaper.plist` | Route the first two through `governor-act` (§9.6). Unload and delete the dead plist. |
+| Kill engines outside the policy | `free-resources.py:328-340`; `vitest-watchdog.mjs` kill calls; `ai.cynap.workflow.reaper.plist` | Route the first two through `governor_kill` (§9.2) or `machine-steward`, not through a keel-owned multi-case executor (that executor was dropped, §9). Unload and delete the dead plist. |
 | Ancestry-based merged test and the second worktree remover | `worktree-reaper.sh` Pass B (L255-300, `is-ancestor` L288) and `git worktree prune` (L302); `macos-storage-reclaim/prune-stale-worktrees.sh`; SKILL.md L113 "ancestor of `origin/main`" | Delete Pass B and `prune-stale-worktrees.sh`; `governor-act worktree-remove` is the one rule. The reaper keeps Pass A behind `--pass A`, and `disk-keeper.sh:375-376` calls it that way. SKILL.md L113 and step 5 point to `governor-act worktree-remove` (PR state). |
 | **`com.roeealfasi.disk-clean` (weekly), deleted.** | `~/.claude/scripts/disk-clean` (68 lines) and its plist | Its `find ~/code -name node_modules/.next/dist -mtime` rules (`disk-clean:44-57`) exclude `~/code/cynap/*`, but the repo lives at `~/code/cynap-monorepo-next`, so those rules reach **live** worktrees with no liveness check. They are superseded by reaper Pass A. Its unique rows (`brew autoremove`, `brew cleanup -s`, `uv cache prune`, Xcode `DerivedData`, `~/.cache/puppeteer`) move into `disk-keeper.sh` as a weekly-stamped block (`~/.keel/governor/weekly.stamp`). Its Chrome OptGuide row is already disk-keeper 3b (L150), and its `npm cache verify` is covered by S3. Delete the script and plist, and unload the agent. |
 | r1's JEV REDUNDANT question set, the K3 JEV gate, and the SKILL.md consent amendment | r1 §5.3, §12 | Never built. |
 
 Absence claims in this table come from reads made on 2026-09-29: `sed -n`/`grep -n` of the cited files, `git ls-tree origin/main .claude/hooks/ | grep -c heartbeat` → 0, and `launchctl list | grep -i 'cynap\|keeper\|disk-clean'`, which showed the workflow reaper absent. The implementer re-runs them at change time, because line numbers drift.
 
-## 16. Phase 2 (after phase 1 is graded; nothing below is built in phase 1)
+## 14. Phase 2 (after phase 1 is graded; nothing below is built in phase 1)
 
 - **R-ETA refined model.** This covers per-lease remaining time, per-worktree verify-history p50, and the full-vs-quick split once `class` has n ≥ 10 per mode. It adds **V6**, ETA MAE ≤ 180 s, measured from `verify-route.jsonl` against local actuals and against CI actuals by `head_sha` (`gh run list`, TTL 15 min).
 - **Ramp limiter.** `slots_now` would rise by at most +1 per 300 s. Build it only if phase-1 grading shows oscillation, i.e. a bad outcome within 5 min of a slot increase.
 - **audit-kills heuristics.** The rule "a user record within 10 min after the kill mentions the killed command" is a heuristic, reported as such.
-- **Session archive in a lane.** Revisit only if a future CLI exposes a local archive tool in `-p` (re-run §13 item 3 on each major CLI version).
+- **Session archive in a lane.** Moot -- `machine-steward` runs on the desktop, where `archive_session` is already available to it natively (§9.4). This item only mattered for a headless-lane design, which was dropped.
 - **Transcript compression.** It stays unbuilt unless idle-over-30-day transcripts exceed 5 GiB (today 0.22 GiB).
 - **S8 automation.** Deleting Colima profiles stays proposal-only until 3 proposals have been accepted by hand.
 
-## 17. Revision log (r1 → r2)
+## 15. Revision log (r1 -> r2)
 
 | Critique | Resolution (code it relies on) |
 |---|---|
@@ -578,23 +567,26 @@ Absence claims in this table come from reads made on 2026-09-29: `sed -n`/`grep 
 | Founder: storage via the skill | §9.2: the mission invokes `Skill(macos-storage-reclaim)`, and mutations map to `governor-act storage --row`. |
 | Founder: Job 4 red-main | §11. |
 
-## 18. Open questions and STILL UNPROVEN (2026-09-29)
+## 16. Open questions and STILL UNPROVEN (2026-09-29)
 
-1. Q1 (archive in `-p`) is answered statically: no (§10). A live one-turn confirmation is owed as phase-0 item 3.
+1. Q1 (archive in `-p`) is **moot** after the rescope -- `machine-steward` runs on the desktop,
+   where `archive_session` is natively available; the "no local archive in a headless lane" finding
+   (§9.4) only mattered for the dropped lane design.
 2. Q2: does Tahoe write `.hang`/`.spin` reports for user app hangs? `app_hang` stays shadow-only until firings are counted against reported beach-balls.
-3. Q3: the Codex transcript location. Until it is known, Codex owners are N4 (report only).
-4. Q4: whether `ListAgents` in `-p` sees local desktop sessions (phase-0 item 4, §11 fallback).
+3. Q3: the Codex transcript location. Until it is known, `machine-steward`'s charter treats a Codex tree's owner as not-positively-dead (report only), same substance as r2's N4, now the steward's call rather than a keel kill-class.
+4. Q4 (`ListAgents` local-session visibility) is **moot** after the rescope -- there is no keel-side red-main lane to need it; `machine-steward` calls `ListAgents` from its own desktop context, where it is documented to work.
 5. **UNPROVEN:**
-   - (a) JEV quality on real states. Only one probe exists. Re-derive with `governor grade --since 7d`.
-   - (b) That D reduces deferrals without raising `memory_pressure_during_run`. Re-derive with `governor replay --mode lock-only` and the phase-0 grade.
-   - (c) The V3 baseline.
-   - (d) The broker's `unslotted_heavy_per_1k`.
-   - (e) Lane cost: measure tokens and wall time over the first 5 lanes, with a target median < 10 min.
+   - (a) JEV quality on real states. One live smoke call exists (`docs/specs/2026-09-29-machine-governor.phase0.md`); a 7-day promotion-gate comparison (§5.4) needs a `governor grade` CLI that is not built in this phase.
+   - (b) That D reduces deferrals without raising `memory_pressure_during_run` on real traffic (only a synthetic/replay check exists so far, §12.2).
+   - (c) The V3 baseline (p90 time from a feature-branch verify to a local start or CI route) -- needs live traffic after `verify-route` merges on the cynap side.
+   - (d) The broker's `unslotted_heavy_per_1k` -- the broker is built and unit-tested but is inert by default (`governor_mode=shadow`); it has made zero live decisions to measure.
+   - (e) The CONTEXT block's real effect on `machine-steward`'s behavior -- only its own emission (snapshot, join, print, persist) is proven live; whether the steward session actually acts correctly on it is that session's own charter to prove, not this spec's.
 6. **Proven now:**
-   - the `/v1/evaluate` shape (`resp4.json`);
-   - `claude` 2.1.284 accepts `--effort` and `--allowed-tools`;
-   - the registry fields;
-   - the 113/6,284 and 61/114 counts;
-   - the per-class RSS×s figures (`stats2.py`);
-   - `main-deploy-health.mjs`'s TSV and owner contract;
-   - the absence of a local `archive_session` in the CLI binary (the strings probe above).
+   - the `/v1/evaluate` shape, live (this session's smoke call, plus the earlier `resp4.json` capture);
+   - the correct live endpoint, `https://ai-gateway.vercel.sh/v1/evaluate` (the `api.digitalocean.com` guess 404'd; corrected before shipping, §7);
+   - the Keychain credential path has zero interactive friction from both a bare Bash context and `governor.jev_client`'s own code;
+   - the registry fields, live, against this machine's real 121-entry session registry;
+   - the 113/6,284 and 61/114 counts (unchanged from r2, still the motivating baseline);
+   - the per-class RSS×s figures (`stats2.py`, unchanged from r2);
+   - `main-deploy-health.mjs`'s TSV and owner contract (unchanged; now consumed by `machine-steward`, not a keel tick);
+   - `with-heavy-lock --admit-preview`'s output parses cleanly through cynap's real `admitPreview()`/`decideRoute()`, live, end to end (§7, §12.2).
