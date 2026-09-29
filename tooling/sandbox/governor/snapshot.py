@@ -121,7 +121,7 @@ def leases(heavy_directory, max_slots=6):
         rss_mb = sum(table[m].rss_mb for m in members if m in table)
         result.append({'slot': slot, 'job_id': lease.get('job_id'), 'class': lease.get('class'),
                         'age_s': max(0, now - lease.get('started', now)), 'rss_mb': rss_mb,
-                        'members': members})
+                        'members': members, 'cwd': lease.get('cwd')})
     return result
 
 

@@ -9,28 +9,40 @@ from datetime import datetime, timezone
 import json
 
 from governor import admission
+from governor import registry as registry_module
 
 STEWARD_LINE = ('GOVERNOR: send this context to the "machine-steward" session via SendMessage '
                  '(to: "machine-steward") and continue; do not kill or delete anything yourself.')
 
 
-def top_candidates(snapshot, registry=None, limit=5):
-    """The candidate process trees a steward would look at first: the live leases, richest first."""
+def top_candidates(snapshot, registry=None, table=None, limit=5):
+    """The candidate process trees a steward would look at first: the live leases, richest first.
+
+    Each candidate's owner is joined from `registry` by ancestry (walking ppid to a registered
+    pid) or, failing that, a cwd/worktree match (spec §4). A pid with no owner still gets a
+    candidate row -- `unknown` never means dead -- just with owner fields as `None`.
+    """
     leases = sorted(snapshot.get('leases') or [], key=lambda l: l.get('rss_mb', 0), reverse=True)
     candidates = []
     registry = registry or {}
     for lease in leases[:limit]:
         pid = (lease.get('members') or [None])[0]
-        owner = registry.get(pid, {})
+        owner = {}
+        try:
+            owner = registry_module.owner_of(pid, lease.get('cwd'), table, registry) or {}
+        except Exception:  # noqa: BLE001 - the join is best-effort; a candidate row is still useful bare
+            owner = {}
         candidates.append({
             'pid': pid, 'identity': owner.get('identity'), 'cwd': owner.get('cwd'),
-            'session': owner.get('sessionId'), 'idle_minutes': owner.get('idle_minutes'),
+            'session': owner.get('sessionId'), 'session_name': owner.get('name'),
+            'idle_minutes': owner.get('idle_minutes'),
             'rss_mb': lease.get('rss_mb'), 'class': lease.get('class'), 'age_s': lease.get('age_s'),
         })
     return candidates
 
 
-def build(reason, job_class, snapshot, policy, jev_decision=None, d_result=None, registry=None):
+def build(reason, job_class, snapshot, policy, jev_decision=None, d_result=None, registry=None,
+          table=None):
     d_result = d_result or admission.rule_d(job_class, snapshot, policy)
     return {
         'ts': datetime.now(timezone.utc).isoformat(),
@@ -47,7 +59,7 @@ def build(reason, job_class, snapshot, policy, jev_decision=None, d_result=None,
         'floors_fired': admission.floors_fired(snapshot, policy),
         'd_rule': d_result,
         'jev': jev_decision,
-        'candidates': top_candidates(snapshot, registry),
+        'candidates': top_candidates(snapshot, registry, table),
         'instruction': STEWARD_LINE,
     }
 

@@ -206,13 +206,18 @@ def announce_governor_context(directory, reason, command, policy):
     never turned into a crash. No kill or delete ever happens as a result of this call.
     """
     try:
-        from governor import admission, context
+        from governor import admission, context, registry as governor_registry
         from governor.state import governor_directory
         from governor.snapshot import take as take_snapshot
         governor_dir = governor_directory()
         snapshot = take_snapshot(governor_dir, directory)
         job_class = Path(command[0]).name if command else 'other-heavy'
-        built = context.build(reason, job_class, snapshot, policy)
+        table = processes()
+        try:
+            registry = governor_registry.build(table=table)
+        except Exception:  # noqa: BLE001 - the registry join is best-effort; bare pids still work
+            registry = {}
+        built = context.build(reason, job_class, snapshot, policy, registry=registry, table=table)
         print(context.render_stderr_block(built), file=sys.stderr)
         context.write_last_context(governor_dir, built)
         event(directory, 'governor_decision', job_id=None, reason=reason,
@@ -564,6 +569,68 @@ def run_broker_if_wrapper(directory, policy, command):
     return code
 
 
+def admit_preview(directory, policy, job_class):
+    """Read-only admission preview for cynap's `verify-route` (spec §7).
+
+    Never queues (no ticket is written), never claims a slot (no flock is held past the read),
+    and never makes a fresh live JEV call -- only a JEV verdict already cached by a real contended
+    acquire informs it, so `verify-route`'s per-push preview volume can never drive JEV traffic.
+    Any internal failure raises, so the caller (`main()`) fails closed to a non-zero exit -- that
+    is what makes `verify-route`'s R4 ("preview unavailable") the safe default.
+
+    Returns exactly the shape verify-route's `admitPreview()` consumes:
+    `{decision, source, slots_now, running, queued, eta_wait_p90_s, eta_run_p50_s, eta_total_s}`.
+    """
+    from governor import admission, jev_client
+    from governor.state import governor_directory
+    from governor.snapshot import take as take_snapshot
+
+    governor_dir = governor_directory()
+    snapshot = take_snapshot(governor_dir, directory, persist=False)
+    running = len(snapshot.get('leases') or [])
+    queued = snapshot.get('queued', 0)
+    class_stats = snapshot.get('class_stats') or {}
+    class_row = admission.class_row(class_stats, job_class)
+    run_p50 = class_row.get('run_p50_s')
+    run_p90 = class_row.get('run_p90_s')
+
+    floors = admission.floors_fired(snapshot, policy)
+    fast_reason = None if admission.any_unknown(snapshot) else pressure_reason(policy, running >= 1)
+
+    if not floors and running < policy.slots and fast_reason is None:
+        decision, source, slots_now = 'admit', 'fast_path', policy.slots
+    else:
+        d_result = admission.cheap_class_bonus(
+            job_class, snapshot, policy, admission.rule_d(job_class, snapshot, policy, running=running))
+        source, slots_now, admit = 'd_rule', d_result['slots_now'], d_result['admit']
+        if not floors:
+            cached = jev_client._cached_decision(governor_dir, job_class, time.time(), policy.decision_ttl_s)
+            if cached is not None:
+                admit = cached.get('admit', admit)
+                slots_now = cached.get('slots_now', slots_now)
+                source = cached.get('source', 'jev_cache')
+        decision = 'admit' if (admit and not floors) else 'deny'
+
+    if decision == 'admit':
+        eta_wait_p90_s = 0.0
+    else:
+        wait_candidates = []
+        for lease in snapshot.get('leases') or []:
+            lease_row = admission.class_row(class_stats, lease.get('class'))
+            lease_p90 = lease_row.get('run_p90_s')
+            if lease_p90 is not None:
+                wait_candidates.append(max(0.0, lease_p90 - lease.get('age_s', 0)))
+        min_wait = min(wait_candidates) if wait_candidates else 0.0
+        queue_term = (queued // max(slots_now, 1)) * (run_p90 or 0)
+        eta_wait_p90_s = min_wait + queue_term
+    eta_run_p50_s = run_p50 if run_p50 is not None else 0.0
+    eta_total_s = eta_wait_p90_s + eta_run_p50_s
+
+    return {'decision': decision, 'source': source, 'slots_now': slots_now, 'running': running,
+            'queued': queued, 'eta_wait_p90_s': round(eta_wait_p90_s, 1),
+            'eta_run_p50_s': round(eta_run_p50_s, 1), 'eta_total_s': round(eta_total_s, 1)}
+
+
 def main():
     try:
         policy = load_policy()
@@ -581,6 +648,20 @@ def main():
             return 0
         if command == ['--check-lease']:
             return 0 if valid_lease(directory) else 75
+        if command[:1] == ['--admit-preview']:
+            try:
+                job_class = command[command.index('--class') + 1]
+            except (ValueError, IndexError):
+                print('with-heavy-lock: --admit-preview requires --class <name>', file=sys.stderr)
+                return 64
+            try:
+                result = admit_preview(directory, policy, job_class)
+            except Exception as error:  # noqa: BLE001 - any failure here must fail closed (verify-route R4)
+                print(f'with-heavy-lock: admit-preview unavailable: {type(error).__name__}: {error}',
+                      file=sys.stderr)
+                return 70
+            print(json.dumps(result, sort_keys=True))
+            return 0
         if command[:1] == ['--']:
             command = command[1:]
         if not command:
