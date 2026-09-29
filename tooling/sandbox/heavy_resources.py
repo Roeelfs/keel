@@ -26,6 +26,25 @@ class Policy:
     poll_seconds: float = 0.5
     max_seconds: float = 7200
     command_max_seconds: dict = field(default_factory=dict)
+    # Machine-governor fields (docs/specs/2026-09-29-machine-governor.md §5.5). Deleted 2026-11-15
+    # along with governor_mode/jev_admission if phase 1b has not been promoted by then.
+    governor_mode: str = 'shadow'  # 'shadow' | 'enforce'; no 'off' value — shadow enforces the fixed policy.
+    jev_admission: str = 'shadow'  # 'shadow' | 'enforce'
+    max_slots: int = 6  # governor-side ceiling for the D/JEV arbiter; MAX_SLOTS still bounds claim_slot.
+    cheap_rss_seconds: float = 131072  # RSS x seconds gate for the +1 cheap-class slot (§5.2)
+    disk_floor_gib: float = 10
+    disk_reclaim_gib: float = 25
+    swap_growth_floor_mb_per_min: float = 256
+    jev_deadline_ms: float = 1500
+    decision_ttl_s: float = 20
+    admit_p_hi: float = 0.60
+    admit_p_lo: float = 0.40
+    saturation_deny: float = 3.5
+    idle_kill_hours: float = 6
+    reclaim_min_interval_s: float = 1800
+    reclaim_daily_max: int = 6
+    reclaim_max_runtime_s: float = 1200
+    broker_shells: tuple = ('bash', 'zsh', 'sh', 'dash')
 
 
 def account_home():
@@ -41,8 +60,18 @@ def load_policy():
     if unknown:
         raise ValueError('unknown resource policy fields: ' + ', '.join(sorted(unknown)))
     defaults = asdict(Policy())
+    string_fields = {'governor_mode', 'jev_admission'}
+    list_fields = {'broker_shells'}
     for key, value in values.items():
         if key == 'command_max_seconds':
+            continue
+        if key in string_fields:
+            if value not in ('shadow', 'enforce'):
+                raise ValueError('invalid resource policy field: ' + key)
+            continue
+        if key in list_fields:
+            if not isinstance(value, (list, tuple)) or not all(isinstance(v, str) for v in value):
+                raise ValueError('invalid resource policy field: ' + key)
             continue
         if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or value < 0:
             raise ValueError('invalid resource policy field: ' + key)
@@ -64,8 +93,13 @@ def load_policy():
         policy['poll_seconds'] = min(policy['poll_seconds'], float(os.environ['KEEL_HEAVY_POLL_SECONDS']))
     if 'KEEL_HEAVY_MIN_FREE_PERCENT' in os.environ:
         policy['min_free_percent'] = max(policy['min_free_percent'], float(os.environ['KEEL_HEAVY_MIN_FREE_PERCENT']))
-    if any(not math.isfinite(value) for value in policy.values()):
+    if os.environ.get('KEEL_GOVERNOR_MODE') == 'shadow':  # may only move enforce -> shadow, never the reverse
+        policy['governor_mode'] = 'shadow'
+    if any(not math.isfinite(value) for key, value in policy.items()
+           if key not in string_fields and key not in list_fields):
         raise ValueError('resource policy values must be finite')
+    if policy['governor_mode'] not in ('shadow', 'enforce') or policy['jev_admission'] not in ('shadow', 'enforce'):
+        raise ValueError('governor_mode and jev_admission must be shadow or enforce')
     if not 1 <= policy['slots'] <= MAX_SLOTS or policy['slots'] % 1:
         raise ValueError(f'slots must be between 1 and {MAX_SLOTS}')
     policy['slots'] = int(policy['slots'])
