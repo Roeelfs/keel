@@ -9,6 +9,13 @@ PACKAGE_MANAGERS = frozenset({'pnpm', 'npm', 'npx', 'yarn', 'bun', 'bunx', 'core
 PACKAGE_VERBS = frozenset({'test', 'build', 'install', 'ci', 'i'})
 TEST_RUNNERS = frozenset({'vitest', 'vitest.mjs', 'vitest.js', 'jest', 'jest.js'})
 
+# `with-heavy-lock`'s own read-only flags: none of them ever hold a slot or run a heavy command,
+# so none of them may ever be forced into the background, regardless of what a configured
+# `background_required.with-heavy-lock` rule says (a `["*"]` rule with no `!` exclusion would
+# otherwise catch these too -- docs/specs/2026-09-29-machine-governor.md §7/§8). This is a
+# hardcoded floor, not a default a resource-commands.json config can accidentally omit.
+WITH_HEAVY_LOCK_READ_ONLY_VERBS = frozenset({'--admit-preview', '--status', '--check-lease'})
+
 # A project-command that owns its own heavy-slot lock internally (enforced by that project's own
 # lint) can carry this marker to opt out of the shared runner. Only the custom-rule branch below
 # ever consults it; built-in kinds (turbo, vitest, pnpm test, cdk, next build) are never exempt.
@@ -251,10 +258,14 @@ def verbs_match(verbs, args):
 def background_required(command, rules):
     """Name the rule a command segment matches, looking through a leading with-heavy-lock.
 
-    A `with-heavy-lock` rule matches the runner itself, so every command it may queue is covered at once."""
+    A `with-heavy-lock` rule matches the runner itself, so every command it may queue is covered at
+    once -- except its own read-only flags (`--admit-preview`, `--status`, `--check-lease`), which
+    never hold a slot and are never forced into the background, no matter what the rule says."""
     for segment in segments(command):
         words = without_prefixes(segment)
         if words and PurePosixPath(words[0]).name == 'with-heavy-lock':
+            if words[1:2] and words[1] in WITH_HEAVY_LOCK_READ_ONLY_VERBS:
+                continue
             if 'with-heavy-lock' in rules and verbs_match(rules['with-heavy-lock'], words[1:]):
                 return 'with-heavy-lock'
             words = words[2:] if words[1:2] == ['--'] else words[1:]

@@ -235,6 +235,20 @@ class BackgroundRequired(unittest.TestCase):
         self.assertIn("set run_in_background: true", unwrapped.stderr,
                       "the wrap instruction names backgrounding, so the retry is not denied twice")
 
+    def test_read_only_flags_are_never_forced_background_even_with_a_catch_all_rule(self):
+        # A `["*"]` rule with no `!` exclusion would otherwise catch with-heavy-lock's own
+        # read-only flags too -- these are hardcoded-exempt regardless of what the config says.
+        self.write_rules({**TODAY_RULES, "background_required": {"with-heavy-lock": ["*"]}})
+        for command in ("with-heavy-lock --admit-preview --class cynap-verify-full --json",
+                        "with-heavy-lock --status", "with-heavy-lock --check-lease",
+                        "~/.local/bin/with-heavy-lock --admit-preview --class cynap-sandbox --json"):
+            with self.subTest(command=command):
+                result = self.check(command, "--runtime", "claude")
+                self.assertEqual(result.returncode, 0, result.stderr)
+        # A real heavy verb under the same catch-all rule is still forced into the background.
+        denied = self.check("with-heavy-lock project-verify verify", "--runtime", "claude")
+        self.assertEqual(denied.returncode, 2, denied.stderr)
+
     def test_codex_runtime_gets_running_cell_guidance(self):
         result = self.check("with-heavy-lock project-verify verify", "--runtime", "codex")
         self.assertEqual(result.returncode, 0, result.stderr)
