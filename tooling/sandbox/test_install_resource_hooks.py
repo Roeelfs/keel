@@ -121,4 +121,24 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn('resource guard unavailable', result.stderr)
 
+    def test_governor_package_is_installed_as_a_runnable_subpackage(self):
+        # docs/specs/2026-09-29-machine-governor.md phase 1: governor/* must land under the
+        # runtime dir intact (not flattened), and be importable there like it is from the source
+        # tree, since heavy_runner does `from governor import ...` at the installed location too.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            installer.install(home, True)
+            runtime_dir = home.resolve() / ".keel" / "resource-hooks"
+            for module in installer.GOVERNOR_MODULES:
+                self.assertTrue((runtime_dir / module).is_file(), module)
+            probe = subprocess.run(
+                [os.sys.executable, "-c",
+                 "import sys; sys.path.insert(0, '.'); "
+                 "from governor import admission, snapshot, jev_client, broker, act, context, registry"],
+                cwd=str(runtime_dir), capture_output=True, text=True)
+            self.assertEqual(probe.returncode, 0, probe.stderr)
+            second = installer.install(home, True)
+            self.assertFalse(second.get("claude_changed"))
+            self.assertNotIn("backups", second)  # a second apply over the same governor tree is a no-op
+
 if __name__ == "__main__": unittest.main(verbosity=2)

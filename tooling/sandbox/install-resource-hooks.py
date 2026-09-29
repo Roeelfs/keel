@@ -15,7 +15,12 @@ from datetime import datetime, timezone
 SOURCE_ROOT = Path(__file__).resolve().parent
 HOOK_SOURCE = SOURCE_ROOT.parents[1] / ".claude" / "hooks"
 CLAUDE_HOOKS = ("serialize-heavy-ops.py", "heavy_command.py")
-RUNTIME_FILES = ("with-heavy-lock", "heavy_resources.py", "heavy_runner.py", "heavy_node.cjs", "heavy_child.py")
+GOVERNOR_MODULES = tuple(
+    "governor/" + name for name in
+    ("__init__.py", "state.py", "snapshot.py", "admission.py", "jev_client.py", "broker.py",
+     "act.py", "context.py", "registry.py"))  # docs/specs/2026-09-29-machine-governor.md phase 1
+RUNTIME_FILES = ("with-heavy-lock", "heavy_resources.py", "heavy_runner.py", "heavy_node.cjs",
+                  "heavy_child.py", *GOVERNOR_MODULES)
 RESOURCE_SCRIPT = "serialize-heavy-ops.py"
 
 def load_json(path, default):
