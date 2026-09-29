@@ -40,11 +40,10 @@ class Policy:
     admit_p_hi: float = 0.60
     admit_p_lo: float = 0.40
     saturation_deny: float = 3.5
-    idle_kill_hours: float = 6
-    reclaim_min_interval_s: float = 1800
-    reclaim_daily_max: int = 6
-    reclaim_max_runtime_s: float = 1200
     broker_shells: tuple = ('bash', 'zsh', 'sh', 'dash')
+    # idle_kill_hours/reclaim_min_interval_s/reclaim_daily_max/reclaim_max_runtime_s (r2) are gone:
+    # they rate-limited the tick/lane reclaim engine, which the 2026-09-29 founder rescope dropped
+    # in favor of machine-steward (docs/machine-steward.md). Nothing in this repo reads them.
 
 
 def account_home():

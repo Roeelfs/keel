@@ -15,7 +15,11 @@ import urllib.request
 
 from governor import admission
 
-ENDPOINT = 'https://api.digitalocean.com/v1/evaluate'  # JEV proxies through this gateway (r1 probe)
+ENDPOINT = 'https://ai-gateway.vercel.sh/v1/evaluate'  # verified live 2026-09-29 (phase0.md); the
+# credential is named vercel-ai-gateway for exactly this reason. An earlier api.digitalocean.com
+# guess -- "digitalocean" is only the *resolvedProvider* the gateway picked, never the URL to call
+# -- 404'd with {"id":"not_found","message":"Your request could not be routed."}; fixed before any
+# JEV code shipped live.
 CREDENTIAL_SERVICE = 'vercel-ai-gateway'
 BREACH_THRESHOLD = 3
 BREACH_WINDOW_S = 30 * 60

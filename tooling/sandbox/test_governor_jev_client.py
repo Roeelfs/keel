@@ -32,6 +32,13 @@ def snapshot():
             'leases': [], 'class_stats': {}, 'unknown': [], 'ncpu': 12, 'load1_per_core': 1.0}
 
 
+class EndpointTests(unittest.TestCase):
+    def test_endpoint_is_the_verified_live_gateway_not_a_guess(self):
+        # api.digitalocean.com 404'd live (docs/specs/2026-09-29-machine-governor.phase0.md); the
+        # credential is named vercel-ai-gateway for exactly the reason this constant must match.
+        self.assertEqual(jev_client.ENDPOINT, 'https://ai-gateway.vercel.sh/v1/evaluate')
+
+
 class JevClientTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
