@@ -118,13 +118,14 @@ def probe_credential(directory, run=None):
 
 
 def build_request(job_class, snapshot, policy, d_result):
+    row = admission.class_row(snapshot.get('class_stats') or {}, job_class)
     return {
         'model': 'typesafe-ai/jev',
         'state': {
             'job': {'class': job_class,
-                    'est_run_p50_s': (snapshot.get('class_stats', {}).get(job_class) or {}).get('run_p50_s'),
-                    'est_run_p90_s': (snapshot.get('class_stats', {}).get(job_class) or {}).get('run_p90_s'),
-                    'est_peak_rss_mb': (snapshot.get('class_stats', {}).get(job_class) or {}).get('rss_p90_mb')},
+                    'est_run_p50_s': row.get('run_p50_s'),
+                    'est_run_p90_s': row.get('run_p90_s'),
+                    'est_peak_rss_mb': row.get('rss_p90_mb')},
             'machine': {'ncpu': snapshot.get('ncpu'), 'load1_per_core': snapshot.get('load1_per_core'),
                         'mem_pressure_level': snapshot.get('mem_pressure_level'),
                         'mem_free_percent': snapshot.get('mem_free_percent'),

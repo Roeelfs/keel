@@ -69,6 +69,37 @@ class AdmitPreviewFunctionTests(unittest.TestCase):
         self.assertEqual(result['decision'], 'deny')
         self.assertGreaterEqual(result['eta_total_s'], 0)
 
+    def test_live_bug_2026_09_29_real_leases_no_class_stats_file_deny_has_nonzero_eta(self):
+        # Reproduces the exact reported shape: `--class cynap-verify-full`, two REAL leases (the
+        # 'executable'/'started_ns' shape run_job() actually writes, never 'class'/'started'),
+        # class-stats.json absent. Before the fix this returned eta_*_s: 0.0 on a deny.
+        policy = Policy(slots=2, max_slots=2)
+        for slot in (1, 2):
+            write_record(self.heavy_dir / f'lease.{slot}.json', {
+                'job_id': f'j{slot}', 'supervisor_pid': 1, 'supervisor_identity': 'x',
+                'pgid': 999999990 + slot, 'cwd': '/repo', 'executable': 'cynap-sandbox',
+                'slot': slot, 'started_ns': time.time_ns() - 60_000_000_000})
+        # A real completed job in this machine's history -- the only source of real numbers,
+        # since class-stats.json is never written by any code in this repo.
+        events = self.heavy_dir / 'events.jsonl'
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        with events.open('a') as stream:
+            for i in range(10):
+                started = now - timedelta(seconds=600 + i)
+                completed = started + timedelta(seconds=400)
+                stream.write(json.dumps({'event': 'started', 'job_id': f'hist{i}',
+                                         'executable': 'cynap-sandbox', 'ts': started.isoformat()}) + '\n')
+                stream.write(json.dumps({'event': 'completed', 'job_id': f'hist{i}', 'reason': 'exit',
+                                         'peak_rss_mb': 4000, 'exit_code': 0,
+                                         'ts': completed.isoformat()}) + '\n')
+        result = heavy_runner.admit_preview(self.heavy_dir, policy, 'cynap-verify-full')
+        assert_contract(self, result)
+        self.assertEqual(result['decision'], 'deny')
+        self.assertEqual(result['running'], 2)
+        self.assertGreater(result['eta_total_s'], 0)
+        self.assertGreater(result['eta_wait_p90_s'], 0)
+
     def test_a_disk_floor_always_denies_even_if_d_rule_would_admit(self):
         policy = Policy(slots=1, max_slots=6, disk_floor_gib=999999)  # always fires
         result = heavy_runner.admit_preview(self.heavy_dir, policy, 'other-heavy')

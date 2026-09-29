@@ -580,6 +580,11 @@ def admit_preview(directory, policy, job_class):
 
     Returns exactly the shape verify-route's `admitPreview()` consumes:
     `{decision, source, slots_now, running, queued, eta_wait_p90_s, eta_run_p50_s, eta_total_s}`.
+
+    `job_class` may be a synthetic preview-only name (`cynap-verify-<mode>`) that never appears in
+    a recorded lease/event; `admission.canonical_class()` is the one place that maps it to the
+    executable it actually runs as (`cynap-sandbox`), so every `class_stats` lookup here goes
+    through `admission.class_row()` rather than a raw dict `.get(job_class)`.
     """
     from governor import admission, jev_client
     from governor.state import governor_directory
@@ -620,7 +625,17 @@ def admit_preview(directory, policy, job_class):
             lease_p90 = lease_row.get('run_p90_s')
             if lease_p90 is not None:
                 wait_candidates.append(max(0.0, lease_p90 - lease.get('age_s', 0)))
-        min_wait = min(wait_candidates) if wait_candidates else 0.0
+        if wait_candidates:
+            min_wait = min(wait_candidates)
+        elif running > 0:
+            # A deny with running jobs but no per-class run-time data (a brand-new class, or a
+            # cold class_stats before any job of this kind has ever completed) must not silently
+            # report ETA 0 -- verify-route's R6 (ETA>600s -> CI) can never fire on a false 0
+            # (live bug, 2026-09-29). `policy.wait_seconds` (with-heavy-lock's own queue timeout)
+            # is the conservative, always-available floor for "unknown, but definitely not zero".
+            min_wait = float(policy.wait_seconds)
+        else:
+            min_wait = 0.0
         queue_term = (queued // max(slots_now, 1)) * (run_p90 or 0)
         eta_wait_p90_s = min_wait + queue_term
     eta_run_p50_s = run_p50 if run_p50 is not None else 0.0

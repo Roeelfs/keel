@@ -6,6 +6,7 @@ name lands in `unknown[]` — never raises, so a partial snapshot still routes s
 """
 from datetime import datetime, timezone
 import json
+import math
 import os
 import re
 import subprocess
@@ -119,8 +120,17 @@ def leases(heavy_directory, max_slots=6):
         members = [p.pid for p in table.values()
                    if p.pgid == lease.get('pgid') and not p.state.startswith('Z')]
         rss_mb = sum(table[m].rss_mb for m in members if m in table)
-        result.append({'slot': slot, 'job_id': lease.get('job_id'), 'class': lease.get('class'),
-                        'age_s': max(0, now - lease.get('started', now)), 'rss_mb': rss_mb,
+        # A real lease (heavy_runner.run_job) is written with 'executable', not 'class', and with
+        # 'started_ns' (nanoseconds), not 'started' -- only a test fixture ever sets the latter pair
+        # directly. Prefer the real field when present; a live lease's class_stats key is always
+        # its recorded executable name (spec §7), and its age is always derived from started_ns.
+        job_class = lease.get('class') or lease.get('executable')
+        started_ns = lease.get('started_ns')
+        started = lease.get('started')
+        if started is None:
+            started = (started_ns / 1e9) if started_ns else now
+        result.append({'slot': slot, 'job_id': lease.get('job_id'), 'class': job_class,
+                        'age_s': max(0, now - started), 'rss_mb': rss_mb,
                         'members': members, 'cwd': lease.get('cwd')})
     return result
 
@@ -148,15 +158,93 @@ def queued_and_deferrals(heavy_directory, window_s=3600):
     return queued, deferrals
 
 
-def load_class_stats(directory):
-    path = directory / 'class-stats.json'
-    if not path.exists():
+CLASS_STATS_WINDOW_S = 7 * 24 * 3600
+CLASS_STATS_MAX_LINES = 20000
+
+
+def _percentile(values, pct):
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, max(0, math.ceil(pct / 100 * len(ordered)) - 1))
+    return ordered[index]
+
+
+def compute_class_stats_from_events(heavy_directory, window_s=CLASS_STATS_WINDOW_S,
+                                     max_lines=CLASS_STATS_MAX_LINES):
+    """Fallback class stats computed live from a bounded tail of `events.jsonl`, keyed by the
+    recorded executable name (`started`'s `executable` field, joined to its `completed` by
+    `job_id`) -- `class-stats.json` is never written by any code in this repo, so this is the
+    only source of real `run_p50_s`/`run_p90_s`/`rss_p90_mb`/`rss_s_p90`/`n` numbers today
+    (spec §7; verify-route's `cynap-verify-<mode>` classes reach these via `canonical_class()`).
+    Never raises; a missing file or a parse failure yields `{}`.
+    """
+    events_path = heavy_directory / 'events.jsonl'
+    if not events_path.exists():
         return {}
     try:
-        value = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
+        lines = events_path.read_text().splitlines()[-max_lines:]
+    except OSError:
         return {}
-    return value if isinstance(value, dict) else {}
+    cutoff = time.time() - window_s
+    started_by_job = {}
+    samples_by_class = {}
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        event_name = record.get('event')
+        job_id = record.get('job_id')
+        if not job_id:
+            continue
+        if event_name == 'started':
+            try:
+                ts = datetime.fromisoformat(record['ts']).timestamp()
+            except (KeyError, ValueError):
+                continue
+            started_by_job[job_id] = {'ts': ts, 'executable': record.get('executable')}
+        elif event_name == 'completed':
+            begin = started_by_job.pop(job_id, None)
+            if not begin or not begin.get('executable'):
+                continue
+            try:
+                end_ts = datetime.fromisoformat(record['ts']).timestamp()
+            except (KeyError, ValueError):
+                continue
+            if end_ts < cutoff:
+                continue
+            duration_s = max(0.0, end_ts - begin['ts'])
+            peak_rss = record.get('peak_rss_mb')
+            bucket = samples_by_class.setdefault(
+                begin['executable'], {'durations': [], 'rss': [], 'rss_seconds': []})
+            bucket['durations'].append(duration_s)
+            if peak_rss is not None:
+                bucket['rss'].append(peak_rss)
+                bucket['rss_seconds'].append(peak_rss * duration_s)
+    return {name: {'n': len(bucket['durations']),
+                   'run_p50_s': _percentile(bucket['durations'], 50),
+                   'run_p90_s': _percentile(bucket['durations'], 90),
+                   'rss_p90_mb': _percentile(bucket['rss'], 90),
+                   'rss_s_p90': _percentile(bucket['rss_seconds'], 90)}
+            for name, bucket in samples_by_class.items()}
+
+
+def load_class_stats(directory, heavy_directory=None):
+    """Prefer a persisted `class-stats.json` (a future aggregator's authoritative numbers); fall
+    back to computing the same shape live from `events.jsonl` when it is absent or empty -- see
+    `compute_class_stats_from_events`."""
+    path = directory / 'class-stats.json'
+    if path.exists():
+        try:
+            value = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            value = None
+        if isinstance(value, dict) and value:
+            return value
+    if heavy_directory is not None:
+        return compute_class_stats_from_events(heavy_directory)
+    return {}
 
 
 def _recent_snapshots(directory, limit=20):
@@ -195,7 +283,7 @@ def take(directory, heavy_directory, disk_path='/System/Volumes/Data', persist=T
         **disk(unknown, disk_path),
         'hang_reports_recent': hang_reports_recent(unknown),
         'leases': leases(heavy_directory),
-        'class_stats': load_class_stats(directory),
+        'class_stats': load_class_stats(directory, heavy_directory),
     }
     queued, deferrals = queued_and_deferrals(heavy_directory)
     result['queued'] = queued

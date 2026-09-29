@@ -8,9 +8,26 @@ import math
 
 OTHER_CLASS = 'other-heavy'
 
+# Single source of truth for "synthetic" job classes that never appear in a recorded lease/event
+# (they only exist as a `--class` argument to a read-only preview call). cynap's verify-route.mjs
+# calls `--admit-preview --class cynap-verify-<mode>` (quick/full/...), but every real job it
+# previews actually runs as the `cynap-sandbox` executable -- that is the name every `queued`/
+# `started`/`completed` event and every lease is recorded under (spec §7). Without this map, a
+# `cynap-verify-*` lookup always misses class_stats and silently falls through to `other-heavy`,
+# which can itself be empty -- reported live 2026-09-29 as `eta_*_s: 0.0` on a real deny.
+CLASS_ALIASES_PREFIXES = (('cynap-verify-', 'cynap-sandbox'),)
+
+
+def canonical_class(job_class):
+    """Map a synthetic preview-only class name to the executable it is actually recorded under."""
+    for prefix, target in CLASS_ALIASES_PREFIXES:
+        if job_class and job_class.startswith(prefix):
+            return target
+    return job_class
+
 
 def class_row(class_stats, job_class):
-    row = class_stats.get(job_class)
+    row = class_stats.get(job_class) or class_stats.get(canonical_class(job_class))
     if not row or row.get('n', 0) < 10:
         row = class_stats.get(OTHER_CLASS)
     return row or {}

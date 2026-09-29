@@ -111,5 +111,31 @@ class FloorsTests(unittest.TestCase):
         self.assertEqual(admission.floors_fired(snapshot(disk_free_gib=20), policy), [])
 
 
+class ClassAliasTests(unittest.TestCase):
+    """verify-route.mjs's synthetic `cynap-verify-<mode>` classes must resolve to the same
+    class_stats row as the real recorded executable, `cynap-sandbox` (live bug, 2026-09-29)."""
+
+    def test_canonical_class_maps_every_verify_mode_to_cynap_sandbox(self):
+        for job_class in ('cynap-verify-quick', 'cynap-verify-full', 'cynap-verify-anything'):
+            with self.subTest(job_class=job_class):
+                self.assertEqual(admission.canonical_class(job_class), 'cynap-sandbox')
+
+    def test_canonical_class_is_the_identity_for_a_real_recorded_class(self):
+        for job_class in ('cynap-sandbox', 'wt-verify', None, ''):
+            with self.subTest(job_class=job_class):
+                self.assertEqual(admission.canonical_class(job_class), job_class)
+
+    def test_class_row_finds_stats_recorded_only_under_the_real_executable_name(self):
+        stats = {'cynap-sandbox': CYNAP_SANDBOX}
+        row = admission.class_row(stats, 'cynap-verify-full')
+        self.assertEqual(row, CYNAP_SANDBOX)
+
+    def test_class_row_prefers_an_exact_synthetic_key_if_one_is_ever_recorded(self):
+        exact = {'run_p50_s': 1, 'run_p90_s': 2, 'rss_p90_mb': 3, 'n': 50}
+        stats = {'cynap-verify-full': exact, 'cynap-sandbox': CYNAP_SANDBOX}
+        row = admission.class_row(stats, 'cynap-verify-full')
+        self.assertEqual(row, exact)
+
+
 if __name__ == '__main__':
     unittest.main()
