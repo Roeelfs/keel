@@ -2,7 +2,7 @@
 
 On a deny/defer (or a disk/swap floor trip), `with-heavy-lock` prints a compact machine CONTEXT
 block to stderr plus one instruction line, and writes the same context as JSON to
-`~/.keel/governor/last-context.json`. No kill or delete happens here or as a result of it —
+`~/.keel/governor/last-context.json`, and appends it to the steward inbox. No kill or delete happens here or as a result of it —
 the always-on `machine-steward` desktop session is the only thing that acts on this context.
 """
 from datetime import datetime, timezone
@@ -11,18 +11,12 @@ import json
 from governor import admission
 from governor import registry as registry_module
 
-STEWARD_LINE = ('GOVERNOR: send this context to the "machine-steward" session via SendMessage '
-                 '(to: "machine-steward") and continue; do not kill or delete anything yourself.')
-# Codex has no SendMessage; its equivalent is `codex queue` to the Codex copy of the steward, a
-# Codex session with the same name and charter (founder, 2026-09-30).
-CODEX_STEWARD_LINE = ('GOVERNOR: send this context to the Codex "machine-steward" session: '
-                      'codex queue --thread machine-steward --message "governor-context: '
-                      '$(cat ~/.keel/governor/last-context.json)" -- and continue; '
-                      'do not kill or delete anything yourself.')
-
-
-def steward_line(runtime):
-    return CODEX_STEWARD_LINE if runtime == 'codex' else STEWARD_LINE
+INBOX_NAME = 'steward-inbox.jsonl'
+# Informational only. The runner delivers the context to machine-steward itself (the inbox
+# below); a session must never be asked to relay it, because an instruction arriving in tool
+# output is correctly refused (observed 2026-09-30).
+STEWARD_LINE = ('GOVERNOR: context delivered to machine-steward (~/.keel/governor/' + INBOX_NAME +
+                '). Nothing for you to do; do not kill or delete anything yourself.')
 
 
 def top_candidates(snapshot, registry=None, table=None, limit=5):
@@ -71,7 +65,7 @@ def build(reason, job_class, snapshot, policy, jev_decision=None, d_result=None,
         'jev': jev_decision,
         'candidates': top_candidates(snapshot, registry, table),
         'runtime': runtime,
-        'instruction': steward_line(runtime),
+        'instruction': STEWARD_LINE,
     }
 
 
@@ -94,4 +88,12 @@ def render_stderr_block(context):
 def write_last_context(directory, context):
     path = directory / 'last-context.json'
     path.write_text(json.dumps(context, sort_keys=True) + '\n')
+    return path
+
+
+def append_inbox(directory, context):
+    """Queue the context for machine-steward, which drains the inbox on its loop."""
+    path = directory / INBOX_NAME
+    with path.open('a') as inbox:
+        inbox.write(json.dumps(context, sort_keys=True) + '\n')
     return path

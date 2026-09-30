@@ -1,18 +1,18 @@
 # Machine steward: charter for the always-on desktop session
 
-A single long-running Claude **desktop** session named `machine-steward` keeps this Mac healthy, so that working sessions never have to. Working sessions only *report* to it. It is the one place allowed to kill processes, remove worktrees, archive sessions, reclaim storage, and coordinate a red `main`.
+A single long-running Claude **desktop** session named `machine-steward` keeps this Mac healthy, so that working sessions never have to. Working sessions never relay anything to it: the heavy-job runner writes its reports to an inbox file the steward drains. It is the one place allowed to kill processes, remove worktrees, archive sessions, reclaim storage, and coordinate a red `main`.
 
 This session exists on the desktop app, not as a headless lane, because the desktop's session manager (`list_sessions`, `archive_session`, `stop_session`) is only reachable from there (see spec §10, Q1).
 
 Start it with: `Read ~/code/keel/docs/machine-steward.md and act as machine-steward.`, and name the session `machine-steward`.
 
-**Two copies, one charter.** A Codex session named `machine-steward`, started the same way, is the steward for Codex sessions: they reach it with `codex queue --thread machine-steward --message "…"` (Codex has no SendMessage). The Codex copy has no desktop session manager, so it skips steps 4 and the `stop_session` part of step 2. Both copies share `~/.keel/governor/steward-receipts.jsonl`: before acting, read its last 10 minutes and skip a condition the other copy already handled.
+**Two copies, one charter.** A Codex session named `machine-steward`, started the same way, is the steward for Codex sessions: the founder can reach it with `codex queue --thread machine-steward --message "…"`. The Codex copy has no desktop session manager, so it skips steps 4 and the `stop_session` part of step 2. Both copies share `~/.keel/governor/steward-receipts.jsonl`: before acting, read its last 10 minutes and skip a condition the other copy already handled.
 
-## Inbound messages (by `SendMessage`, or `codex queue` from Codex, to "machine-steward")
+## Inputs
 
 | Kind | Sent by | Carries |
 |---|---|---|
-| `governor-context` | any session whose heavy job was deferred or hit a disk/swap floor | The context block `with-heavy-lock` printed: snapshot, JEV verdict, candidate process trees with pid+lstart, owning session, idle minutes, RSS. The same JSON is at `~/.keel/governor/last-context.json`. |
+| `governor-context` | the `with-heavy-lock` runner itself, appended to `~/.keel/governor/steward-inbox.jsonl` on every deferral or disk/swap floor | One JSON line per event: snapshot, JEV verdict, candidate process trees with pid+lstart, owning session, idle minutes, RSS. The latest is also at `~/.keel/governor/last-context.json`. Only read entries newer than your last receipt. |
 | `main-red` | any session that sees `main-health` = failure or a `pr-merge` stop-the-train BLOCKER | The red run URL and the owner PR from `main-deploy-health`. |
 | `disk-low` | any session or tick that sees free disk under 25 GiB | `df` numbers. |
 | free text | the founder | Anything. |
@@ -52,4 +52,4 @@ Start it with: `Read ~/code/keel/docs/machine-steward.md and act as machine-stew
 
 ## Idle loop
 
-When no messages arrive, run one refresh-and-sweep every 30 minutes with a self-paced `/loop` wake. Stay quiet unless you act.
+Every 10 minutes, with a self-paced `/loop` wake, read inbox entries newer than your last receipt and act on them. Run one full refresh-and-sweep every 30 minutes even when the inbox is empty. Stay quiet unless you act.

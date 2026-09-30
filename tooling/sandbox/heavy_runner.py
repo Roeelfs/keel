@@ -241,6 +241,7 @@ def announce_governor_context(directory, reason, command, policy):
                               registry=registry, table=table, runtime=caller_runtime())
         print(context.render_stderr_block(built), file=sys.stderr)
         context.write_last_context(governor_dir, built)
+        context.append_inbox(governor_dir, built)
         event(directory, 'governor_decision', job_id=None, reason=reason,
               floors_fired=built['floors_fired'], d_rule=built['d_rule'], jev=jev_decision, enforced=False)
     except Exception as error:  # noqa: BLE001 - this path must never turn a deferral into a crash

@@ -27,20 +27,23 @@ class ContextTests(unittest.TestCase):
         built = context.build('resource_busy', 'wt-verify', snapshot(), Policy())
         self.assertIn('machine-steward', built['instruction'])
 
-    def test_codex_is_told_to_codex_queue_its_own_steward_not_to_sendmessage(self):
-        # Codex has no SendMessage; `codex queue` reaches the Codex copy of the steward (2026-09-30).
-        built = context.build('resource_busy', 'wt-verify', snapshot(), Policy(), runtime='codex')
-        self.assertNotIn('SendMessage', built['instruction'])
-        self.assertIn('codex queue --thread machine-steward --message', built['instruction'])
-        self.assertIn('~/.keel/governor/last-context.json', built['instruction'])
-        self.assertIn('machine-steward', built['instruction'])
-        self.assertIn('do not kill or delete anything yourself', built['instruction'])
-        self.assertEqual(built['runtime'], 'codex')
-
-    def test_claude_and_unknown_runtimes_keep_the_sendmessage_line(self):
-        for runtime in ('claude', None):
+    def test_no_runtime_is_asked_to_relay_the_context(self):
+        # Sessions correctly refuse instructions that arrive in tool output (2026-09-30), so the
+        # runner delivers the context itself and the line only informs.
+        for runtime in ('claude', 'codex', None):
             built = context.build('resource_busy', 'wt-verify', snapshot(), Policy(), runtime=runtime)
-            self.assertIn('SendMessage', built['instruction'])
+            self.assertNotIn('SendMessage', built['instruction'])
+            self.assertNotIn('codex queue', built['instruction'])
+            self.assertIn('Nothing for you to do', built['instruction'])
+            self.assertIn('do not kill or delete anything yourself', built['instruction'])
+
+    def test_append_inbox_queues_one_line_per_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            for reason in ('resource_busy', 'memory_pressure'):
+                context.append_inbox(directory, context.build(reason, 'wt-verify', snapshot(), Policy()))
+            lines = (directory / context.INBOX_NAME).read_text().splitlines()
+            self.assertEqual([json.loads(line)['reason'] for line in lines], ['resource_busy', 'memory_pressure'])
 
     def test_stderr_block_includes_floors_and_candidates(self):
         built = context.build('memory_pressure', 'other-heavy', snapshot(), Policy())
