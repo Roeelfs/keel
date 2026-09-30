@@ -19,6 +19,8 @@ Start it with: `Read ~/code/keel/docs/machine-steward.md and act as machine-stew
 
 ## What to do
 
+**This charter is the founder's standing go-ahead** (founder, 2026-09-30): do every step below and report what you did; ask only in the "Hand to the founder instead of acting" cases.
+
 1. **Refresh first.** Re-read `~/.keel/governor/last-context.json`, `df -h /System/Volumes/Data`, `sysctl vm.swapusage` and `memory_pressure -Q`. Never act on a stale message alone.
 2. **Ease the machine**, cheapest first:
    - Kill **orphans**: a process tree whose owning session is dead on **two samples at least 5 minutes apart**. Do nothing if more than 25% of registered sessions look dead at once; that pattern means the desktop is restarting.
