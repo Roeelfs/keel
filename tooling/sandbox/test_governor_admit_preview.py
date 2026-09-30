@@ -183,7 +183,7 @@ class AdmitPreviewFunctionTests(unittest.TestCase):
                        'started_ns': time.time_ns(), 'cwd': None})
         self._ticket('old', None)
         result = heavy_runner.admit_preview(self.heavy_dir, policy, 'cynap-verify-full')
-        self.assertGreaterEqual(result['eta_wait_p90_s'], 1200)  # lease 600 + one ticket 600
+        self.assertGreater(result['eta_wait_p90_s'], 1190)  # lease ~600 (ages while the test runs) + one ticket 600
 
     def test_never_writes_a_snapshot_sample_persist_false(self):
         heavy_runner.admit_preview(self.heavy_dir, Policy(), 'other-heavy')

@@ -60,16 +60,33 @@ def valid_lease(directory):
                 and not lock_available(directory, slot))
 
 
-def pressure_reason(policy, others_held):
-    """A job alone needs min_free_percent; beside another it needs that much left after its full budget."""
+JEV_FLOOR_MARGIN_PERCENT = 2  # a JEV admit may never push free memory within this of the run floor
+YIELD_MAX_SECONDS = 300  # a memory-refused waiter lets smaller jobs pass for at most this long
+
+
+def pressure_reason(policy, others_held, budget_mb=None, jev_admit=False):
+    """A job alone needs min_free_percent. Beside others it needs that much left after ITS budget.
+
+    `budget_mb` is the job's own class p90 RSS (2026-09-30: a flat `max_rss_mb` of 6 GB for every
+    job, including 1 GB vitest runs, left one slot usable on a 24 GB machine). When the fit test
+    fails, a fresh JEV admit (`jev_admission=enforce`) may still admit -- but never past
+    `run_min_free_percent + JEV_FLOOR_MARGIN_PERCENT`, the line below which running jobs are
+    interrupted. Swap/disk floors are enforced by the caller before this point.
+    """
     if not policy.min_free_percent:
         return None
     free = free_percent()
     if free < policy.min_free_percent:
         return 'memory_pressure'
-    if others_held and free - 100 * policy.max_rss_mb / total_memory_mb() < policy.min_free_percent:
-        return 'memory_pressure'
-    return None
+    if not others_held:
+        return None
+    budget = min(budget_mb or policy.max_rss_mb, policy.max_rss_mb)
+    after = free - 100 * budget / total_memory_mb()
+    if after >= policy.min_free_percent:
+        return None
+    if jev_admit and after >= policy.run_min_free_percent + JEV_FLOOR_MARGIN_PERCENT:
+        return None
+    return 'memory_pressure'
 
 
 class Interrupted(Exception):
@@ -161,7 +178,7 @@ def working_directory():
         return None
 
 
-def claim_slot(directory, policy, position):
+def claim_slot(directory, policy, position, budget_mb=None, jev_admit=False):
     """Lock the first free slot when no more waiters are ahead than there are free slots.
 
     Returns (stream, slot) or (None, reason). A slot is free when its lock is available and no
@@ -188,7 +205,7 @@ def claim_slot(directory, policy, position):
         for other, _ in free:
             other.close()
         free = []
-        reason = pressure_reason(policy, others_held)
+        reason = pressure_reason(policy, others_held, budget_mb=budget_mb, jev_admit=jev_admit)
         if reason:
             stream.close()
             return None, reason
@@ -261,6 +278,46 @@ def consult_jev(directory, job_id, command, policy):
               file=sys.stderr)
 
 
+def queue_position(live, ticket, fresh_after):
+    """1 + the live, fresh, NON-yielding tickets ahead. A yielding ticket (refused for memory,
+    within YIELD_MAX_SECONDS) lets a smaller job behind it take the slot it cannot use."""
+    return 1 + sum(1 for path in live if path < ticket and heartbeat(path) >= fresh_after
+                   and not (read_record(path) or {}).get('yield'))
+
+
+def job_budget_mb(command, policy):
+    """This job's memory budget: its class's measured p90 RSS, capped at `max_rss_mb`.
+
+    An unmodeled class (fewer than 10 completions; `class_row` falls back to `other-heavy`) or any
+    read failure keeps the conservative flat `max_rss_mb`. Returns a number, never None, so the
+    caller reads the event log at most once per job.
+    """
+    try:
+        from governor import admission
+        from governor.state import governor_directory
+        from governor.snapshot import take as take_snapshot
+        snapshot = take_snapshot(governor_directory(), state_directory(), persist=False)
+        job_class = Path(command[0]).name if command else 'other-heavy'
+        p90 = admission.class_row(snapshot.get('class_stats') or {}, job_class).get('rss_p90_mb')
+        return min(float(p90), float(policy.max_rss_mb)) if p90 else float(policy.max_rss_mb)
+    except Exception:  # noqa: BLE001 - a budget read failure must fall back, never block admission
+        return float(policy.max_rss_mb)
+
+
+def jev_admits(command, policy):
+    """A fresh cached JEV admit for this job's class, honoured only under `jev_admission=enforce`."""
+    if policy.jev_admission != 'enforce':
+        return False
+    try:
+        from governor import jev_client
+        from governor.state import governor_directory
+        job_class = Path(command[0]).name if command else 'other-heavy'
+        cached = jev_client._cached_decision(governor_directory(), job_class, time.time(), policy.decision_ttl_s)
+        return bool(cached and cached.get('admit') and cached.get('source') == 'jev')
+    except Exception:  # noqa: BLE001 - no verdict is simply no JEV admit
+        return False
+
+
 def start_jev_consult(directory, job_id, command, policy):
     import threading
     thread = threading.Thread(target=consult_jev, args=(directory, job_id, command, policy), daemon=True)
@@ -282,6 +339,8 @@ def acquire(directory, policy, job_id, command):
           executable=Path(command[0]).name, args=event_args(command),
           wait_seconds=policy.wait_seconds, caller=caller_runtime())
     progress_at = None
+    budget_mb = None  # this job's class p90 RSS, read once on the first real claim attempt
+    last_consult = time.monotonic()  # the first JEV consult starts with the first QUEUED line
     handlers = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
     def interrupted(signum, _frame):
         raise Interrupted(signum)
@@ -298,15 +357,26 @@ def acquire(directory, policy, job_id, command):
             if ticket not in live:
                 write_record(ticket, record)  # Restore a wrongly pruned ticket at its original place.
                 live = sorted([*live, ticket])
-            # Skip, never delete, a live waiter whose heartbeat stalled.
+            # Skip, never delete, a live waiter whose heartbeat stalled -- or one that is yielding
+            # (refused for memory, so a smaller job behind it may use the slot it cannot).
             fresh_after = time.time() - max(3, 6 * policy.poll_seconds)
-            position = 1 + sum(1 for path in live if path < ticket and heartbeat(path) >= fresh_after)
+            position = queue_position(live, ticket, fresh_after)
             reason = 'resource_busy'
             if position <= policy.slots:  # A waiter behind every slot's worth of waiters cannot be next.
-                stream, claimed = claim_slot(directory, policy, position)
+                if budget_mb is None:
+                    budget_mb = job_budget_mb(command, policy)
+                stream, claimed = claim_slot(directory, policy, position, budget_mb=budget_mb,
+                                             jev_admit=jev_admits(command, policy))
                 if stream:
                     return stream, claimed
                 reason = claimed
+                if reason == 'memory_pressure' and time.monotonic() - last_consult >= policy.decision_ttl_s:
+                    start_jev_consult(directory, job_id, command, policy)  # refresh the grey-zone verdict
+                    last_consult = time.monotonic()
+            yielding = reason == 'memory_pressure' and time.monotonic() - started < YIELD_MAX_SECONDS
+            if bool(record.get('yield')) != yielding:
+                record = {**record, 'yield': yielding}
+                write_record(ticket, record)
             now = time.monotonic()
             if now >= deadline:
                 event(directory, 'deferred', job_id=job_id, reason=reason,
