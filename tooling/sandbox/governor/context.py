@@ -13,6 +13,13 @@ from governor import registry as registry_module
 
 STEWARD_LINE = ('GOVERNOR: send this context to the "machine-steward" session via SendMessage '
                  '(to: "machine-steward") and continue; do not kill or delete anything yourself.')
+# Codex has no SendMessage to reach the Claude desktop steward; it hands the context up instead.
+CODEX_STEWARD_LINE = ('GOVERNOR: quote this context in your final report so it reaches the '
+                      '"machine-steward" session, and continue; do not kill or delete anything yourself.')
+
+
+def steward_line(runtime):
+    return CODEX_STEWARD_LINE if runtime == 'codex' else STEWARD_LINE
 
 
 def top_candidates(snapshot, registry=None, table=None, limit=5):
@@ -42,7 +49,7 @@ def top_candidates(snapshot, registry=None, table=None, limit=5):
 
 
 def build(reason, job_class, snapshot, policy, jev_decision=None, d_result=None, registry=None,
-          table=None):
+          table=None, runtime=None):
     d_result = d_result or admission.rule_d(job_class, snapshot, policy)
     return {
         'ts': datetime.now(timezone.utc).isoformat(),
@@ -60,7 +67,8 @@ def build(reason, job_class, snapshot, policy, jev_decision=None, d_result=None,
         'd_rule': d_result,
         'jev': jev_decision,
         'candidates': top_candidates(snapshot, registry, table),
-        'instruction': STEWARD_LINE,
+        'runtime': runtime,
+        'instruction': steward_line(runtime),
     }
 
 

@@ -27,6 +27,20 @@ class ContextTests(unittest.TestCase):
         built = context.build('resource_busy', 'wt-verify', snapshot(), Policy())
         self.assertIn('machine-steward', built['instruction'])
 
+    def test_codex_is_told_to_report_it_not_to_sendmessage(self):
+        # Codex has no SendMessage to the Claude desktop steward (2026-09-30).
+        built = context.build('resource_busy', 'wt-verify', snapshot(), Policy(), runtime='codex')
+        self.assertNotIn('SendMessage', built['instruction'])
+        self.assertIn('final report', built['instruction'])
+        self.assertIn('machine-steward', built['instruction'])
+        self.assertIn('do not kill or delete anything yourself', built['instruction'])
+        self.assertEqual(built['runtime'], 'codex')
+
+    def test_claude_and_unknown_runtimes_keep_the_sendmessage_line(self):
+        for runtime in ('claude', None):
+            built = context.build('resource_busy', 'wt-verify', snapshot(), Policy(), runtime=runtime)
+            self.assertIn('SendMessage', built['instruction'])
+
     def test_stderr_block_includes_floors_and_candidates(self):
         built = context.build('memory_pressure', 'other-heavy', snapshot(), Policy())
         block = context.render_stderr_block(built)

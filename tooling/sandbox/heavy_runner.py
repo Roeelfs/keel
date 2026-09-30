@@ -221,7 +221,7 @@ def announce_governor_context(directory, reason, command, policy):
         # The verdict the queued-time consult (consult_jev) cached for this class, if any.
         jev_decision = jev_client._cached_decision(governor_dir, job_class, time.time(), policy.wait_seconds)
         built = context.build(reason, job_class, snapshot, policy, jev_decision=jev_decision,
-                              registry=registry, table=table)
+                              registry=registry, table=table, runtime=caller_runtime())
         print(context.render_stderr_block(built), file=sys.stderr)
         context.write_last_context(governor_dir, built)
         event(directory, 'governor_decision', job_id=None, reason=reason,
