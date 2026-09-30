@@ -153,6 +153,44 @@ class JevClientTests(unittest.TestCase):
             t.join(timeout=5)
         self.assertLessEqual(len(calls), 1)
 
+    def _concurrent(self, classes, post):
+        results = []
+        threads = [threading.Thread(target=lambda c=c: results.append(
+                       jev_client.decide(c, snapshot(), self.policy, self.directory, http_post=post)))
+                   for c in classes]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+        return results
+
+    def test_same_class_waiters_get_the_in_flight_jev_answer_not_a_fallback(self):
+        self._ok_credential()
+        calls = []
+
+        def post(*a, **k):
+            calls.append(1)
+            time.sleep(0.1)
+            return RESP4_FIXTURE
+
+        results = self._concurrent(['other-heavy'] * 5, post)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(results), 5)
+        self.assertFalse([r for r in results if r['source'].startswith('fallback')])
+
+    def test_different_classes_never_block_each_other(self):
+        self._ok_credential()
+        calls = []
+
+        def post(*a, **k):
+            calls.append(1)
+            time.sleep(0.1)
+            return RESP4_FIXTURE
+
+        results = self._concurrent(['pnpm', 'wt-verify.sh', 'cynap-sandbox'], post)
+        self.assertEqual(len(calls), 3)
+        self.assertFalse([r for r in results if r['source'] == 'fallback:contended_lock'])
+
     def test_contract_test_rejects_mutants_of_the_real_response_shape(self):
         self._ok_credential()
         mutants = [
