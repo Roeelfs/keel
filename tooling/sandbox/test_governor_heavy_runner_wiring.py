@@ -50,5 +50,68 @@ class AnnounceGovernorContextTests(unittest.TestCase):
         self.assertTrue(any(json.loads(line)['event'] == 'governor_decision' for line in events))
 
 
+class ConsultJevTests(unittest.TestCase):
+    """2026-09-30: `jev_client.decide()` had no caller, so JEV was never asked (0/7 decisions)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.governor_dir = Path(self.tmp.name) / 'governor'
+        self.heavy_dir = Path(self.tmp.name) / 'heavy.slots'
+        self.heavy_dir.mkdir()
+        self.env_patch = mock.patch.dict(os.environ, {'KEEL_GOVERNOR_STATE_DIR': str(self.governor_dir)})
+        self.env_patch.start()
+        self.addCleanup(self.env_patch.stop)
+
+    def _events(self):
+        path = self.heavy_dir / 'events.jsonl'
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def test_asks_jev_and_records_both_verdicts_for_shadow_grading(self):
+        verdict = {'admit': True, 'slots_now': 3, 'source': 'jev', 'latency_ms': 400}
+        with mock.patch('governor.jev_client.decide', return_value=verdict) as decide:
+            heavy_runner.consult_jev(self.heavy_dir, 'job1', ['/x/wt-verify.sh', 'backend'], Policy())
+        decide.assert_called_once()
+        self.assertEqual(decide.call_args.args[0], 'wt-verify.sh')
+        [decision] = [e for e in self._events() if e['event'] == 'governor_decision']
+        self.assertEqual(decision['stage'], 'queued')
+        self.assertEqual(decision['job_id'], 'job1')
+        self.assertEqual(decision['jev'], verdict)
+        self.assertIn('slots_now', decision['d_rule'])
+        self.assertFalse(decision['enforced'])
+
+    def test_a_fired_floor_skips_the_jev_call(self):
+        with mock.patch('governor.jev_client.decide') as decide:
+            heavy_runner.consult_jev(self.heavy_dir, 'job1', ['x'], Policy(disk_floor_gib=999999))
+        decide.assert_not_called()
+        [decision] = [e for e in self._events() if e['event'] == 'governor_decision']
+        self.assertIsNone(decision['jev'])
+
+    def test_a_jev_failure_never_raises(self):
+        buffer = io.StringIO()
+        with mock.patch('governor.jev_client.decide', side_effect=RuntimeError('boom')), redirect_stderr(buffer):
+            heavy_runner.consult_jev(self.heavy_dir, 'job1', ['x'], Policy())
+        self.assertIn('JEV consult unavailable', buffer.getvalue())
+
+    def test_start_jev_consult_runs_off_the_heartbeat_thread(self):
+        with mock.patch.object(heavy_runner, 'consult_jev') as consult:
+            thread = heavy_runner.start_jev_consult(self.heavy_dir, 'job1', ['x'], Policy())
+            thread.join(5)
+        self.assertTrue(thread.daemon)
+        consult.assert_called_once()
+
+    def test_the_deferral_context_carries_the_cached_jev_verdict(self):
+        import time
+        self.governor_dir.mkdir(parents=True, exist_ok=True)
+        (self.governor_dir / 'decision.x.json').write_text(json.dumps(
+            {'cached_at': time.time(), 'decision': {'admit': False, 'slots_now': 1, 'source': 'jev'}}))
+        with redirect_stderr(io.StringIO()):
+            heavy_runner.announce_governor_context(self.heavy_dir, 'resource_busy', ['x'], Policy())
+        last_context = json.loads((self.governor_dir / 'last-context.json').read_text())
+        self.assertEqual(last_context['jev']['source'], 'jev')
+        [decision] = [e for e in self._events() if e['event'] == 'governor_decision']
+        self.assertEqual(decision['jev']['admit'], False)
+
+
 if __name__ == '__main__':
     unittest.main()

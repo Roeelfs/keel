@@ -2,6 +2,7 @@
 """JEV fallback matrix, caching and the contract test (spec §5.4, §5.6, §14.1)."""
 import json
 import os
+import subprocess
 import tempfile
 import threading
 import time
@@ -186,6 +187,39 @@ class CredentialAndBreakerTests(unittest.TestCase):
             json.dumps({'ok': True, 'checked_at': time.time() - 25 * 3600}))
         result = jev_client.read_credential(self.directory)
         self.assertFalse(result['ok'])
+
+    def _runner(self, ok=True):
+        calls = []
+        def run(cmd, **kwargs):
+            calls.append(cmd)
+            if not ok:
+                raise subprocess.CalledProcessError(44, cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout='k\n', stderr='')
+        return run, calls
+
+    def test_refresh_probes_when_the_record_is_missing(self):
+        # 2026-09-30: nothing scheduled probe-credential, so credential.json never existed.
+        run, calls = self._runner()
+        state = jev_client.refresh_credential(self.directory, run=run)
+        self.assertTrue(state['ok'])
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(jev_client.read_credential(self.directory, run=run)['ok'])
+
+    def test_refresh_skips_a_fresh_ok_record(self):
+        (self.directory / 'credential.json').write_text(json.dumps({'ok': True, 'checked_at': time.time()}))
+        run, calls = self._runner()
+        jev_client.refresh_credential(self.directory, run=run)
+        self.assertEqual(calls, [])
+
+    def test_refresh_retries_a_failed_probe_only_after_the_retry_window(self):
+        run, calls = self._runner(ok=False)
+        now = time.time()
+        (self.directory / 'credential.json').write_text(json.dumps({'ok': False, 'checked_at': now - 60}))
+        jev_client.refresh_credential(self.directory, run=run, now=now)
+        self.assertEqual(calls, [])
+        (self.directory / 'credential.json').write_text(json.dumps({'ok': False, 'checked_at': now - 11 * 60}))
+        jev_client.refresh_credential(self.directory, run=run, now=now)
+        self.assertEqual(len(calls), 1)
 
     def test_breaker_opens_after_three_failures_in_thirty_minutes(self):
         now = time.time()

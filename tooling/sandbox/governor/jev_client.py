@@ -25,6 +25,7 @@ BREACH_THRESHOLD = 3
 BREACH_WINDOW_S = 30 * 60
 BREAKER_OPEN_S = 15 * 60
 CREDENTIAL_TTL_S = 24 * 3600
+CREDENTIAL_RETRY_S = 10 * 60
 CREDENTIAL_TIMEOUT_S = 0.25
 
 
@@ -115,6 +116,22 @@ def probe_credential(directory, run=None):
     state = {'ok': ok, 'checked_at': time.time()}
     _write_json_locked(directory / 'credential.json', state)
     return state
+
+
+def refresh_credential(directory, run=None, now=None):
+    """Re-probe Keychain when `credential.json` is missing, past its TTL, or a failed probe older
+    than CREDENTIAL_RETRY_S. Nothing scheduled `probe-credential`, so without this the record never
+    existed and every decide() fell back with `no_credential` (2026-09-30). Only called off the
+    ticket-heartbeat thread (heavy_runner.consult_jev), so a slow Keychain never stalls a waiter.
+    """
+    now = now or time.time()
+    state = _read_json(directory / 'credential.json') or {}
+    age = now - state.get('checked_at', 0)
+    if state.get('ok') and age < CREDENTIAL_TTL_S:
+        return state
+    if not state.get('ok') and state and age < CREDENTIAL_RETRY_S:
+        return state
+    return probe_credential(directory, run=run)
 
 
 def build_request(job_class, snapshot, policy, d_result):

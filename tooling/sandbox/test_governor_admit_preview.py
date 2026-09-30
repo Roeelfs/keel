@@ -107,7 +107,7 @@ class AdmitPreviewFunctionTests(unittest.TestCase):
         self.assertEqual(result['decision'], 'deny')
 
     def test_a_cached_jev_verdict_can_flip_a_d_rule_deny_to_admit_without_a_live_call(self):
-        policy = Policy(slots=1, max_slots=1, jev_admission='enforce')
+        policy = Policy(slots=1, max_slots=1, jev_admission='enforce', governor_mode='enforce')
         write_record(self.heavy_dir / 'lease.1.json',
                       {'job_id': 'j1', 'class': 'other-heavy', 'pgid': 999999999,
                        'started': time.time(), 'cwd': None})
@@ -121,6 +121,69 @@ class AdmitPreviewFunctionTests(unittest.TestCase):
         assert_contract(self, result)
         self.assertEqual(result['decision'], 'admit')
         self.assertEqual(result['source'], 'jev')
+
+    def test_shadow_mode_reports_a_cached_jev_verdict_but_never_applies_it(self):
+        # 2026-09-30: in shadow the slot loop admits only below policy.slots, so a preview that
+        # applied JEV's admit promised a slot the loop would not give.
+        policy = Policy(slots=1, max_slots=6, jev_admission='shadow')
+        write_record(self.heavy_dir / 'lease.1.json',
+                      {'job_id': 'j1', 'class': 'other-heavy', 'pgid': 999999999,
+                       'started': time.time(), 'cwd': None})
+        self.governor_dir.mkdir(parents=True, exist_ok=True)
+        (self.governor_dir / 'decision.other-heavy.json').write_text(json.dumps(
+            {'cached_at': time.time(), 'decision': {'admit': True, 'slots_now': 3, 'source': 'jev'}}))
+        result = heavy_runner.admit_preview(self.heavy_dir, policy, 'other-heavy')
+        assert_contract(self, result)
+        self.assertEqual(result['decision'], 'deny')
+        self.assertEqual(result['source'], 'shadow_queue')
+        self.assertEqual(result['slots_now'], 1)
+        self.assertEqual(result['jev']['admit'], True)
+
+    def _history(self, executable, run_s, n=10):
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        with (self.heavy_dir / 'events.jsonl').open('a') as stream:
+            for i in range(n):
+                started = now - timedelta(seconds=3600 + i)
+                stream.write(json.dumps({'event': 'started', 'job_id': f'{executable}{i}',
+                                         'executable': executable, 'ts': started.isoformat()}) + '\n')
+                stream.write(json.dumps({'event': 'completed', 'job_id': f'{executable}{i}', 'reason': 'exit',
+                                         'peak_rss_mb': 1000, 'exit_code': 0,
+                                         'ts': (started + timedelta(seconds=run_s)).isoformat()}) + '\n')
+
+    def _ticket(self, name, job_class):
+        me = heavy_runner.processes()[os.getpid()]
+        record = {'pid': me.pid, 'identity': me.identity, 'job_id': name, 'enqueued': time.time()}
+        if job_class:
+            record['class'] = job_class
+        write_record(self.heavy_dir / 'queue' / f'{time.time_ns():020d}-{name}.json', record)
+
+    def test_eta_prices_the_queue_by_each_tickets_own_class_not_the_callers(self):
+        # Live 2026-09-30: 7 queued seconds-long jobs were priced at cynap-sandbox's p90 each,
+        # reporting a 76-minute wait against a real worst case of ~8 minutes.
+        policy = Policy(slots=1, max_slots=1)
+        self._history('cynap-sandbox', 600)
+        self._history('pnpm', 10)
+        write_record(self.heavy_dir / 'lease.1.json',
+                      {'job_id': 'j1', 'executable': 'pnpm', 'pgid': 999999999,
+                       'started_ns': time.time_ns(), 'cwd': None})
+        for i in range(4):
+            self._ticket(f'cheap{i}', 'pnpm')
+        result = heavy_runner.admit_preview(self.heavy_dir, policy, 'cynap-verify-full')
+        assert_contract(self, result)
+        self.assertEqual(result['decision'], 'deny')
+        self.assertEqual(result['queued'], 4)
+        self.assertLess(result['eta_wait_p90_s'], 60)  # 10s lease + 4 x 10s, never 4 x 600s
+
+    def test_eta_prices_a_classless_ticket_as_the_callers_class(self):
+        policy = Policy(slots=1, max_slots=1)
+        self._history('cynap-sandbox', 600)
+        write_record(self.heavy_dir / 'lease.1.json',
+                      {'job_id': 'j1', 'executable': 'cynap-sandbox', 'pgid': 999999999,
+                       'started_ns': time.time_ns(), 'cwd': None})
+        self._ticket('old', None)
+        result = heavy_runner.admit_preview(self.heavy_dir, policy, 'cynap-verify-full')
+        self.assertGreaterEqual(result['eta_wait_p90_s'], 1200)  # lease 600 + one ticket 600
 
     def test_never_writes_a_snapshot_sample_persist_false(self):
         heavy_runner.admit_preview(self.heavy_dir, Policy(), 'other-heavy')

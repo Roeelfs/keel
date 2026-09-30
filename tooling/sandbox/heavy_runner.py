@@ -217,14 +217,55 @@ def announce_governor_context(directory, reason, command, policy):
             registry = governor_registry.build(table=table)
         except Exception:  # noqa: BLE001 - the registry join is best-effort; bare pids still work
             registry = {}
-        built = context.build(reason, job_class, snapshot, policy, registry=registry, table=table)
+        from governor import jev_client
+        # The verdict the queued-time consult (consult_jev) cached for this class, if any.
+        jev_decision = jev_client._cached_decision(governor_dir, job_class, time.time(), policy.wait_seconds)
+        built = context.build(reason, job_class, snapshot, policy, jev_decision=jev_decision,
+                              registry=registry, table=table)
         print(context.render_stderr_block(built), file=sys.stderr)
         context.write_last_context(governor_dir, built)
         event(directory, 'governor_decision', job_id=None, reason=reason,
-              floors_fired=built['floors_fired'], d_rule=built['d_rule'], enforced=False)
+              floors_fired=built['floors_fired'], d_rule=built['d_rule'], jev=jev_decision, enforced=False)
     except Exception as error:  # noqa: BLE001 - this path must never turn a deferral into a crash
         print(f'with-heavy-lock: governor context unavailable ({type(error).__name__}: {error})',
               file=sys.stderr)
+
+
+def consult_jev(directory, job_id, command, policy):
+    """Ask JEV once, when a job first finds itself queued (the contended acquire).
+
+    Records rule D's and JEV's verdicts side by side as a `governor_decision` event (stage
+    `queued`) so shadow mode can be graded, and fills the per-class cache `admit_preview` and the
+    deferral CONTEXT read. Never changes this job's admission: the slot loop above is the only
+    arbiter until `jev_admission=enforce`. Best-effort; never raises. Runs on a daemon thread (see
+    `start_jev_consult`) so a JEV call of up to `jev_deadline_ms` never stalls the ticket heartbeat.
+    """
+    try:
+        from governor import admission, jev_client
+        from governor.state import governor_directory
+        from governor.snapshot import take as take_snapshot
+        governor_dir = governor_directory()
+        snapshot = take_snapshot(governor_dir, directory, persist=False)
+        job_class = Path(command[0]).name if command else 'other-heavy'
+        floors = admission.floors_fired(snapshot, policy)
+        d_result = admission.rule_d(job_class, snapshot, policy)
+        jev_decision = None
+        if not floors:
+            jev_client.refresh_credential(governor_dir)
+            jev_decision = jev_client.decide(job_class, snapshot, policy, governor_dir)
+        event(directory, 'governor_decision', job_id=job_id, reason='contended', stage='queued',
+              job_class=job_class, floors_fired=floors, d_rule=d_result, jev=jev_decision,
+              enforced=policy.jev_admission == 'enforce')
+    except Exception as error:  # noqa: BLE001 - a failed consult must never touch the job
+        print(f'with-heavy-lock: JEV consult unavailable ({type(error).__name__}: {error})',
+              file=sys.stderr)
+
+
+def start_jev_consult(directory, job_id, command, policy):
+    import threading
+    thread = threading.Thread(target=consult_jev, args=(directory, job_id, command, policy), daemon=True)
+    thread.start()
+    return thread
 
 
 def acquire(directory, policy, job_id, command):
@@ -234,7 +275,9 @@ def acquire(directory, policy, job_id, command):
     deadline = started + policy.wait_seconds
     owner = processes()[os.getpid()]
     ticket = queue / f'{time.time_ns():020d}-{owner.pid}.json'
-    record = {'pid': owner.pid, 'identity': owner.identity, 'job_id': job_id, 'enqueued': time.time()}
+    # 'class' lets admit_preview price the queue by what is actually waiting, not by the caller.
+    record = {'pid': owner.pid, 'identity': owner.identity, 'job_id': job_id, 'enqueued': time.time(),
+              'class': Path(command[0]).name if command else 'other-heavy'}
     event(directory, 'queued', job_id=job_id, pid=os.getpid(), cwd=working_directory(),
           executable=Path(command[0]).name, args=event_args(command),
           wait_seconds=policy.wait_seconds, caller=caller_runtime())
@@ -275,6 +318,8 @@ def acquire(directory, policy, job_id, command):
                 announce_governor_context(directory, reason, command, policy)
                 return None
             if progress_at is None or now >= progress_at:
+                if progress_at is None:
+                    start_jev_consult(directory, job_id, command, policy)
                 label = 'QUEUED' if progress_at is None else 'still QUEUED'
                 waited = '' if progress_at is None else f' after {now - started:.0f}s'
                 print(f'with-heavy-lock: {label} at position {position}{waited}; '
@@ -602,6 +647,7 @@ def admit_preview(directory, policy, job_class):
     floors = admission.floors_fired(snapshot, policy)
     fast_reason = None if admission.any_unknown(snapshot) else pressure_reason(policy, running >= 1)
 
+    cached_jev = None
     if not floors and running < policy.slots and fast_reason is None:
         decision, source, slots_now = 'admit', 'fast_path', policy.slots
     else:
@@ -609,12 +655,19 @@ def admit_preview(directory, policy, job_class):
             job_class, snapshot, policy, admission.rule_d(job_class, snapshot, policy, running=running))
         source, slots_now, admit = 'd_rule', d_result['slots_now'], d_result['admit']
         if not floors:
-            cached = jev_client._cached_decision(governor_dir, job_class, time.time(), policy.decision_ttl_s)
-            if cached is not None:
-                admit = cached.get('admit', admit)
-                slots_now = cached.get('slots_now', slots_now)
-                source = cached.get('source', 'jev_cache')
-        decision = 'admit' if (admit and not floors) else 'deny'
+            cached_jev = jev_client._cached_decision(governor_dir, job_class, time.time(), policy.decision_ttl_s)
+        if policy.governor_mode != 'enforce':
+            # Shadow: the slot loop admits only below the fixed `policy.slots` with no pressure
+            # (the fast path above), so anything else really queues. Rule D and JEV are reported
+            # for grading, never applied -- a preview that promised an admit the loop will not
+            # honor would keep verify local behind a queue it never priced.
+            decision, source, slots_now = 'deny', 'shadow_queue', policy.slots
+        else:
+            if cached_jev is not None and policy.jev_admission == 'enforce':
+                admit = cached_jev.get('admit', admit)
+                slots_now = cached_jev.get('slots_now', slots_now)
+                source = cached_jev.get('source', 'jev_cache')
+            decision = 'admit' if (admit and not floors) else 'deny'
 
     if decision == 'admit':
         eta_wait_p90_s = 0.0
@@ -636,14 +689,23 @@ def admit_preview(directory, policy, job_class):
             min_wait = float(policy.wait_seconds)
         else:
             min_wait = 0.0
-        queue_term = (queued // max(slots_now, 1)) * (run_p90 or 0)
+        # Price the queue by what is actually waiting: each ticket's own class p90, shared across
+        # the slots that really drain it. A ticket with no recorded class (written before tickets
+        # carried one) or an unmodeled class is priced as the caller's class, the old estimate.
+        ahead = []
+        for path in live_tickets(directory / 'queue'):
+            ticket_class = (read_record(path) or {}).get('class')
+            ahead.append(admission.class_row(class_stats, ticket_class).get('run_p90_s') if ticket_class else None)
+        ahead += [None] * max(0, queued - len(ahead))
+        queue_term = sum(p90 if p90 is not None else (run_p90 or 0) for p90 in ahead) / max(slots_now, 1)
         eta_wait_p90_s = min_wait + queue_term
     eta_run_p50_s = run_p50 if run_p50 is not None else 0.0
     eta_total_s = eta_wait_p90_s + eta_run_p50_s
 
     return {'decision': decision, 'source': source, 'slots_now': slots_now, 'running': running,
             'queued': queued, 'eta_wait_p90_s': round(eta_wait_p90_s, 1),
-            'eta_run_p50_s': round(eta_run_p50_s, 1), 'eta_total_s': round(eta_total_s, 1)}
+            'eta_run_p50_s': round(eta_run_p50_s, 1), 'eta_total_s': round(eta_total_s, 1),
+            'jev': cached_jev}
 
 
 def main():
