@@ -13,9 +13,12 @@ from governor import registry as registry_module
 
 STEWARD_LINE = ('GOVERNOR: send this context to the "machine-steward" session via SendMessage '
                  '(to: "machine-steward") and continue; do not kill or delete anything yourself.')
-# Codex has no SendMessage to reach the Claude desktop steward; it hands the context up instead.
-CODEX_STEWARD_LINE = ('GOVERNOR: quote this context in your final report so it reaches the '
-                      '"machine-steward" session, and continue; do not kill or delete anything yourself.')
+# Codex has no SendMessage; its equivalent is `codex queue` to the Codex copy of the steward, a
+# Codex session with the same name and charter (founder, 2026-09-30).
+CODEX_STEWARD_LINE = ('GOVERNOR: send this context to the Codex "machine-steward" session: '
+                      'codex queue --thread machine-steward --message "governor-context: '
+                      '$(cat ~/.keel/governor/last-context.json)" -- and continue; '
+                      'do not kill or delete anything yourself.')
 
 
 def steward_line(runtime):

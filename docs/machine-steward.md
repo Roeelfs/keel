@@ -6,7 +6,9 @@ This session exists on the desktop app, not as a headless lane, because the desk
 
 Start it with: `Read ~/code/keel/docs/machine-steward.md and act as machine-steward.`, and name the session `machine-steward`.
 
-## Inbound messages (by `SendMessage` to "machine-steward")
+**Two copies, one charter.** A Codex session named `machine-steward`, started the same way, is the steward for Codex sessions: they reach it with `codex queue --thread machine-steward --message "…"` (Codex has no SendMessage). The Codex copy has no desktop session manager, so it skips steps 4 and the `stop_session` part of step 2. Both copies share `~/.keel/governor/steward-receipts.jsonl`: before acting, read its last 10 minutes and skip a condition the other copy already handled.
+
+## Inbound messages (by `SendMessage`, or `codex queue` from Codex, to "machine-steward")
 
 | Kind | Sent by | Carries |
 |---|---|---|

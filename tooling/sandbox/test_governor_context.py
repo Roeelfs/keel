@@ -27,11 +27,12 @@ class ContextTests(unittest.TestCase):
         built = context.build('resource_busy', 'wt-verify', snapshot(), Policy())
         self.assertIn('machine-steward', built['instruction'])
 
-    def test_codex_is_told_to_report_it_not_to_sendmessage(self):
-        # Codex has no SendMessage to the Claude desktop steward (2026-09-30).
+    def test_codex_is_told_to_codex_queue_its_own_steward_not_to_sendmessage(self):
+        # Codex has no SendMessage; `codex queue` reaches the Codex copy of the steward (2026-09-30).
         built = context.build('resource_busy', 'wt-verify', snapshot(), Policy(), runtime='codex')
         self.assertNotIn('SendMessage', built['instruction'])
-        self.assertIn('final report', built['instruction'])
+        self.assertIn('codex queue --thread machine-steward --message', built['instruction'])
+        self.assertIn('~/.keel/governor/last-context.json', built['instruction'])
         self.assertIn('machine-steward', built['instruction'])
         self.assertIn('do not kill or delete anything yourself', built['instruction'])
         self.assertEqual(built['runtime'], 'codex')
