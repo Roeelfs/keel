@@ -86,7 +86,7 @@ When the investigation completes, read the output file and extract findings your
 
 ```markdown
 ### Alignment Findings
-**Model:** gpt-6-sol at high | **Mode:** single-pass [or adaptive]
+**Model:** gpt-6.1-sol at high | **Mode:** single-pass [or adaptive]
 
 #### Confirmed Misalignments
 - [severity] <description> — Evidence: <files/lines>. Action: <fix>

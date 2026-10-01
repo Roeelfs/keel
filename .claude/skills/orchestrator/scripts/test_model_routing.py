@@ -11,7 +11,7 @@ SOL_LANE = (SKILL_DIR / "prompts" / "sol-judgment-lane.md").read_text()
 # The Codex model + effort ladder is single-sourced in codex-headroom.sh's case statement
 # ("THIS CASE STATEMENT IS THE ONE ROUTE TABLE"). These three docs used to restate that
 # table's rows; they must now only name the CLASS a reader passes to `--route <class>`.
-RESTATED_GEN6_IDS = ("gpt-6-sol", "gpt-6-astra", "gpt-6-luna")
+RESTATED_GEN6_IDS = ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra", "gpt-6-luna")
 
 
 class ModelRoutingContractTests(unittest.TestCase):
