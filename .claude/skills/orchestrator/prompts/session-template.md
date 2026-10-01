@@ -1,6 +1,6 @@
 # Interactive bounded-phase session template
 
-Use one interactive task for one phase of **define → build → verify-release**. The second paste starts the bounded loop from `prompts/loop-directive.md`.
+Use one interactive task for one phase of **define → build → verify-release**. The continuation contract is in `prompts/loop-directive.md`; it does not start a schedule.
 
 ## Paste 1
 
@@ -37,12 +37,12 @@ Constraints:
 - External wait/readiness failure ends with one blocker/resume artifact.
 - Final reply: phase, branch HEAD, artifacts, obligations, checks, changed seams, last verified fact, blocker/resume key.
 
-After accepting this mission, Paste 2 starts the bounded loop.
+After accepting this mission, complete the bounded phase under its continuation contract.
 ```
 
 ## Paste 2
 
-Paste the directive verbatim from `prompts/loop-directive.md` §Paste 2. Do not maintain a duplicate here.
+Use `prompts/loop-directive.md` §Default continuation (or §Codex variant). Do not add a schedule unless the user explicitly requests one.
 
 ## Filling guide
 

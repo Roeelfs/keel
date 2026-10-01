@@ -7,6 +7,10 @@ This skill is symlinked into both `~/.claude/skills/` and `~/.codex/skills/`. De
 
 When hosted by Codex, the following replace the CORE's verbs. Everything else in the CORE — program files, membership, collision protocol, lane grading, pre-flight verification — applies unchanged.
 
+## No automation substitute for continuation
+
+Do not translate Claude `/loop` or `ScheduleWakeup` instructions into Codex heartbeat/cron automations. Scheduling requires an explicit user request for that schedule. “Go”, “finish”, and a program GOAL heading are not such requests. Use an explicitly requested bounded native goal for reachable work, owned-child event waits for internal execution, and a durable resume key at external gates. Do not repeatedly recreate or update finite-count schedules; that resets their limit and makes an unbounded poller.
+
 ## Native goal command — bounded autonomy
 
 Treat a native goal as a **runtime continuation lease**, not as the cross-session program and not as permission to widen work.

@@ -14,6 +14,14 @@ Depth lives in `references/` and is **not** auto-loaded:
 - **Read `references/merge-and-retire.md` before merging any lane PR or signing off a retire** — project-authorized merge, keyed post-merge proof, retire checklist.
 - **Read `references/codex-runtime.md` first when `$CLAUDE_SESSION_ID` is unset** — you are hosted by Codex CLI and most verbs below do not exist there.
 
+## Continuation policy — no scheduled polling
+
+Do not create or re-arm a heartbeat, recurring automation, `/loop`, or scheduled wake to keep orchestration alive unless the user explicitly requests that schedule. Ordinary “go”, “finish”, orchestration, or autonomous-work authorization does not authorize a schedule. This policy applies to every runtime and overrides the historical wake terminology below.
+
+On Codex, use a bounded native goal only when explicitly requested, through the next known approval or external gate. Consume owned-child results through their event-wait leases. At an external gate, persist the exact prerequisite and resume key, then end the bounded task. A notification or later authorized task checks that prerequisite once. Never replace a missing event subscription with scheduled LLM checks.
+
+Updating a finite schedule on every run resets its limit: `COUNT=1` or `COUNT=2` plus re-arming is recurring polling. Quiet notifications do not reduce execution tokens. Any user-requested schedule needs an explicit finish condition and must not renew itself past that condition.
+
 ## Model topology — cheap root, intelligent escalations
 
 - **Long-lived Codex root:** ask the gate for the `standard` class (`~/.claude/scripts/codex-headroom.sh --route standard` → Sol at Medium; see `prompts/model-routing.md` for the full class table). The root pays for accumulated context on every turn, so it coordinates, integrates, and keeps state on the everyday tier.
@@ -178,8 +186,8 @@ paths; a hand-rolled `codex exec` must do it too. Do not route through a Claude 
 
 ## Transport, continuation, and the human
 
-- **`ScheduleWakeup` is the continuation mechanism** — one snapshot per wake, never a poll loop. Size the delay to what you are waiting on (a CI run is minutes; a bake is hours). Re-arm only on a **changed fingerprint**; if nothing moved, extend the delay instead of re-firing at the same cadence. **Numbers (measured 2026-09-21, 14d, 198 paired ticks):** while untracked lanes are advancing start at **300–600s** — at 10–45 min delays 65–93% of ticks found work already waiting, i.e. the orchestrator was the bottleneck; at 5–10 min 41% were empty, so go no shorter. **Double after each empty tick; ceiling 2700s.** The ceiling is the prompt cache, not the work: the Claude main loop caches at a 1-hour TTL and a wake past ~55 min re-writes the whole context (58% miss at 55–65 min, 99% beyond). A wake is never armed *to keep the cache warm* — inside the hour it is already warm. Harness-tracked work (Agent, Workflow, background Bash) still gets NO wake: its notification is the wake.
-- **The wake prompt is a POINTER** — state-file path + "step N NOW" + the one fact that changed since arming. Never the state itself. (Measured: 97 of 170 wake prompts carried ≥1,000 chars of re-serialized state, up to ~6k, because nothing durable survived the turn boundary. `<slug>.state.md` is what makes the pointer sufficient.)
+- **Continuation follows the policy above.** Owned children use event waits. Codex goals keep explicitly authorized, reachable work moving. Scheduling is opt-in only, never the default for CI, deployment, ownership, locks, or human input.
+- **Resume state is a POINTER** — persist the state-file path, the next action, and exact prerequisite. Keep facts in the state file rather than replaying them in injected prompts.
 - **External waits end the bounded task.** Write a blocker/wake artifact keyed by the awaited state; a later fresh task checks it once. An owned in-scope child is internal work governed by the continuation invariant, not an external wait. Foreground sleep and polling loops are forbidden.
 - **`AskUserQuestion`** is how a contested claim, a pre-authorization ask, or a genuine judgment call reaches the human. **`PushNotification`** tells an away operator something now needs them.
 - **`TaskCreate` / `TaskUpdate`** carry per-lane status the operator can see; prefer them to prose status dumps re-typed each turn.
@@ -191,7 +199,7 @@ Before any unattended stretch, compute the set of work reachable **without a hum
 
 1. **Stack, don't park.** A lane blocked on an unmerged PR branches its worktree off that PR's branch, builds there, rebases after the merge. Record the edge in the manifest lane (`stacked_on: <pr>`).
 2. **Pre-authorization ask BEFORE the human leaves** (`AskUserQuestion`): present the projected merge stack and ask for standing approval per class. A decline is fine — then plan around the gate by stacking. Discovering the gate at 2am is the failure.
-3. **Deliberate park.** Frontier genuinely empty → ONE wake at the human's expected return with a morning summary and the ready-to-merge stack. Never poll a gate only a human can open.
+3. **Deliberate park.** Frontier genuinely empty → persist the ready-to-merge stack and exact resume prerequisite, then stop. Never schedule checks of a gate only a human can open.
 4. **Frontier refresh on every event** — a merge, a lane exit, or an operator message re-opens the computation; newly un-gated work dispatches immediately.
 
 ## The advance tick — one unattended wake, many lanes
@@ -249,29 +257,11 @@ is present in the target environment (§Pre-flight verification); only then disp
 grade a keyed `verify-release`. If the wake fired early and the SHA is absent, no verifier
 runs — retain the keyed wake artifact and end the bounded task.
 
-### Deciding the next wake
+### Ending at the continuation frontier
 
-Size the delay to the fastest pending change (§Transport). Then:
+Reachable authorized work advances now. Owned children use their declared event-wait lease. When only an external prerequisite or human decision remains, persist its normalized semantic fingerprint and resume key, then stop. Artifact existence, branch SHA, terminal ledger status, exact deploy SHA, process identity, and child result are evidence; raw log bytes and mtimes are not.
 
-- Something advancing → re-arm once, at that size.
-- Nothing advancing but work is reachable → dispatch it; do not sleep on work you are
-  allowed to start.
-- Everything reachable is gated on a human → **park**: one wake at the operator's expected
-  return, with the ready-to-merge stack.
-
-**There is no fixed number of idle wakes that means "stalled."** Wake count measures
-scheduler cadence, not progress: at a 10-minute default, three idle wakes parks a healthy
-40-minute build at minute 30, and if a *different* lane causes two-minute wakes the same
-count parks it after six. Continuous log writes produce the opposite failure — a wedged
-loop always looks like it is changing. So bound each lane by its **own lease or checkpoint
-deadline**, and judge movement by a **normalized semantic fingerprint**: artifact existence,
-branch or remote SHA, terminal ledger status, exact deploy-SHA readiness, process
-exit/identity, child result. Raw output bytes and JSONL or log mtimes do not qualify. A wake
-triggered by another lane never counts against a live lane still inside its lease; a lane
-that misses its own deadline is what escalates or gets interrupted.
-
-Record one line per tick in `<slug>.events.jsonl` — what advanced, what was salvaged, what
-is awaited, the next wake. The wake prompt itself stays a pointer.
+Record material transitions in `<slug>.events.jsonl`. An unchanged external check does not justify another scheduled check. There is no default wake cadence.
 
 ## Grading a lane
 
