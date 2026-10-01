@@ -200,13 +200,37 @@ the orchestrator pushes after grading. If you find yourself wanting to push, you
 
   # Same stdin discipline as the claude path, and for the same reason: `codex exec` with an
   # inherited pipe hangs on "Reading additional input from stdin" and never runs the mission.
-  if [ "$MISSION_SRC" = "-" ]; then
-    exec env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
-      codex exec "${CARGS[@]}" "$MISSION"
-  else
-    exec env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
-      codex exec "${CARGS[@]}" "$MISSION" < /dev/null
+  # ---- zero-commit guard (implementation lanes only) -------------------------------------
+  # An implementation lane exists to commit. A clean exit with HEAD unchanged is a dead lane
+  # wearing a success code. Research lanes legitimately commit nothing, so they keep exec.
+  if [ "$CLASS" != implementation ]; then
+    if [ "$MISSION_SRC" = "-" ]; then
+      exec env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
+        codex exec "${CARGS[@]}" "$MISSION"
+    else
+      exec env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
+        codex exec "${CARGS[@]}" "$MISSION" < /dev/null
+    fi
   fi
+  HEAD_BEFORE="$(git rev-parse HEAD 2>/dev/null || echo none)"
+  CODEX_RC=0
+  if [ "$MISSION_SRC" = "-" ]; then
+    env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
+      codex exec "${CARGS[@]}" "$MISSION" || CODEX_RC=$?
+  else
+    env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
+      codex exec "${CARGS[@]}" "$MISSION" < /dev/null || CODEX_RC=$?
+  fi
+  [ "$CODEX_RC" -ne 0 ] && exit "$CODEX_RC"
+  if [ "$(git rev-parse HEAD 2>/dev/null || echo none)" = "$HEAD_BEFORE" ]; then
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+      echo "spawn-lane.sh: DEAD LANE: codex exited 0 but committed nothing; uncommitted work is left in $(pwd), salvage before re-dispatch" >&2
+    else
+      echo "spawn-lane.sh: DEAD LANE: codex exited 0 but committed nothing and left a clean tree" >&2
+    fi
+    exit 3
+  fi
+  exit 0
 fi
 
 ARGS=( --permission-mode "$MODE" --session-id "$(uuidgen | tr 'A-Z' 'a-z')" --model "$MODEL" )
