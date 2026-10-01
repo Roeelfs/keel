@@ -36,8 +36,15 @@ def top_candidates(snapshot, registry=None, table=None, limit=5):
             owner = registry_module.owner_of(pid, lease.get('cwd'), table, registry) or {}
         except Exception:  # noqa: BLE001 - the join is best-effort; a candidate row is still useful bare
             owner = {}
+        if owner.get('live') is False:
+            # The registry pid now belongs to a different process (reused pid): its session
+            # fields describe a dead session, and its identity is not the candidate's. Drop both.
+            owner = {}
+        entry = (table or {}).get(pid)
         candidates.append({
-            'pid': pid, 'identity': owner.get('identity'), 'cwd': owner.get('cwd'),
+            # identity is the CANDIDATE pid's own live lstart, never the owner's: the steward
+            # pins the kill to it, so a stale value would fail closed or hit the wrong process.
+            'pid': pid, 'identity': entry.identity if entry else None, 'cwd': owner.get('cwd'),
             'session': owner.get('sessionId'), 'session_name': owner.get('name'),
             'idle_minutes': owner.get('idle_minutes'),
             'rss_mb': lease.get('rss_mb'), 'class': lease.get('class'), 'age_s': lease.get('age_s'),

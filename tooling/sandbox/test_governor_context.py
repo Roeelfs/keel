@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The CONTEXT block: deny/defer surfaces state to machine-steward; it never kills or deletes."""
 import json
+import types
 import tempfile
 import unittest
 from pathlib import Path
@@ -66,6 +67,17 @@ class ContextTests(unittest.TestCase):
         ]
         candidates = context.top_candidates(snap)
         self.assertEqual(candidates[0]['pid'], 2)
+
+    def test_reused_pid_drops_stale_owner_and_uses_live_identity(self):
+        snap = snapshot()
+        snap['leases'] = [{'members': [7], 'rss_mb': 10, 'class': 'a', 'age_s': 1}]
+        table = {7: types.SimpleNamespace(pid=7, ppid=1, identity='Thu Oct  1 10:00:00 2026')}
+        registry = {7: {'identity': 'Thu Oct  1 10:00:00 2026', 'sessionId': 'old', 'name': 'dead',
+                        'cwd': '/x', 'idle_minutes': 5, 'live': False}}
+        candidate = context.top_candidates(snap, registry, table)[0]
+        self.assertIsNone(candidate['session'])
+        self.assertIsNone(candidate['session_name'])
+        self.assertEqual(candidate['identity'], 'Thu Oct  1 10:00:00 2026')
 
 
 if __name__ == '__main__':

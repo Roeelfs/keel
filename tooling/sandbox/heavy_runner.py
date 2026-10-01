@@ -571,6 +571,11 @@ def supervise(child, job, policy, max_seconds, directory, job_id, interruption):
             return 137
         code = child.poll()
         if code is not None and not members:
+            # `members` was sampled BEFORE the poll: a descendant forked just before the root exited
+            # can be missing from it (observed under load: completed at peak 0.0 MiB while a forked
+            # child ran). Only a sample taken after the exit was observed can say the job is gone.
+            members = job.sampled()
+        if code is not None and members == []:
             result = code if code >= 0 else 128 - code
             event(directory, 'completed', job_id=job_id, reason='exit',
                   peak_rss_mb=round(peak, 2), exit_code=result)
