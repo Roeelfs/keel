@@ -181,6 +181,15 @@ print(json.dumps(roots))')" || exit 2
   # invocation, so it does the two things it CAN do deterministically: mint a stable lane
   # key, and state the requirement in the mission every single time.
   LANE_KEY="codex-lane-$(uuidgen | tr 'A-Z' 'a-z')"
+  # The lane never pushes; the session that spawned it does, and owns the resulting PR. Record
+  # lane -> parent session BEFORE the identity scrub below, so a PR whose commits carry only lane
+  # keys still resolves to a session a peer can message. Best-effort: a write failure never
+  # blocks the lane.
+  if [ -n "${CLAUDE_SESSION_ID:-}" ]; then
+    mkdir -p "$HOME/.claude/state" 2>/dev/null &&
+      printf '{"lane":"%s","parent":"%s","ts":"%s"}\n' "$LANE_KEY" "$CLAUDE_SESSION_ID" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$HOME/.claude/state/lane-parents.jsonl" 2>/dev/null || true
+  fi
   MISSION="$MISSION
 
 --- appended by spawn-lane.sh (non-negotiable) ---
