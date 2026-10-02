@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from governor import snapshot
@@ -25,6 +26,24 @@ class SnapshotTests(unittest.TestCase):
                     'disk_free_gib', 'hang_reports_recent', 'leases', 'queued',
                     'deferrals_last_60m', 'unknown', 'took_ms'):
             self.assertIn(key, result)
+
+    def test_sessions_block_sums_each_live_session_tree(self):
+        from heavy_resources import Process
+        table = {1: Process(1, 0, 1, 100.0, 'a', 'S'), 2: Process(2, 1, 1, 50.0, 'b', 'S'),
+                 3: Process(3, 0, 3, 200.0, 'c', 'S'), 4: Process(4, 0, 4, 999.0, 'd', 'S')}
+        registry = {1: {'live': True, 'idle_minutes': 2.0}, 3: {'live': True, 'idle_minutes': 60.0},
+                    9: {'live': False, 'idle_minutes': 1.0}}
+        self.assertEqual(snapshot.sessions(table=table, registry=registry),
+                         {'live_count': 2, 'active_count': 1, 'idle_count': 1,
+                          'total_rss_mb': 350.0, 'largest_rss_mb': 200.0})
+
+    def test_sessions_failure_is_none_and_not_unknown(self):
+        with mock.patch.object(snapshot, 'processes', side_effect=OSError('ps')):
+            self.assertIsNone(snapshot.sessions())
+        with mock.patch.object(snapshot, 'sessions', return_value=None):
+            result = snapshot.take(self.directory, self.heavy_directory, persist=False)
+        self.assertIsNone(result['sessions'])
+        self.assertNotIn('sessions', result['unknown'])
 
     def test_a_failed_probe_is_recorded_as_unknown_not_raised(self):
         unknown = []

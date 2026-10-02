@@ -20,10 +20,11 @@ import heavy_runner
 TOTAL = 24576.0
 
 
-def pressure(free, others_held=True, budget_mb=None, jev_admit=False, **policy):
+def pressure(free, others_held=True, budget_mb=None, jev_admit=False, reserve_mb=0.0, **policy):
     with mock.patch.object(heavy_runner, 'free_percent', return_value=free), \
             mock.patch.object(heavy_runner, 'total_memory_mb', return_value=TOTAL):
-        return heavy_runner.pressure_reason(Policy(**policy), others_held, budget_mb=budget_mb, jev_admit=jev_admit)
+        return heavy_runner.pressure_reason(Policy(**policy), others_held, budget_mb=budget_mb, jev_admit=jev_admit,
+                                        reserve_mb=reserve_mb)
 
 
 class PressureReasonTests(unittest.TestCase):
@@ -46,6 +47,16 @@ class PressureReasonTests(unittest.TestCase):
     def test_a_jev_admit_never_goes_below_the_run_interrupt_floor(self):
         # 28% free - 18.4% = 9.6% left: below run_min_free_percent (10) + 2.
         self.assertEqual(pressure(28, budget_mb=4522, jev_admit=True), 'memory_pressure')
+
+    def test_running_jobs_unreached_peak_denies_though_current_free_passes(self):
+        # 40% free, 1256 MB job -> 34.9% left passes; 6144 MB of running-job growth leaves 9.9%.
+        self.assertIsNone(pressure(40, budget_mb=1256))
+        self.assertEqual(pressure(40, budget_mb=1256, reserve_mb=6144), 'memory_pressure')
+
+    def test_the_jev_override_floor_includes_the_reserve(self):
+        # 33% - 18.4% = 14.6% passes the JEV floor alone; 4000 MB reserve drops it to 8.3%.
+        self.assertIsNone(pressure(33, budget_mb=4522, jev_admit=True))
+        self.assertEqual(pressure(33, budget_mb=4522, jev_admit=True, reserve_mb=4000), 'memory_pressure')
 
     def test_a_budget_is_capped_at_max_rss(self):
         self.assertEqual(pressure(33, budget_mb=99999), pressure(33))
@@ -76,10 +87,27 @@ class JevAdmitsTests(unittest.TestCase):
         self.assertFalse(heavy_runner.jev_admits(['pnpm'], Policy(jev_admission='enforce')))
 
 
+class AdmitIsOneJobTests(JevAdmitsTests):
+    def test_invalidate_drops_the_class_verdict_so_the_next_waiter_consults(self):
+        self._cache({'admit': True, 'source': 'jev'})
+        self.assertTrue(heavy_runner.jev_admits(['pnpm'], Policy(jev_admission='enforce')))
+        heavy_runner.invalidate_jev_admit(['pnpm'])
+        self.assertFalse(heavy_runner.jev_admits(['pnpm'], Policy(jev_admission='enforce')))
+
+    def test_a_jev_admitted_claim_invalidates_the_cache(self):
+        self._cache({'admit': True, 'source': 'jev'})
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(heavy_runner, 'job_budget', return_value=(1000.0, 0.0)), \
+                mock.patch.object(heavy_runner, 'claim_slot', return_value=('stream', 1)):
+            stream, slot = heavy_runner.acquire(Path(tmp), Policy(jev_admission='enforce'), 'job1', ['pnpm'])
+        self.assertEqual(slot, 1)
+        self.assertFalse((self.governor_dir / 'decision.pnpm.json').exists())
+
+
 class BudgetAndBackfillTests(unittest.TestCase):
     def test_a_budget_read_failure_falls_back_to_max_rss(self):
         with mock.patch('governor.snapshot.take', side_effect=RuntimeError('boom')):
-            self.assertEqual(heavy_runner.job_budget_mb(['pnpm'], Policy()), 6144.0)
+            self.assertEqual(heavy_runner.job_budget(['pnpm'], Policy()), (6144.0, 0.0))
 
     def test_a_yielding_ticket_ahead_does_not_count_toward_position(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -40,6 +40,20 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual(jev_client.ENDPOINT, 'https://ai-gateway.vercel.sh/v1/evaluate')
 
 
+class BuildRequestSessionTests(unittest.TestCase):
+    def test_request_carries_sessions_reserve_and_total_memory(self):
+        snap = {**snapshot(), 'sessions': {'live_count': 40, 'active_count': 5, 'idle_count': 35,
+                                           'total_rss_mb': 6000.0, 'largest_rss_mb': 400.0},
+                'leases': [{'class': 'pnpm', 'rss_mb': 1000.0, 'age_s': 5}],
+                'class_stats': {'pnpm': {'n': 20, 'rss_p90_mb': 4000.0}}}
+        d = {'slots_now': 1, 'admit': False}
+        state = jev_client.build_request('pnpm', snap, Policy(), d)['state']
+        self.assertEqual(state['sessions']['live_count'], 40)
+        self.assertEqual(state['machine']['mem_total_mb'], 32768)
+        self.assertEqual(state['lock']['reserve_mb'], 3000.0)
+        self.assertEqual(state['lock']['lease_rss_mb'], 1000.0)
+
+
 class JevClientTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

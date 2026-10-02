@@ -14,6 +14,7 @@ import sys
 import time
 
 from heavy_resources import event, free_percent, processes, read_record, total_memory_mb
+from governor import registry as session_registry
 
 PROBE_TIMEOUT_S = 0.25
 SNAPSHOT_INTERVAL_S = 10
@@ -158,6 +159,44 @@ def queued_and_deferrals(heavy_directory, window_s=3600):
     return queued, deferrals
 
 
+ACTIVE_IDLE_MINUTES = 10
+SESSIONS_BUDGET_S = 0.15
+
+
+def sessions(table=None, registry=None):
+    """Live interactive agent sessions and the memory they hold, or None when unreadable.
+
+    Optional by design: no session signal never forces the rule-D fallback, so failures are not
+    added to `unknown[]`. `total_rss_mb` sums each live session pid's whole process tree.
+    """
+    try:
+        table = table if table is not None else processes()
+        registry = registry if registry is not None else session_registry.build(
+            table=table, budget_s=SESSIONS_BUDGET_S)
+        children = {}
+        for proc in table.values():
+            children.setdefault(proc.ppid, []).append(proc.pid)
+        live = [pid for pid, entry in registry.items() if entry.get('live') and pid in table]
+        sizes = []
+        for root in live:
+            seen, stack, total = set(), [root], 0.0
+            while stack:
+                pid = stack.pop()
+                if pid in seen or pid not in table:
+                    continue
+                seen.add(pid)
+                total += table[pid].rss_mb
+                stack.extend(children.get(pid, []))
+            sizes.append(total)
+        active = sum(1 for pid in live
+                     if (registry[pid].get('idle_minutes') is not None
+                         and registry[pid]['idle_minutes'] < ACTIVE_IDLE_MINUTES))
+        return {'live_count': len(live), 'active_count': active, 'idle_count': len(live) - active,
+                'total_rss_mb': round(sum(sizes), 1), 'largest_rss_mb': round(max(sizes, default=0.0), 1)}
+    except Exception:  # noqa: BLE001 - an absent session signal must never break or fail a snapshot
+        return None
+
+
 CLASS_STATS_WINDOW_S = 7 * 24 * 3600
 CLASS_STATS_MAX_LINES = 20000
 
@@ -283,6 +322,7 @@ def take(directory, heavy_directory, disk_path='/System/Volumes/Data', persist=T
         **disk(unknown, disk_path),
         'hang_reports_recent': hang_reports_recent(unknown),
         'leases': leases(heavy_directory),
+        'sessions': sessions(),
         'class_stats': load_class_stats(directory, heavy_directory),
     }
     queued, deferrals = queued_and_deferrals(heavy_directory)

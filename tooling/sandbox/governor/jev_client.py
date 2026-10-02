@@ -136,6 +136,8 @@ def refresh_credential(directory, run=None, now=None):
 
 def build_request(job_class, snapshot, policy, d_result):
     row = admission.class_row(snapshot.get('class_stats') or {}, job_class)
+    leases = snapshot.get('leases') or []
+    reserve = admission.reserve_mb(leases, snapshot.get('class_stats') or {})
     return {
         'model': 'typesafe-ai/jev',
         'state': {
@@ -146,20 +148,29 @@ def build_request(job_class, snapshot, policy, d_result):
             'machine': {'ncpu': snapshot.get('ncpu'), 'load1_per_core': snapshot.get('load1_per_core'),
                         'mem_pressure_level': snapshot.get('mem_pressure_level'),
                         'mem_free_percent': snapshot.get('mem_free_percent'),
+                        'mem_total_mb': snapshot.get('mem_total_mb'),
                         'swap_used_mb': snapshot.get('swap_used_mb'), 'swap_total_mb': snapshot.get('swap_total_mb'),
                         'swap_growth_mb_per_min': snapshot.get('swap_growth_mb_per_min'),
                         'disk_free_gb': snapshot.get('disk_free_gib')},
             'lock': {'leases_live': len(snapshot.get('leases') or []),
                      'lease_ages_s': [l.get('age_s') for l in (snapshot.get('leases') or [])],
                      'lease_classes': [l.get('class') for l in (snapshot.get('leases') or [])],
+                     'reserve_mb': round(reserve, 1),
+                     'lease_rss_mb': round(sum(l.get('rss_mb') or 0.0 for l in leases), 1),
                      'queued': snapshot.get('queued'), 'deferrals_last_60m': snapshot.get('deferrals_last_60m')},
+            'sessions': snapshot.get('sessions'),
             'd_rule': {'slots_now': d_result['slots_now'], 'admit': d_result['admit']},
         },
         'questions': {
             'admit': {'type': 'boolean',
-                      'instructions': ('Can this machine start ONE more job of job.class now without driving '
-                                       'memory pressure to critical, exhausting swap, or making interactive '
-                                       'apps unresponsive?')},
+                      'instructions': ('This machine also hosts state.sessions interactive Claude agent '
+                                       'sessions that must never be stalled or OOM-killed. Running jobs will '
+                                       'still grow by state.lock.reserve_mb toward their p90 peak. Can ONE '
+                                       'more job of job.class start now? Admit only if free memory '
+                                       '(mem_free_percent of mem_total_mb), after this job reaches '
+                                       'est_peak_rss_mb AND the running jobs grow by reserve_mb, still leaves '
+                                       'the interactive sessions comfortable: no critical memory pressure, '
+                                       'no swap exhaustion, no unresponsive apps.')},
             'headroom_slots': {'type': 'choice', 'criteria': {str(n): str(n) for n in range(1, 7)}},
             'saturation': {'type': 'score', 'criteria': ['idle', 'light', 'moderate', 'heavy', 'thrashing']},
         },
@@ -177,6 +188,11 @@ def _cached_decision(directory, job_class, now, max_age_s):
     if now - cached.get('cached_at', 0) > max_age_s:
         return None
     return cached['decision']
+
+
+def invalidate_decision(directory, job_class):
+    """Drop a class's cached verdict so the next waiter consults afresh (one admit = one job)."""
+    _cache_path(directory, job_class).unlink(missing_ok=True)
 
 
 def _map_answers(answers, policy, d_result):
