@@ -22,6 +22,12 @@ class PolicyDefaultsTests(unittest.TestCase):
         self.assertEqual((p.jev_deadline_ms, p.decision_ttl_s, p.admit_p_hi, p.admit_p_lo, p.saturation_deny),
                          (1500, 20, 0.60, 0.40, 3.5))
 
+    def test_disk_thresholds_resolve_without_a_policy_file_entry(self):
+        with tempfile.TemporaryDirectory() as home, mock.patch.object(
+                heavy_resources, 'account_home', return_value=Path(home)):
+            p = heavy_resources.load_policy()
+        self.assertEqual((p.disk_floor_gib, p.disk_reclaim_gib), (10, 25))
+
     def test_no_off_value_is_accepted(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
                 heavy_resources, 'account_home', return_value=Path(tmp)):

@@ -50,6 +50,46 @@ class AnnounceGovernorContextTests(unittest.TestCase):
         self.assertTrue(any(json.loads(line)['event'] == 'governor_decision' for line in events))
 
 
+class DiskReclaimInboxTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.governor_dir = Path(self.tmp.name) / 'governor'
+        self.heavy_dir = Path(self.tmp.name) / 'heavy.slots'
+        self.heavy_dir.mkdir()
+        env = mock.patch.dict(os.environ, {'KEEL_GOVERNOR_STATE_DIR': str(self.governor_dir)})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def inbox(self):
+        path = self.governor_dir / 'steward-inbox.jsonl'
+        return [json.loads(l) for l in path.read_text().splitlines()] if path.exists() else []
+
+    def test_low_disk_appends_one_disk_reclaim_per_window(self):
+        snap = {'disk_free_gib': 5, 'leases': []}
+        with mock.patch('governor.snapshot.take', return_value=snap):
+            heavy_runner.announce_disk_reclaim(self.heavy_dir, ['x'], Policy())
+            heavy_runner.announce_disk_reclaim(self.heavy_dir, ['x'], Policy())
+        self.assertEqual([r['reason'] for r in self.inbox()], ['disk_reclaim'])
+
+    def test_stale_entry_does_not_dedupe(self):
+        self.governor_dir.mkdir()
+        old = {'ts': '2020-01-01T00:00:00+00:00', 'reason': 'disk_reclaim'}
+        (self.governor_dir / 'steward-inbox.jsonl').write_text(json.dumps(old) + '\n')
+        with mock.patch('governor.snapshot.take', return_value={'disk_free_gib': 5, 'leases': []}):
+            heavy_runner.announce_disk_reclaim(self.heavy_dir, ['x'], Policy())
+        self.assertEqual(len(self.inbox()), 2)
+
+    def test_ample_disk_writes_nothing(self):
+        with mock.patch('governor.snapshot.take', return_value={'disk_free_gib': 500, 'leases': []}):
+            heavy_runner.announce_disk_reclaim(self.heavy_dir, ['x'], Policy())
+        self.assertEqual(self.inbox(), [])
+
+    def test_interrupted_is_appended(self):
+        heavy_runner.append_interrupted_inbox(15)
+        self.assertEqual([(r['reason'], r['signal']) for r in self.inbox()], [('interrupted', 15)])
+
+
 class ConsultJevTests(unittest.TestCase):
     """2026-09-30: `jev_client.decide()` had no caller, so JEV was never asked (0/7 decisions)."""
 

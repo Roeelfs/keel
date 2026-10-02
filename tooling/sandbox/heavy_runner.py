@@ -1,5 +1,6 @@
 """Up to `slots` machine-wide heavy jobs, each observed as its complete process tree."""
 from dataclasses import asdict
+from datetime import datetime, timezone
 import fcntl
 import json
 import os
@@ -216,6 +217,34 @@ def claim_slot(directory, policy, position, budget_mb=None, jev_admit=False, res
     finally:
         for stream, _ in free:
             stream.close()
+
+
+def announce_disk_reclaim(directory, command, policy):
+    """Best-effort: when free disk is under the soft threshold, queue a `disk_reclaim` context for the
+    steward (deduped to one per 30 min), whether or not this job is deferred. Never raises."""
+    try:
+        from governor import admission, context
+        from governor.state import governor_directory
+        from governor.snapshot import take as take_snapshot
+        governor_dir = governor_directory()
+        snapshot = take_snapshot(governor_dir, directory)
+        if admission.needs_reclaim(snapshot, policy):
+            job_class = Path(command[0]).name if command else 'other-heavy'
+            context.append_inbox_deduped(governor_dir, context.build('disk_reclaim', job_class, snapshot, policy))
+    except Exception as error:  # noqa: BLE001 - must never block a job
+        print(f'with-heavy-lock: disk reclaim check unavailable ({type(error).__name__}: {error})',
+              file=sys.stderr)
+
+
+def append_interrupted_inbox(signum):
+    """Best-effort: tell the steward a heavy job was interrupted by a signal."""
+    try:
+        from governor import context
+        from governor.state import governor_directory
+        context.append_inbox(governor_directory(), {'ts': datetime.now(timezone.utc).isoformat(),
+                                                    'reason': 'interrupted', 'signal': int(signum)})
+    except Exception:  # noqa: BLE001 - observability only
+        pass
 
 
 def announce_governor_context(directory, reason, command, policy):
@@ -650,6 +679,7 @@ def run_job(command, directory, policy, job_id, stream, slot):
                          lambda: received_signal)
     except InterruptedError as error:
         event(directory, 'interrupted', job_id=job_id, reason='signal', signal=error.args[0])
+        append_interrupted_inbox(error.args[0])
         return 128 + int(error.args[0])
     except Exception as error:
         if child is not None:  # The job started; close its record before the error propagates.
@@ -848,10 +878,12 @@ def main():
             if broker_result is not None:
                 return broker_result
         job_id = uuid.uuid4().hex
+        announce_disk_reclaim(directory, command, policy)
         try:
             claimed = acquire(directory, policy, job_id, command)
         except Interrupted as error:
             event(directory, 'interrupted', job_id=job_id, reason='signal', signal=error.args[0])
+            append_interrupted_inbox(error.args[0])
             return 128 + int(error.args[0])
         return run_job(command, directory, policy, job_id, *claimed) if claimed else 75
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:

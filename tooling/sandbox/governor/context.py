@@ -104,3 +104,21 @@ def append_inbox(directory, context):
     with path.open('a') as inbox:
         inbox.write(json.dumps(context, sort_keys=True) + '\n')
     return path
+
+
+def append_inbox_deduped(directory, context, window_seconds=1800):
+    """Like append_inbox, but skip when the newest inbox line of the same reason is within the window."""
+    path = directory / INBOX_NAME
+    if path.exists():
+        for line in reversed(path.read_text().splitlines()):
+            try:
+                last = json.loads(line)
+            except ValueError:
+                continue
+            if last.get('reason') != context.get('reason'):
+                continue
+            age = datetime.now(timezone.utc) - datetime.fromisoformat(last['ts'])
+            if age.total_seconds() < window_seconds:
+                return None
+            break
+    return append_inbox(directory, context)
