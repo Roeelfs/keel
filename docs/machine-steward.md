@@ -52,4 +52,4 @@ Start it with: `Read ~/code/keel/docs/machine-steward.md and act as machine-stew
 
 ## Idle loop
 
-Every 10 minutes, with a self-paced `/loop` wake, read inbox entries newer than your last receipt and act on them. Run one full refresh-and-sweep every 30 minutes even when the inbox is empty. Stay quiet unless you act.
+The wake is the inbox itself, never a timer (no `/loop`, no cron, no scheduled wake: founder ruling 2026-10-01). At the end of every turn, make sure exactly one watcher is armed: a Bash call with `run_in_background: true` running `python3 ~/code/keel/tooling/sandbox/governor/wait_inbox.py`. It blocks on kqueue with no CPU until the governor appends a line, prints the new lines, then exits, and that exit re-invokes this session. On wake, read every inbox entry newer than your last receipt, act on them, write receipts, and re-arm the watcher. Before arming, check that one is not already running (`pgrep -f 'wait_inbox\.py$'`; anchored to line end, because a bare `pgrep -f wait_inbox.py` also matches the shell running the check and always reports one), so watchers never stack. Stay quiet unless you act.
