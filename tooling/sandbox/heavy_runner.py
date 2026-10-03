@@ -236,17 +236,6 @@ def announce_disk_reclaim(directory, command, policy):
               file=sys.stderr)
 
 
-def append_interrupted_inbox(signum):
-    """Best-effort: tell the steward a heavy job was interrupted by a signal."""
-    try:
-        from governor import context
-        from governor.state import governor_directory
-        context.append_inbox(governor_directory(), {'ts': datetime.now(timezone.utc).isoformat(),
-                                                    'reason': 'interrupted', 'signal': int(signum)})
-    except Exception:  # noqa: BLE001 - observability only
-        pass
-
-
 def announce_governor_context(directory, reason, command, policy):
     """The whole reclaim interface (2026-09-29 founder rescope): a compact CONTEXT block to stderr
 
@@ -679,7 +668,6 @@ def run_job(command, directory, policy, job_id, stream, slot):
                          lambda: received_signal)
     except InterruptedError as error:
         event(directory, 'interrupted', job_id=job_id, reason='signal', signal=error.args[0])
-        append_interrupted_inbox(error.args[0])
         return 128 + int(error.args[0])
     except Exception as error:
         if child is not None:  # The job started; close its record before the error propagates.
@@ -883,7 +871,6 @@ def main():
             claimed = acquire(directory, policy, job_id, command)
         except Interrupted as error:
             event(directory, 'interrupted', job_id=job_id, reason='signal', signal=error.args[0])
-            append_interrupted_inbox(error.args[0])
             return 128 + int(error.args[0])
         return run_job(command, directory, policy, job_id, *claimed) if claimed else 75
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:

@@ -85,10 +85,6 @@ class DiskReclaimInboxTests(unittest.TestCase):
             heavy_runner.announce_disk_reclaim(self.heavy_dir, ['x'], Policy())
         self.assertEqual(self.inbox(), [])
 
-    def test_interrupted_is_appended(self):
-        heavy_runner.append_interrupted_inbox(15)
-        self.assertEqual([(r['reason'], r['signal']) for r in self.inbox()], [('interrupted', 15)])
-
 
 class ConsultJevTests(unittest.TestCase):
     """2026-09-30: `jev_client.decide()` had no caller, so JEV was never asked (0/7 decisions)."""
