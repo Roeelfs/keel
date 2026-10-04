@@ -2,6 +2,7 @@
 name: refactorer
 description: Behavior-preserving large refactors and legacy deletion — owns the rewrite-don't-preserve discipline (Sonnet)
 model: sonnet
+effort: medium
 level: 2
 ---
 

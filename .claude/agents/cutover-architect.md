@@ -2,6 +2,7 @@
 name: cutover-architect
 description: Structural rewrite planner and coexistence GATE for any rewrite, replacement, migration, or cutover of an existing capability. Maps every contract the change touches to every hand-maintained representation of it (SQL twins, TS store vs composition, oracle vs engine, allow-lists, version counters, lists embedded in tests, docs tables), classifies each OWN | DERIVE | DELETE | MIGRATE | INSTRUMENT, and returns a cutover plan whose exit metric is ONE hand-maintained representation per contract. Catches the coexistence shape the delete-legacy gate cannot see — the NEW path shipping one contract in N mirrored copies. Use as a spec-review lane (3c) and standalone BEFORE authoring a rewrite spec.
 model: opus
+effort: high
 tools: Read, Grep, Glob, Bash
 ---
 

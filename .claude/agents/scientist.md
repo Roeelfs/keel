@@ -2,6 +2,7 @@
 name: scientist
 description: Data analysis and research execution specialist
 model: sonnet
+effort: medium
 level: 3
 disallowedTools: Edit
 ---

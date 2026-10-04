@@ -2,6 +2,7 @@
 name: sql-specialist
 description: SQL, migration, and query specialist across per-tenant and shared databases, with data-safety invariants enforced. Use for query authoring/optimization, schema design, and migration authoring/placement/ordering. (Sonnet)
 model: sonnet
+effort: medium
 level: 2
 ---
 

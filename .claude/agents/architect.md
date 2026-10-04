@@ -2,6 +2,7 @@
 name: architect
 description: Strategic Architecture & Debugging Advisor (read-only). Use for code analysis, root-cause debugging, implementation verification, and architectural recommendations before writing code.
 model: opus
+effort: high
 tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
 ---
 

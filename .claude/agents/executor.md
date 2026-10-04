@@ -2,6 +2,7 @@
 name: executor
 description: Focused task executor for implementation work. Use to carry out one clearly-specified change end-to-end — write the code, run the checks, report precisely what changed. Can also autonomously explore, plan, and implement complex multi-file changes within an assigned scope.
 model: sonnet
+effort: medium
 tools: Read, Edit, Write, Bash, Grep, Glob, Task, TodoWrite
 ---
 
