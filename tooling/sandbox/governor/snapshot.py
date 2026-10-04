@@ -196,6 +196,60 @@ def sessions(table=None, registry=None):
     except Exception:  # noqa: BLE001 - an absent session signal must never break or fail a snapshot
         return None
 
+# Interactive desktop apps whose whole process tree competes with jobs for memory. The ChatGPT
+# app hosts the Codex desktop agent (`codex`, its renderers and services), so its tree is the
+# Codex desktop footprint. Measured as phys_footprint (Activity Monitor's Memory column, which
+# counts compressed pages); RSS read 1.6 GB for a ChatGPT tree Force Quit showed at 14.7 GB.
+DESKTOP_APPS = ('ChatGPT', 'Claude', 'Google Chrome')
+_RUSAGE_INFO_V2 = 2
+_PHYS_FOOTPRINT_OFFSET = 16 + 7 * 8  # rusage_info_v2: uuid[16], then uint64 fields; 8th is phys_footprint.
+
+
+def _footprint_mb(pid, _libc=[]):
+    """phys_footprint of one same-user pid in MB, or None. One syscall, no subprocess."""
+    import ctypes
+    if not _libc:
+        _libc.append(ctypes.CDLL('/usr/lib/libproc.dylib'))
+    buf = ctypes.create_string_buffer(1024)
+    if _libc[0].proc_pid_rusage(ctypes.c_int(pid), ctypes.c_int(_RUSAGE_INFO_V2), buf) != 0:
+        return None
+    return int.from_bytes(buf.raw[_PHYS_FOOTPRINT_OFFSET:_PHYS_FOOTPRINT_OFFSET + 8], 'little') / 1048576
+
+
+DESKTOP_APP_RE = re.compile(r'^/Applications/(?P<app>[^/]+)\.app/Contents/MacOS/(?P=app)$')
+
+
+def desktop_apps(table=None):
+    """`{app: footprint_mb}` per running desktop app's whole tree, or None when unreadable (optional)."""
+    try:
+        table = table if table is not None else processes()
+        listing = subprocess.run(['ps', '-axo', 'pid=,comm='], text=True, capture_output=True,
+                                 check=True, timeout=5, env={**os.environ, 'LC_ALL': 'C'}).stdout
+        roots = {}
+        for line in listing.splitlines():
+            pid, _, comm = line.strip().partition(' ')
+            match = DESKTOP_APP_RE.match(comm.strip())
+            if match and match.group('app') in DESKTOP_APPS and pid.isdigit():
+                roots.setdefault(match.group('app'), []).append(int(pid))
+        children = {}
+        for proc in table.values():
+            children.setdefault(proc.ppid, []).append(proc.pid)
+        result = {}
+        for app, pids in roots.items():
+            seen, stack, total = set(), list(pids), 0.0
+            while stack:
+                pid = stack.pop()
+                if pid in seen or pid not in table:
+                    continue
+                seen.add(pid)
+                footprint = _footprint_mb(pid)
+                total += footprint if footprint is not None else table[pid].rss_mb
+                stack.extend(children.get(pid, []))
+            result[app] = round(total, 1)
+        return result
+    except Exception:  # noqa: BLE001 - an absent app signal must never break or fail a snapshot
+        return None
+
 
 CLASS_STATS_WINDOW_S = 7 * 24 * 3600
 CLASS_STATS_MAX_LINES = 20000
@@ -323,6 +377,7 @@ def take(directory, heavy_directory, disk_path='/System/Volumes/Data', persist=T
         'hang_reports_recent': hang_reports_recent(unknown),
         'leases': leases(heavy_directory),
         'sessions': sessions(),
+        'desktop_apps': desktop_apps(),
         'class_stats': load_class_stats(directory, heavy_directory),
     }
     queued, deferrals = queued_and_deferrals(heavy_directory)

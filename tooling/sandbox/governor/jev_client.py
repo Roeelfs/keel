@@ -159,12 +159,16 @@ def build_request(job_class, snapshot, policy, d_result):
                      'lease_rss_mb': round(sum(l.get('rss_mb') or 0.0 for l in leases), 1),
                      'queued': snapshot.get('queued'), 'deferrals_last_60m': snapshot.get('deferrals_last_60m')},
             'sessions': snapshot.get('sessions'),
+            'desktop_apps_footprint_mb': snapshot.get('desktop_apps'),
             'd_rule': {'slots_now': d_result['slots_now'], 'admit': d_result['admit']},
         },
         'questions': {
             'admit': {'type': 'boolean',
                       'instructions': ('This machine also hosts state.sessions interactive Claude agent '
-                                       'sessions that must never be stalled or OOM-killed. Running jobs will '
+                                       'sessions, plus the interactive desktop apps in state.desktop_apps_footprint_mb (the ChatGPT app '
+                                       'hosts the Codex desktop agent), none of which may be stalled or '
+                                       'OOM-killed. Their memory can grow by GBs without warning; a ChatGPT or Claude tree over ~8000 MB is a hog that '
+                                       'shrinks headroom. Running jobs will '
                                        'still grow by state.lock.reserve_mb toward their p90 peak. Can ONE '
                                        'more job of job.class start now? Admit only if free memory '
                                        '(mem_free_percent of mem_total_mb), after this job reaches '

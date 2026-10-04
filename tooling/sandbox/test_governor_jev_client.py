@@ -53,6 +53,12 @@ class BuildRequestSessionTests(unittest.TestCase):
         self.assertEqual(state['lock']['reserve_mb'], 3000.0)
         self.assertEqual(state['lock']['lease_rss_mb'], 1000.0)
 
+    def test_request_carries_desktop_app_footprints_and_names_chatgpt(self):
+        snap = {**snapshot(), 'desktop_apps': {'ChatGPT': 14400.0, 'Claude': 16000.0}}
+        request = jev_client.build_request('pnpm', snap, Policy(), {'slots_now': 1, 'admit': True})
+        self.assertEqual(request['state']['desktop_apps_footprint_mb']['ChatGPT'], 14400.0)
+        self.assertIn('ChatGPT', request['questions']['admit']['instructions'])
+
 
 class JevClientTests(unittest.TestCase):
     def setUp(self):
