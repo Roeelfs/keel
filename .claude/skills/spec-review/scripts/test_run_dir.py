@@ -108,6 +108,7 @@ class LanesCommandTests(unittest.TestCase):
                 self.assertTrue(text.startswith(f"ROLE: {label}\n"), label)
                 self.assertEqual(run_dir.find_placeholders(text), [], label)
                 self.assertIn("Run contract", text)
+                self.assertNotIn("LEARNINGS", text, f"{label}: review lanes must not be handed LEARNINGS")
             for label in out["codex"]:
                 text = (run / "codex" / f"{label}.prompt.md").read_text()
                 self.assertTrue(text.startswith(f"ROLE: {label}\n"))

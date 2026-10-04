@@ -173,10 +173,9 @@ def learnings_paths(skill_dir=SKILL_DIR, home=None):
     return out
 
 
-def run_contract(run, entry, questions, learnings, label=None, ids_note=None):
+def run_contract(run, entry, questions, label=None, ids_note=None):
     run = str(run)
     qlines = "\n".join(f"  - {q['id']} [{q.get('lane', '')}]: {q['text']}" for q in questions) or "  (none assigned)"
-    ll = "\n".join(f"  - {p}" for p in learnings) or "  (none)"
     prefix = entry.get("idPrefix", "F")
     label = label or entry["label"]
     ids_note = ids_note or (f"Use the ids your format defines (EC-N, Sec-N, Obs-N, LE-N, DRIFT-N); otherwise {prefix}-1, {prefix}-2, ... in file order.")
@@ -191,8 +190,6 @@ def run_contract(run, entry, questions, learnings, label=None, ids_note=None):
   "dossier content" placeholder above.
 - Assigned review questions -- answer EVERY one, citing its Q-id in your findings file:
 {qlines}
-- LEARNINGS (read the parts relevant to your lane; NEVER edit them):
-{ll}
 - Independence: you read no other lane's output. You are a leaf agent -- spawn no sub-agents or Workflows.
 - Delivery:
   1. Write your COMPLETE output, in the format your brief above specifies, to {run}/lanes/{label}.md.
@@ -347,7 +344,6 @@ def cmd_lanes(a):
             assignments[e["label"]] = list(assignments.get(e["substituteFor"], []))
         write(assign_path, json.dumps(assignments, indent=1))
         by_id = {q["id"]: q for q in questions}
-        learnings = [l for l in (run / "inputs" / "learnings.txt").read_text(encoding="utf-8").splitlines() if l]
         root = (run / "inputs" / "root.txt").read_text(encoding="utf-8").strip()
         spec = a.spec
         spec_rel = os.path.relpath(spec, root) if os.path.isabs(spec) else spec
@@ -380,7 +376,7 @@ def cmd_lanes(a):
                 body = fill(extract_body(tpl), values)
             else:
                 body = (e["brief"].replace("{{SPEC_PATH}}", spec).replace("{{PROJECT_ROOT}}", root))
-            text = f"ROLE: {label}\n{body}" + run_contract(run, e, qs, learnings)
+            text = f"ROLE: {label}\n{body}" + run_contract(run, e, qs)
             left = find_placeholders(text)
             if left:
                 errors.append(f"{label}: unfilled placeholders {sorted(set(left))}")
@@ -409,7 +405,6 @@ def cmd_drift_briefs(a):
     role_line(tpl, INVESTIGATOR)
     body = extract_body(tpl)
     root = (run / "inputs" / "root.txt").read_text(encoding="utf-8").strip()
-    learnings = [l for l in (run / "inputs" / "learnings.txt").read_text(encoding="utf-8").splitlines() if l]
     briefs, errors = [], []
     for it in items[:5]:
         did = str(it.get("drift_id", "")).strip()
@@ -424,7 +419,7 @@ def cmd_drift_briefs(a):
                   "TARGETED_PATHS": f"the paths/worktrees/specs named in the {did} row of {scout_file}",
                   "NARROW_QUESTION": str(it.get("narrow_question") or f"resolve {did} as the scout's row asks")}
         note = f"Use ids DI-1, DI-2, ... in file order (the scout already owns the {did} id)."
-        text = f"ROLE: {INVESTIGATOR}\n" + fill(body, values) + run_contract(run, e, [], learnings, label=label, ids_note=note)
+        text = f"ROLE: {INVESTIGATOR}\n" + fill(body, values) + run_contract(run, e, [], label=label, ids_note=note)
         left = find_placeholders(text)
         if left:
             errors.append(f"{label}: unfilled placeholders {sorted(set(left))}")
