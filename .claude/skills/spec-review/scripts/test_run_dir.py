@@ -174,10 +174,52 @@ class EnvelopeAndReportTests(unittest.TestCase):
             envelope(run, "codex-frontier", [("AST-1", "MAJOR")], [])
             rc, out = call("falsify-plan", "--run", str(run), "--spec", "s.md", "--lanes", "edge-case-miner,codex-research,codex-frontier")
             self.assertEqual(rc, 0, out)
-            self.assertEqual(sorted(p["id"] for p in out["plan"]), ["AST-1", "EC-1"])
-            text = Path(out["plan"][0]["prompt"]).read_text()
-            self.assertTrue(text.startswith("ROLE: finding-falsifier\n"))
-            self.assertEqual(run_dir.find_placeholders(text), [])
+            self.assertEqual(sorted(i for b in out["plan"] for i in b["ids"]), ["AST-1", "EC-1"])
+            texts = [Path(b["prompt"]).read_text() for b in out["plan"]]
+            for text in texts:
+                self.assertTrue(text.startswith("ROLE: finding-falsifier\n"))
+                self.assertEqual(run_dir.find_placeholders(text), [])
+            self.assertTrue(any("EC-1" in x for x in texts))
+
+    def test_dry_plan_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = make_run(tmp)
+            envelope(run, "edge-case-miner", [("EC-1", "CRITICAL")], [])
+            rc, out = call("falsify-plan", "--run", str(run), "--spec", "s.md", "--lanes", "edge-case-miner", "--dry")
+            self.assertEqual(rc, 0)
+            self.assertEqual(list((run / "prompts").glob("falsifier-*")), [])
+
+
+class BatchingTests(unittest.TestCase):
+    def F(self, i, title, lane="x"):
+        return {"id": i, "lane": lane, "severity": "MAJOR", "title": title}
+
+    def test_near_duplicates_cluster_across_lanes_and_keep_every_id(self):
+        fs = [self.F("A-1", "Install write-back is a second writer of schema.json under ADR-0088 D2", "arch"),
+              self.F("B-1", "Install write-back makes a second writer of schema.json straying from ADR-0088", "adr"),
+              self.F("C-1", "Retry of the webhook dedup key double-writes the ledger row", "sec")]
+        clusters = run_dir.cluster_findings(fs)
+        sets = sorted(sorted(c["ids"]) for c in clusters)
+        self.assertEqual(sets, [["A-1", "B-1"], ["C-1"]])
+
+    def test_batches_capped_cover_each_id_once(self):
+        fs = [self.F(f"F-{i}", f"distinct topic number {i} alpha{i} beta{i} gamma{i}") for i in range(68)]
+        batches = run_dir.plan_batches(fs, 6)
+        self.assertLessEqual(len(batches), 6)
+        flat = [i for b in batches for i in b["ids"]]
+        self.assertEqual(sorted(flat), sorted(f["id"] for f in fs))
+        self.assertEqual(len(flat), len(set(flat)))
+
+    def test_small_set_and_duplicate_merge_in_one_batch(self):
+        fs = [self.F("A-1", "second writer of schema.json under ADR-0088 install"), self.F("B-1", "install second writer of schema.json under ADR-0088")]
+        batches = run_dir.plan_batches(fs, 6)
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(batches[0]["clusters"], [["A-1", "B-1"]])
+
+    def test_max_batches_must_be_positive(self):
+        with self.assertRaises(run_dir.StageError):
+            run_dir.plan_batches([self.F("A-1", "t")], 0)
+
 
     def _report(self, extra=""):
         return ("## Spec Review - Final Report\n\n### Falsifier wave: 2 dispatched over 2 CRITICAL/MAJOR — 1 REFUTED, 1 SURVIVES.\n\n"

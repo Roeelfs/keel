@@ -492,6 +492,76 @@ def all_critical_major(run, labels):
     return out
 
 
+STOP = set("the a an and or of to in on for with is are be by at as it its this that not no from into than then when what which does do did has have had can will would should must may via per vs all any each only one two new old own more less over under".split())
+STRONG_RE = re.compile(r"^(?:[a-z]+-\d+|[\w.-]*[_/][\w./-]*|[\w-]+\.[a-z]{1,4})$", re.I)
+
+
+def title_tokens(title):
+    toks = [t.strip(".,;:()[]'\"`") for t in re.split(r"\s+", title.lower())]
+    toks = [t for t in toks if len(t) >= 3 and t not in STOP]
+    return set(toks), {t for t in toks if STRONG_RE.match(t)}
+
+
+def cluster_findings(findings):
+    """Union near-duplicate findings across lanes (overlapping title tokens or shared
+    identifiers/paths). Every original id stays in its cluster -- nothing is dropped."""
+    toks = [title_tokens(f["title"]) for f in findings]
+    parent = list(range(len(findings)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(findings)):
+        for j in range(i + 1, len(findings)):
+            (ai, si), (aj, sj) = toks[i], toks[j]
+            union = len(ai | aj) or 1
+            jac = len(ai & aj) / union
+            if jac >= 0.5 or (len(si & sj) >= 3 and jac >= 0.25):
+                parent[find(j)] = find(i)
+    groups = {}
+    for i, f in enumerate(findings):
+        groups.setdefault(find(i), []).append(i)
+    clusters = []
+    for idxs in groups.values():
+        members = [findings[i] for i in idxs]
+        counts = {}
+        for i in idxs:
+            for t in toks[i][1]:
+                counts[t] = counts.get(t, 0) + 1
+        paths = sorted(((c, t) for t, c in counts.items() if "/" in t or re.search(r"\.[a-z]{1,4}$", t)), reverse=True)
+        strong = sorted(((c, t) for t, c in counts.items()), reverse=True)
+        seam = (paths or strong or [(0, members[0]["lane"])])[0][1]
+        clusters.append({"seam": seam, "ids": [m["id"] for m in members], "members": members})
+    clusters.sort(key=lambda c: (-len(c["ids"]), c["ids"][0]))
+    return clusters
+
+
+def plan_batches(findings, max_batches=6):
+    """Pack clusters into <= max_batches batches, keeping a seam together while it fits.
+    Every id lands in exactly one batch."""
+    if max_batches < 1:
+        raise StageError("max-batches must be >= 1")
+    clusters = cluster_findings(findings)
+    total = sum(len(c["ids"]) for c in clusters)
+    cap = -(-total // max_batches)
+    batches = [{"ids": [], "clusters": [], "seams": []} for _ in range(max_batches)]
+    for c in clusters:
+        home = next((b for b in batches if c["seam"] in b["seams"] and len(b["ids"]) + len(c["ids"]) <= cap * 3 // 2), None)
+        target = home or min(batches, key=lambda b: (len(b["ids"]), batches.index(b)))
+        target["ids"] += c["ids"]
+        target["clusters"].append(c["ids"])
+        if c["seam"] not in target["seams"]:
+            target["seams"].append(c["seam"])
+    out = [b for b in batches if b["ids"]]
+    flat = [i for b in out for i in b["ids"]]
+    if sorted(flat) != sorted(f["id"] for f in findings):
+        raise StageError("batch plan does not cover every id exactly once")
+    return out
+
+
 def cmd_falsify_plan(a):
     run = Path(a.run)
     a.lanes = ",".join(expand_labels(run, csv(a.lanes)))
@@ -501,32 +571,41 @@ def cmd_falsify_plan(a):
     tpl = (PROMPTS_DIR / e["prompt"]).read_text(encoding="utf-8")
     role_line(tpl, "finding-falsifier")
     body = extract_body(tpl)
+    findings = all_critical_major(run, csv(a.lanes))
+    batches = plan_batches(findings, int(a.max_batches or 6))
+    by_id = {f["id"]: f for f in findings}
     plan, errors = [], []
-    for f in all_critical_major(run, csv(a.lanes)):
-        lf = lane_file(manifest, run, f["lane"])
-        values = {"LANE": f["lane"], "SEVERITY": f["severity"],
-                  "FINDING_TEXT": f"{f['id']} -- {f['title']}  (the full finding is in {lf}; find it by its id)",
-                  "CITED_EVIDENCE": f"as cited in that finding inside {lf}",
-                  "PROPOSED_FIX": f"as proposed in that finding inside {lf}",
+    for n, b in enumerate(batches, 1):
+        items = "\n".join(
+            f"    - {i} [{by_id[i]['lane']}, {by_id[i]['severity']}] {by_id[i]['title']}  (full finding: {lane_file(manifest, run, by_id[i]['lane'])}, find it by its id)"
+            for i in b["ids"])
+        dupes = "\n".join("    - " + ", ".join(c) for c in b["clusters"] if len(c) > 1) or "    (none)"
+        values = {"LANE": "several -- see the batch list", "SEVERITY": "per item below",
+                  "FINDING_TEXT": f"a BATCH of {len(b['ids'])} findings, each judged separately:\n{items}",
+                  "CITED_EVIDENCE": "as cited in each finding inside its lane file",
+                  "PROPOSED_FIX": "as proposed in each finding inside its lane file",
                   "SPEC_PATH": a.spec, "PROJECT_ROOT": root}
-        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", f["id"])
-        text = f"ROLE: finding-falsifier\n" + fill(body, values) + f"""
+        text = "ROLE: finding-falsifier\n" + fill(body, values) + f"""
 
 ## Run contract (added by the pipeline script -- binding)
-- Finding under test: {f['id']} from lane {f['lane']}. Read ONLY that finding in {lf}, never another lane's output.
-- Write your full reasoning and verdict to {run}/falsifiers/{safe}.md, and {run}/falsifiers/{safe}.json:
-  {{"id": "{f['id']}", "verdict": "REFUTED|SURVIVES|SURVIVES-BUT-FIX-REJECTED|NEEDS-LIVE-EVIDENCE", "evidence": "<one line>"}}.
-- Final reply: that same object via StructuredOutput. You are a leaf agent -- spawn no sub-agents or Workflows.
+- This is batch {n} of {len(batches)}: {len(b['ids'])} findings grouped by seam. Try to defeat EACH id separately and give EACH its own verdict; never merge or skip an id.
+  Near-duplicate clusters inside the batch (same seam; you may share evidence, not verdicts):
+{dupes}
+- Read ONLY the listed findings in their lane files, never another lane's output.
+- Write your full reasoning to {run}/falsifiers/batch-{n}.md, and ONE file per id, {run}/falsifiers/<id with any char outside A-Za-z0-9_.- replaced by _>.json:
+  {{"id": "<id>", "verdict": "REFUTED|SURVIVES|SURVIVES-BUT-FIX-REJECTED|NEEDS-LIVE-EVIDENCE", "evidence": "<one line>"}}.
+- Final reply: {{"verdicts": [that object for every id in the batch]}} via StructuredOutput. You are a leaf agent -- spawn no sub-agents or Workflows.
 """
         left = find_placeholders(text)
         if left:
-            errors.append(f"{f['id']}: unfilled placeholders {sorted(set(left))}")
-        write(run / "prompts" / f"falsifier-{safe}.md", text)
-        plan.append({"id": f["id"], "lane": f["lane"], "severity": f["severity"], "safe": safe,
-                     "prompt": str(run / "prompts" / f"falsifier-{safe}.md")})
+            errors.append(f"batch {n}: unfilled placeholders {sorted(set(left))}")
+        path = run / "prompts" / f"falsifier-batch-{n}.md"
+        if not a.dry:
+            write(path, text)
+        plan.append({"batch": n, "ids": b["ids"], "clusters": b["clusters"], "seams": b["seams"], "prompt": str(path)})
     if errors:
         return emit({"ok": False, "errors": errors}, False)
-    return emit({"ok": True, "plan": plan})
+    return emit({"ok": True, "totalIds": len(findings), "plan": plan})
 
 
 def falsifier_counts(run, expected_ids):
@@ -560,7 +639,7 @@ def cmd_summary(a):
         data = read_json(Path(run) / "envelopes" / "adr-auditor.json", {})
         hard = bool(data.get("founder_approval_needed")) and not bool(data.get("founder_approval_marker_present"))
     missing = [i for i, v in verdicts.items() if v == "MISSING"]
-    return emit({"ok": True, "raw": raw, "surviving": surviving, "falsifierDispatched": len(cm),
+    return emit({"ok": True, "raw": raw, "surviving": surviving, "falsifierDispatched": sum(1 for v in verdicts.values() if v != "MISSING"),
                  "refuted": refuted, "missingVerdicts": missing, "hardStop": hard})
 
 
@@ -626,7 +705,8 @@ def main(argv=None):
     add("check-envelopes", cmd_check_envelopes, "lanes", "codex")
     add("codex-status", cmd_codex_status)
     add("drift-briefs", cmd_drift_briefs, "spec")
-    add("falsify-plan", cmd_falsify_plan, "lanes", "spec")
+    p = add("falsify-plan", cmd_falsify_plan, "lanes", "spec", "max-batches")
+    p.add_argument("--dry", action="store_true", help="print the plan without writing prompts")
     add("summary", cmd_summary, "lanes")
     add("check-report", cmd_check_report, "lanes", "manifest", "skipped", "publish")
     a = ap.parse_args(argv)

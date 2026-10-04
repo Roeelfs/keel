@@ -88,11 +88,13 @@ const ENVELOPE = {
   },
   required: ['lane', 'answered_questions', 'findings'],
 }
-const FALSIFIER = {
+const FALSIFIER_ITEM = {
   type: 'object',
   properties: { id: { type: 'string' }, verdict: { type: 'string', enum: ['REFUTED', 'SURVIVES', 'SURVIVES-BUT-FIX-REJECTED', 'NEEDS-LIVE-EVIDENCE'] }, evidence: { type: 'string' } },
   required: ['id', 'verdict', 'evidence'],
 }
+
+const FALSIFIER_BATCH = { type: 'object', properties: { verdicts: { type: 'array', items: FALSIFIER_ITEM } }, required: ['verdicts'] }
 
 const gateLog = []
 const note = (s) => { gateLog.push(s); log(s) }
@@ -272,20 +274,23 @@ async function synthesize() {
   if (!ok.includes('codex-frontier') && !ok.includes('critic-frontier')) throw new Error('spec-review: no Astra frontier result (lane and critic fallback both failed)')
 
   // Falsifier wave: unconditional, one per CRITICAL/MAJOR, in waves of 6.
-  const fp = await py('Synthesize', 'falsify-plan', `--spec ${sq(SPEC)} --lanes ${sq(ok.join(','))}`)
-  const total = fp.plan.length
-  const runF = (f) => agent(`ROLE: finding-falsifier\n${laneBrief(f.prompt)}`,
-    { label: `falsify:${f.id}`, phase: 'Synthesize', agentType: 'general-purpose', model: 'sonnet', schema: FALSIFIER })
-  for (let i = 0; i < total; i += 6) await parallel(fp.plan.slice(i, i + 6).map((f) => () => runF(f)))
+  const fp = await py('Synthesize', 'falsify-plan', `--spec ${sq(SPEC)} --lanes ${sq(ok.join(','))} --max-batches ${A.maxFalsifierBatches || 6}`)
+  const total = fp.totalIds
+  if (fp.plan.reduce((n, b) => n + b.ids.length, 0) !== total) throw new Error('spec-review: falsifier plan does not cover every id')
+  note(`falsifier plan: ${total} ids in ${fp.plan.length} batches`)
+  const runF = (b) => agent(`ROLE: finding-falsifier\n${laneBrief(b.prompt)}`,
+    { label: `falsify:batch-${b.batch}`, phase: 'Synthesize', agentType: 'general-purpose', model: 'sonnet', schema: FALSIFIER_BATCH })
+  await parallel(fp.plan.map((b) => () => runF(b)))
   let sum = await py('Synthesize', 'summary', `--lanes ${sq(ok.join(','))}`)
   if (sum.missingVerdicts.length) {
-    note(`falsifier retry for: ${sum.missingVerdicts.join(', ')}`)
-    await parallel(fp.plan.filter((f) => sum.missingVerdicts.includes(f.id)).map((f) => () => runF(f)))
+    const redo = fp.plan.filter((b) => b.ids.some((i) => sum.missingVerdicts.includes(i)))
+    note(`falsifier retry for batch(es) ${redo.map((b) => b.batch).join(', ')}: missing ${sum.missingVerdicts.join(', ')}`)
+    await parallel(redo.map((b) => () => runF(b)))
     sum = await py('Synthesize', 'summary', `--lanes ${sq(ok.join(','))}`)
     if (sum.missingVerdicts.length) throw new Error(`spec-review: falsifier verdict missing for ${sum.missingVerdicts.join(', ')}`)
   }
-  if (sum.falsifierDispatched !== total) throw new Error(`spec-review: falsifier count mismatch (${sum.falsifierDispatched} vs ${total})`)
-  note(`falsifier wave: ${total} dispatched over ${total} CRITICAL/MAJOR, ${sum.refuted} REFUTED`)
+  if (sum.falsifierDispatched !== total) throw new Error(`spec-review: verdicts-per-id mismatch (${sum.falsifierDispatched} ids with verdicts vs ${total})`)
+  note(`falsifier wave: ${total} ids in ${fp.plan.length} batches, ${sum.refuted} REFUTED`)
   if (sum.hardStop) note('ADR HARD STOP surfaced in report.md')
 
   // Manifest: every planned lane is listed as run, FAILED, or SKIPPED (gate: ...).
