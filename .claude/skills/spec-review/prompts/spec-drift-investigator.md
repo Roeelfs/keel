@@ -1,3 +1,4 @@
+ROLE: spec-drift-investigator
 # Spec Drift Investigator
 
 Deeply investigates one drift candidate or one tightly related cluster from the

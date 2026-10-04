@@ -1,3 +1,4 @@
+ROLE: live-evidence-auditor
 # Live-Evidence Premise Auditor
 
 Extracts the spec's load-bearing premises and FALSIFIES each against live evidence — deployed config, live schema/rows, DNS, log/invocation counts, measured latencies — instead of prose. The single biggest reviewed-spec miss class is an unverified premise about live state: a flag assumed off that prod runs on, a dead upstream trigger pipeline the bake plan takes as given, a "pure projection" claim one `SELECT DISTINCT` would have refuted, a DNS design one `dig` would have killed.

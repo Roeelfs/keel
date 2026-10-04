@@ -1,3 +1,4 @@
+ROLE: edge-case-miner
 # Edge-Case Miner — spec-review variant
 
 Enumerates semantic boundary conditions the spec does NOT explicitly handle. Distinct lane from the adversarial reviewer (which targets infra/concurrency/env-divergence). Captures, as an automated pass, the kind of "Known Gaps G1-G10" boundary table a careful human author would otherwise enumerate by hand.

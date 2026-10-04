@@ -1,3 +1,4 @@
+ROLE: observability-auditor
 # Observability & Traceability Auditor — spec-review variant
 
 Audits whether the spec specifies **how the feature will be observed, traced, and debugged in production — before it ships.** The "when this breaks at 3am, will we be able to see what happened, on the right source, and know which deploy caused it?" check. Distinct lane from the security-miner (policy violations), the edge-case-miner (semantic boundaries), and the architecture auditor (module shape). Its premise: a change that ships without its telemetry is a future RCA run blind — false positives, wrong-source conclusions, and "we can't tell what failed" all trace back to a spec that never said how the thing would be seen.

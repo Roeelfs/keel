@@ -1,3 +1,4 @@
+ROLE: spec-drift-scout
 # Spec Drift Scout
 
 Finds whether the target spec is drifting from recently pushed work, in-progress

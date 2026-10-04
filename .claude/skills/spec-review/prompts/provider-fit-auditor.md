@@ -1,3 +1,4 @@
+ROLE: provider-fit-auditor
 # Provider-Fit Auditor
 
 Audits a spec through the **Provider ⋈ Technical-Architecture Alignment** lens: does the

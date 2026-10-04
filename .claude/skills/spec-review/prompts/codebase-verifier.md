@@ -1,3 +1,4 @@
+ROLE: codebase-verifier
 # Codebase Verifier
 
 Checks the spec against the actual codebase: do referenced files exist? Are there duplicate implementations? Stale code? Repeat-fix hotspots? What is the FULL blast radius of every seam the spec changes?

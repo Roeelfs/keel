@@ -1,3 +1,4 @@
+ROLE: architecture-auditor
 # Architecture & Simplicity Auditor
 
 Checks whether the spec fits the product's architecture, uses the right abstractions, and isn't over-engineered. The "does this belong here and is it proportionate?" check.

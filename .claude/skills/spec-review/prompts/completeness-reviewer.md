@@ -1,3 +1,4 @@
+ROLE: completeness-reviewer
 # Completeness & Alignment Reviewer
 
 Checks the spec against the design decisions dossier for gaps, contradictions, and missing requirements. This is the "did we spec what we decided?" check.

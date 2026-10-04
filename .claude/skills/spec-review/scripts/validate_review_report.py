@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """SR1/SR4: validate a spec-review `.review.md` report against the pipeline's
-hard rules (SKILL.md Step 5c).
+hard rules (report-template.md + SKILL.md Step 5c).
 
 Usage:
     python3 validate_review_report.py <report.md>
@@ -14,7 +14,7 @@ import sys
 VERDICT_WORDS = ("REFUTED", "SURVIVES", "DOWNGRADED")
 VERDICT_RE = re.compile(r"\b(?:" + "|".join(VERDICT_WORDS) + r")\b", re.IGNORECASE)
 
-# The ONE canonical falsifier-wave line format (SKILL.md Step 5c):
+# The ONE canonical falsifier-wave line format (report-template.md + SKILL.md Step 5c):
 #   ### Falsifier wave: <N> dispatched over <M> CRITICAL/MAJOR — <R> REFUTED, <S> SURVIVES.
 # Tolerates optional `#`/`**` wrapping and a short parenthetical aside before
 # the dash (e.g. "(+2 factual splits)"), and either an em-dash or a hyphen.
@@ -109,8 +109,8 @@ def validate(text):
         if n == 0 and m_val > 0:
             failures.append(
                 f"Falsifier wave dispatched N=0 while M={m_val} CRITICAL/MAJOR "
-                "findings exist -- the wave was skipped (SKILL.md Step 5a: "
-                "'stop and run the wave, do not write the report')."
+                "findings exist -- the wave was skipped (the synthesize stage "
+                "must run it before the report is written)."
             )
 
     ids = find_critical_major_ids(text)

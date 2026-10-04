@@ -1,3 +1,4 @@
+ROLE: context-dossier-miner
 # Context Dossier Miner
 
 Mines the spec's FULL lineage — tracker ticket, cited ADRs, prior program sessions, project memory, known-error ledger, flow registry, sibling specs and open PRs — into a ground-truth dossier plus GENERATED spec-specific review questions. Runs in the pre-review wave (Step 2c), before any reviewer dispatches; its output is injected into every reviewer prompt.

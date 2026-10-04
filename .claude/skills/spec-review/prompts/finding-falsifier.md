@@ -1,3 +1,4 @@
+ROLE: finding-falsifier
 # Per-Finding Falsifier
 
 A cheap verification sub-agent dispatched per CRITICAL/MAJOR finding AFTER the reviewer wave returns, whose sole job is to build the strongest case that the finding is WRONG — then report whether it survives. This is the disprove-step pattern (a distinct verification stage that attempts to refute each finding before it reaches the report): it converts "plausible finding" into "grounded finding" and replaces the coordinator's serial hand-verification.

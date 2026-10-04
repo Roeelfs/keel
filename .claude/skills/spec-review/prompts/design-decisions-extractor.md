@@ -1,3 +1,4 @@
+ROLE: design-decisions-extractor
 # Design Decisions Extractor
 
 Dispatch this agent to mine the structured-decisions JSON for design context the fresh-eyes reviewer needs.
