@@ -48,6 +48,7 @@ const MANIFEST = {
     {"label": "spec-drift-investigator", "agentType": "general-purpose", "model": "opus", "prompt": "spec-drift-investigator.md", "idPrefix": "DI"},
     {"label": "finding-falsifier", "agentType": "general-purpose", "model": "sonnet", "prompt": "finding-falsifier.md"},
     {"label": "codex-envelope-extractor", "agentType": "general-purpose", "model": "sonnet", "prompt": null},
+    {"label": "finding-merger", "agentType": "general-purpose", "model": "sonnet", "prompt": null},
     {"label": "synthesis-writer", "agentType": "general-purpose", "model": "opus", "prompt": null},
     {"label": "script-runner", "agentType": "general-purpose", "model": "haiku", "prompt": null}
   ]
@@ -81,7 +82,7 @@ const ENVELOPE = {
     lane: { type: 'string' },
     verdict: { type: 'string' },
     answered_questions: { type: 'array', items: { type: 'string' } },
-    findings: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, severity: { type: 'string', enum: ['CRITICAL', 'MAJOR', 'MINOR', 'ELEVATE', 'CAUTION'] }, title: { type: 'string' } }, required: ['id', 'severity', 'title'] } },
+    findings: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, severity: { type: 'string', enum: ['CRITICAL', 'MAJOR', 'MINOR', 'ELEVATE', 'CAUTION'] }, title: { type: 'string' }, cites: { type: 'array', items: { type: 'string' } } }, required: ['id', 'severity', 'title'] } },
     founder_approval_needed: { type: 'boolean' },
     founder_approval_marker_present: { type: 'boolean' },
     drift_investigations: { type: 'array', items: { type: 'object', properties: { drift_id: { type: 'string' }, narrow_question: { type: 'string' } }, required: ['drift_id', 'narrow_question'] } },
@@ -290,11 +291,32 @@ async function synthesize() {
   const ok = planned.filter((l) => !failed.includes(l))
   if (!ok.includes('codex-frontier') && !ok.includes('critic-frontier')) throw new Error('spec-review: no Astra frontier result (lane and critic fallback both failed)')
 
-  // Falsifier wave: unconditional, one per CRITICAL/MAJOR, in waves of 6.
+  // Merge before falsify: one merger clusters the CRITICAL/MAJOR lane findings that describe the
+  // same defect into F-N units; run_dir.py rejects any id left out or placed twice.
+  let mc = await py('Synthesize', 'merge-check', `--lanes ${sq(ok.join(','))}`, true)
+  const idList = (mc.ids || []).map((f) => `  - ${f.id} [${f.lane}, ${f.severity}] ${f.title}${f.cites ? ' (cites ' + f.cites.join(', ') + ')' : ''}`).join('\n')
+  const mergePrompt = [
+    'ROLE: finding-merger',
+    `Cluster the ${mc.totalIds} CRITICAL/MAJOR findings below into units, one unit per distinct underlying defect. Findings from different lanes that describe the same mechanism, boundary or missing guarantee belong together even when worded differently; findings that merely touch the same file but describe different defects stay apart. A single-member unit is fine.`,
+    `Read the full findings where a title is ambiguous: Claude lanes in ${RUN}/lanes/<lane>.md, Codex lanes in ${RUN}/codex/<lane>.out.md (find each by its id). Do not judge whether a finding is true; that is the falsifiers' job.`,
+    `Findings:\n${idList}`,
+    `Write ${RUN}/merged.raw.json: a JSON list of {"title": "<one line naming the defect>", "seam": "<the component/file/contract it lives in>", "members": [<original ids>], "cites": ["<path:line>", ...]}. EVERY id above must appear in exactly one unit's members. Reply via StructuredOutput with the number of units.`,
+    'You are a leaf agent: spawn no sub-agents or Workflows.',
+  ].join('\n')
+  const MERGED = { type: 'object', properties: { units: { type: 'number' } }, required: ['units'] }
+  for (let attempt = 0; attempt < 2 && !mc.ok; attempt++) {
+    const repair = attempt ? `\nYOUR PREVIOUS merged.raw.json FAILED VALIDATION, fix exactly these: ${(mc.errors || []).join('; ')}` : ''
+    await agent(mergePrompt + repair, { label: `finding-merger${attempt ? ':repair' : ''}`, phase: 'Synthesize', agentType: 'general-purpose', model: 'sonnet', schema: MERGED })
+    mc = await py('Synthesize', 'merge-check', `--lanes ${sq(ok.join(','))}`, true)
+  }
+  if (!mc.ok) throw new Error(`spec-review: finding merge failed validation: ${(mc.errors || []).join('; ')}`)
+  note(`merge: ${mc.totalIds} CRITICAL/MAJOR ids -> ${mc.clusters} F-N units`)
+
+  // Falsifier wave: unconditional, one verdict per F-N unit, units batched by seam.
   const fp = await py('Synthesize', 'falsify-plan', `--spec ${sq(SPEC)} --lanes ${sq(ok.join(','))} --max-batches ${A.maxFalsifierBatches || 6}`)
   const total = fp.totalIds
-  if (fp.plan.reduce((n, b) => n + b.ids.length, 0) !== total) throw new Error('spec-review: falsifier plan does not cover every id')
-  note(`falsifier plan: ${total} ids in ${fp.plan.length} batches`)
+  if (fp.plan.reduce((n, b) => n + b.ids.length, 0) !== fp.totalUnits) throw new Error('spec-review: falsifier plan does not cover every unit')
+  note(`falsifier plan: ${fp.totalUnits} units (${total} ids) in ${fp.plan.length} batches`)
   const runF = (b) => agent(`ROLE: finding-falsifier\n${laneBrief(b.prompt)}`,
     { label: `falsify:batch-${b.batch}`, phase: 'Synthesize', agentType: 'general-purpose', model: 'sonnet', schema: FALSIFIER_BATCH })
   await parallel(fp.plan.map((b) => () => runF(b)))
@@ -307,7 +329,7 @@ async function synthesize() {
     if (sum.missingVerdicts.length) throw new Error(`spec-review: falsifier verdict missing for ${sum.missingVerdicts.join(', ')}`)
   }
   if (sum.falsifierDispatched !== total) throw new Error(`spec-review: verdicts-per-id mismatch (${sum.falsifierDispatched} ids with verdicts vs ${total})`)
-  note(`falsifier wave: ${total} ids in ${fp.plan.length} batches, ${sum.refuted} REFUTED`)
+  note(`falsifier wave: ${fp.totalUnits} units (${total} ids) in ${fp.plan.length} batches, ${sum.refuted} ids REFUTED`)
   if (sum.hardStop) note('ADR HARD STOP surfaced in report.md')
 
   // Manifest: every planned lane is listed as run, FAILED, or SKIPPED (gate: ...).
@@ -324,7 +346,7 @@ async function synthesize() {
     'ROLE: synthesis-writer',
     `You write the final spec-review report. Write it to ${RUN}/report.md following the template ${SKILL}/report-template.md exactly (section order, one canonical Falsifier wave line, F-N ids assigned once). Do not read the spec's design discussion; read evidence only.`,
     `Spec: ${SPEC}. Profile: ${PROFILE}. Run dir: ${RUN}. Investigation brief: ${A.investigationBrief || 'none (no investigation Workflow ran)'}.`,
-    `Inputs: every ${RUN}/envelopes/*.json (ids + severities per lane); full findings in ${RUN}/lanes/*.md and ${RUN}/codex/*.out.md; falsifier verdicts in ${RUN}/falsifiers/*.json (+ .md reasoning); ground truth in ${RUN}/dossier.md and ${RUN}/decisions.json; LEARNINGS paths (read the parts that apply; never edit): ${RUN}/inputs/learnings.txt lists them.`,
+    `Inputs: every ${RUN}/envelopes/*.json (ids + severities per lane); full findings in ${RUN}/lanes/*.md and ${RUN}/codex/*.out.md; the merged units in ${RUN}/merged.json (use its F-N ids and member lists as the report's F-N ids); falsifier verdicts per F-N in ${RUN}/falsifiers/F-*.json (+ batch-*.md reasoning; a unit's verdict is every member's verdict); ground truth in ${RUN}/dossier.md and ${RUN}/decisions.json; LEARNINGS paths (read the parts that apply; never edit): ${RUN}/inputs/learnings.txt lists them.`,
     'Hard rules the pipeline checks mechanically after you finish:',
     `- EVERY CRITICAL/MAJOR id in ANY envelope appears in report.md, each on a line carrying its verdict word (REFUTED or SURVIVES from its falsifier verdict; SURVIVES-BUT-FIX-REJECTED and NEEDS-LIVE-EVIDENCE count as SURVIVES with the note). Keep each lane's own ids (EC-N, Sec-N, Obs-N, LE-N, DRIFT-N, COMP-N ...). Consensus / Codex-only / Claude-only entries get an F-N id AND list the lane ids they merge.`,
     `- The falsifier line is exactly: ### Falsifier wave: ${falsLine}`,

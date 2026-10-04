@@ -167,59 +167,95 @@ class EnvelopeAndReportTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertEqual(len(out["invalid"]), 2)
 
-    def test_falsify_plan_covers_every_critical_major_only(self):
+    def _merge(self, run, clusters, lanes):
+        (run / "merged.raw.json").write_text(json.dumps(clusters))
+        return call("merge-check", "--run", str(run), "--lanes", lanes)
+
+    def test_merge_check_lists_ids_when_merger_has_not_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             run = make_run(tmp)
             envelope(run, "edge-case-miner", [("EC-1", "CRITICAL"), ("EC-2", "MINOR")], ["Q1"])
-            envelope(run, "codex-research", [("ELV-1", "ELEVATE")], [])
+            rc, out = call("merge-check", "--run", str(run), "--lanes", "edge-case-miner")
+            self.assertEqual(rc, 1)
+            self.assertEqual([f["id"] for f in out["ids"]], ["EC-1"])
+
+    def test_merge_check_rejects_gaps_and_double_membership(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = make_run(tmp)
+            envelope(run, "edge-case-miner", [("EC-1", "CRITICAL"), ("EC-2", "MAJOR")], ["Q1"])
             envelope(run, "codex-frontier", [("AST-1", "MAJOR")], [])
-            rc, out = call("falsify-plan", "--run", str(run), "--spec", "s.md", "--lanes", "edge-case-miner,codex-research,codex-frontier")
+            rc, out = self._merge(run, [{"members": ["EC-1", "AST-1"]}, {"members": ["AST-1"]}], "edge-case-miner,codex-frontier")
+            self.assertEqual(rc, 1)
+            text = " ".join(out["errors"])
+            self.assertIn("AST-1 is already in F-1", text)
+            self.assertIn("EC-2", text)
+            self.assertFalse((run / "merged.json").exists())
+
+    def test_falsify_plan_batches_units_and_verdicts_fan_out(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = make_run(tmp)
+            envelope(run, "edge-case-miner", [("EC-1", "MAJOR"), ("EC-2", "MINOR")], ["Q1"])
+            envelope(run, "codex-research", [("ELV-1", "ELEVATE")], [])
+            envelope(run, "codex-frontier", [("AST-1", "CRITICAL"), ("AST-2", "MAJOR")], [])
+            lanes = "edge-case-miner,codex-research,codex-frontier"
+            rc, out = self._merge(run, [{"title": "same defect", "seam": "schema-apply.ts", "members": ["EC-1", "AST-1"]}, {"members": ["AST-2"]}], lanes)
             self.assertEqual(rc, 0, out)
-            self.assertEqual(sorted(i for b in out["plan"] for i in b["ids"]), ["AST-1", "EC-1"])
+            self.assertEqual((out["totalIds"], out["clusters"]), (3, 2))
+            units = json.loads((run / "merged.json").read_text())["units"]
+            self.assertEqual(units[0]["severity"], "CRITICAL")
+            rc, out = call("falsify-plan", "--run", str(run), "--spec", "s.md", "--lanes", lanes)
+            self.assertEqual(rc, 0, out)
+            self.assertEqual((out["totalUnits"], out["totalIds"]), (2, 3))
+            self.assertEqual(sorted(i for b in out["plan"] for i in b["ids"]), ["F-1", "F-2"])
             texts = [Path(b["prompt"]).read_text() for b in out["plan"]]
             for text in texts:
                 self.assertTrue(text.startswith("ROLE: finding-falsifier\n"))
                 self.assertEqual(run_dir.find_placeholders(text), [])
-            self.assertTrue(any("EC-1" in x for x in texts))
+            self.assertTrue(any("EC-1 in" in x and "AST-1 in" in x for x in texts))
+            (run / "falsifiers").mkdir(exist_ok=True)
+            (run / "falsifiers" / "F-1.json").write_text(json.dumps({"id": "F-1", "verdict": "REFUTED", "evidence": "x"}))
+            rc, out = call("summary", "--run", str(run), "--lanes", lanes)
+            self.assertEqual(out["missingVerdicts"], ["F-2"])
+            self.assertEqual((out["falsifierDispatched"], out["refuted"]), (2, 2))
+
+    def test_falsify_plan_requires_merge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = make_run(tmp)
+            envelope(run, "edge-case-miner", [("EC-1", "CRITICAL")], [])
+            rc, out = call("falsify-plan", "--run", str(run), "--spec", "s.md", "--lanes", "edge-case-miner")
+            self.assertEqual(rc, 1)
+            self.assertIn("merge-check", out["errors"][0])
 
     def test_dry_plan_writes_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             run = make_run(tmp)
             envelope(run, "edge-case-miner", [("EC-1", "CRITICAL")], [])
+            self._merge(run, [{"members": ["EC-1"]}], "edge-case-miner")
             rc, out = call("falsify-plan", "--run", str(run), "--spec", "s.md", "--lanes", "edge-case-miner", "--dry")
             self.assertEqual(rc, 0)
             self.assertEqual(list((run / "prompts").glob("falsifier-*")), [])
 
 
 class BatchingTests(unittest.TestCase):
-    def F(self, i, title, lane="x"):
-        return {"id": i, "lane": lane, "severity": "MAJOR", "title": title}
+    def U(self, i, seam=""):
+        return {"id": i, "severity": "MAJOR", "title": "t", "seam": seam, "members": [i], "cites": []}
 
-    def test_near_duplicates_cluster_across_lanes_and_keep_every_id(self):
-        fs = [self.F("A-1", "Install write-back is a second writer of schema.json under ADR-0088 D2", "arch"),
-              self.F("B-1", "Install write-back makes a second writer of schema.json straying from ADR-0088", "adr"),
-              self.F("C-1", "Retry of the webhook dedup key double-writes the ledger row", "sec")]
-        clusters = run_dir.cluster_findings(fs)
-        sets = sorted(sorted(c["ids"]) for c in clusters)
-        self.assertEqual(sets, [["A-1", "B-1"], ["C-1"]])
-
-    def test_batches_capped_cover_each_id_once(self):
-        fs = [self.F(f"F-{i}", f"distinct topic number {i} alpha{i} beta{i} gamma{i}") for i in range(68)]
-        batches = run_dir.plan_batches(fs, 6)
+    def test_batches_capped_cover_each_unit_once(self):
+        units = [self.U(f"F-{i}", f"seam{i % 9}") for i in range(40)]
+        batches = run_dir.plan_batches(units, 6)
         self.assertLessEqual(len(batches), 6)
         flat = [i for b in batches for i in b["ids"]]
-        self.assertEqual(sorted(flat), sorted(f["id"] for f in fs))
+        self.assertEqual(sorted(flat), sorted(u["id"] for u in units))
         self.assertEqual(len(flat), len(set(flat)))
 
-    def test_small_set_and_duplicate_merge_in_one_batch(self):
-        fs = [self.F("A-1", "second writer of schema.json under ADR-0088 install"), self.F("B-1", "install second writer of schema.json under ADR-0088")]
-        batches = run_dir.plan_batches(fs, 6)
-        self.assertEqual(len(batches), 1)
-        self.assertEqual(batches[0]["clusters"], [["A-1", "B-1"]])
+    def test_same_seam_stays_together_while_it_fits(self):
+        units = [self.U("F-1", "schema.json"), self.U("F-2", "schema.json"), self.U("F-3", "other")]
+        batches = run_dir.plan_batches(units, 6)
+        self.assertIn(["F-1", "F-2"], [sorted(b["ids"])[:2] for b in batches if "F-1" in b["ids"]])
 
     def test_max_batches_must_be_positive(self):
         with self.assertRaises(run_dir.StageError):
-            run_dir.plan_batches([self.F("A-1", "t")], 0)
+            run_dir.plan_batches([self.U("F-1")], 0)
 
 
     def _report(self, extra=""):

@@ -194,7 +194,7 @@ def run_contract(run, entry, questions, label=None, ids_note=None):
 - Delivery:
   1. Write your COMPLETE output, in the format your brief above specifies, to {run}/lanes/{label}.md.
   2. Write {run}/envelopes/{label}.json: {{"lane": "{label}", "verdict": "<one word or ''>",
-     "answered_questions": ["Q1", ...], "findings": [{{"id": "...", "severity": "CRITICAL|MAJOR|MINOR", "title": "<one line>"}}]}}.
+     "answered_questions": ["Q1", ...], "findings": [{{"id": "...", "severity": "CRITICAL|MAJOR|MINOR", "title": "<one line>", "cites": ["<path:line>", ...]}}]}}.
      One entry per finding in your file -- including every CRITICAL and MAJOR. {ids_note}
   3. Your final reply is that same envelope via StructuredOutput (ids, severities, one-line titles; no finding bodies).
 """
@@ -487,74 +487,88 @@ def all_critical_major(run, labels):
     return out
 
 
-STOP = set("the a an and or of to in on for with is are be by at as it its this that not no from into than then when what which does do did has have had can will would should must may via per vs all any each only one two new old own more less over under".split())
-STRONG_RE = re.compile(r"^(?:[a-z]+-\d+|[\w.-]*[_/][\w./-]*|[\w-]+\.[a-z]{1,4})$", re.I)
+SEV_RANK = {"CRITICAL": 2, "MAJOR": 1}
 
 
-def title_tokens(title):
-    toks = [t.strip(".,;:()[]'\"`") for t in re.split(r"\s+", title.lower())]
-    toks = [t for t in toks if len(t) >= 3 and t not in STOP]
-    return set(toks), {t for t in toks if STRONG_RE.match(t)}
+def finding_index(findings):
+    """Compact id list handed to the finding-merger (ids, lanes, severities, titles)."""
+    return [{"id": f["id"], "lane": f["lane"], "severity": f["severity"], "title": f["title"],
+             **({"cites": f["cites"]} if f.get("cites") else {})} for f in findings]
 
 
-def cluster_findings(findings):
-    """Union near-duplicate findings across lanes (overlapping title tokens or shared
-    identifiers/paths). Every original id stays in its cluster -- nothing is dropped."""
-    toks = [title_tokens(f["title"]) for f in findings]
-    parent = list(range(len(findings)))
+def validate_merged(merged, findings):
+    """Normalize the merger's clusters into F-1..F-N units. Every CRITICAL/MAJOR id must be a
+    member of exactly one cluster; severity is the max of the members'. Returns (units, errors)."""
+    want = {f["id"]: f for f in findings}
+    if not isinstance(merged, list) or not merged:
+        return [], ["merged.json must be a non-empty JSON list of clusters"]
+    seen, units, errors = {}, [], []
+    for n, c in enumerate(merged, 1):
+        uid = f"F-{n}"
+        members = c.get("members") if isinstance(c, dict) else None
+        if not isinstance(members, list) or not members:
+            errors.append(f"{uid}: members must be a non-empty list of envelope ids")
+            continue
+        valid = []
+        for m in members:
+            m = str(m)
+            if m not in want:
+                errors.append(f"{uid}: member {m} is not a CRITICAL/MAJOR envelope id")
+            elif m in seen:
+                errors.append(f"{uid}: member {m} is already in {seen[m]}")
+            else:
+                seen[m] = uid
+                valid.append(m)
+        if not valid:
+            continue
+        units.append({"id": uid,
+                      "severity": max((want[m]["severity"] for m in valid), key=SEV_RANK.get),
+                      "title": str(c.get("title") or want[valid[0]]["title"]),
+                      "seam": str(c.get("seam") or ""),
+                      "members": valid,
+                      "cites": [str(x) for x in (c.get("cites") or [])]})
+    missing = [i for i in want if i not in seen]
+    if missing:
+        errors.append(f"CRITICAL/MAJOR ids in no cluster: {missing}")
+    return units, errors
 
-    def find(i):
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
 
-    for i in range(len(findings)):
-        for j in range(i + 1, len(findings)):
-            (ai, si), (aj, sj) = toks[i], toks[j]
-            union = len(ai | aj) or 1
-            jac = len(ai & aj) / union
-            if jac >= 0.5 or (len(si & sj) >= 3 and jac >= 0.25):
-                parent[find(j)] = find(i)
-    groups = {}
-    for i, f in enumerate(findings):
-        groups.setdefault(find(i), []).append(i)
-    clusters = []
-    for idxs in groups.values():
-        members = [findings[i] for i in idxs]
-        counts = {}
-        for i in idxs:
-            for t in toks[i][1]:
-                counts[t] = counts.get(t, 0) + 1
-        paths = sorted(((c, t) for t, c in counts.items() if "/" in t or re.search(r"\.[a-z]{1,4}$", t)), reverse=True)
-        strong = sorted(((c, t) for t, c in counts.items()), reverse=True)
-        seam = (paths or strong or [(0, members[0]["lane"])])[0][1]
-        clusters.append({"seam": seam, "ids": [m["id"] for m in members], "members": members})
-    clusters.sort(key=lambda c: (-len(c["ids"]), c["ids"][0]))
-    return clusters
+def load_units(run):
+    data = read_json(Path(run) / "merged.json")
+    return data.get("units") if isinstance(data, dict) else None
 
 
-def plan_batches(findings, max_batches=6):
-    """Pack clusters into <= max_batches batches, keeping a seam together while it fits.
-    Every id lands in exactly one batch."""
+def plan_batches(units, max_batches=6):
+    """Pack merged units into <= max_batches batches, keeping a seam together while it fits.
+    Every unit lands in exactly one batch."""
     if max_batches < 1:
         raise StageError("max-batches must be >= 1")
-    clusters = cluster_findings(findings)
-    total = sum(len(c["ids"]) for c in clusters)
-    cap = -(-total // max_batches)
-    batches = [{"ids": [], "clusters": [], "seams": []} for _ in range(max_batches)]
-    for c in clusters:
-        home = next((b for b in batches if c["seam"] in b["seams"] and len(b["ids"]) + len(c["ids"]) <= cap * 3 // 2), None)
+    cap = -(-len(units) // max_batches) if units else 0
+    batches = [{"ids": [], "seams": []} for _ in range(max_batches)]
+    for u in sorted(units, key=lambda u: (u["seam"], u["id"])):
+        home = next((b for b in batches if u["seam"] and u["seam"] in b["seams"] and len(b["ids"]) < max(2, cap * 3 // 2)), None)
         target = home or min(batches, key=lambda b: (len(b["ids"]), batches.index(b)))
-        target["ids"] += c["ids"]
-        target["clusters"].append(c["ids"])
-        if c["seam"] not in target["seams"]:
-            target["seams"].append(c["seam"])
+        target["ids"].append(u["id"])
+        if u["seam"] and u["seam"] not in target["seams"]:
+            target["seams"].append(u["seam"])
     out = [b for b in batches if b["ids"]]
     flat = [i for b in out for i in b["ids"]]
-    if sorted(flat) != sorted(f["id"] for f in findings):
-        raise StageError("batch plan does not cover every id exactly once")
+    if sorted(flat) != sorted(u["id"] for u in units):
+        raise StageError("batch plan does not cover every unit exactly once")
     return out
+
+
+def cmd_merge_check(a):
+    run = Path(a.run)
+    findings = all_critical_major(run, expand_labels(run, csv(a.lanes)))
+    raw = read_json(run / "merged.raw.json")
+    if raw is None:
+        return emit({"ok": False, "errors": ["merged.raw.json missing"], "totalIds": len(findings), "ids": finding_index(findings)}, False)
+    units, errors = validate_merged(raw, findings)
+    if errors:
+        return emit({"ok": False, "errors": errors, "totalIds": len(findings)}, False)
+    write(run / "merged.json", json.dumps({"units": units}, indent=1))
+    return emit({"ok": True, "totalIds": len(findings), "clusters": len(units)})
 
 
 def cmd_falsify_plan(a):
@@ -567,29 +581,33 @@ def cmd_falsify_plan(a):
     role_line(tpl, "finding-falsifier")
     body = extract_body(tpl)
     findings = all_critical_major(run, csv(a.lanes))
-    batches = plan_batches(findings, int(a.max_batches or 6))
-    by_id = {f["id"]: f for f in findings}
+    units = load_units(run)
+    if units is None:
+        raise StageError("merged.json missing: run merge-check before falsify-plan")
+    lane_of = {f["id"]: f["lane"] for f in findings}
+    by_unit = {u["id"]: u for u in units}
+    batches = plan_batches(units, int(a.max_batches or 6))
     plan, errors = [], []
     for n, b in enumerate(batches, 1):
-        items = "\n".join(
-            f"    - {i} [{by_id[i]['lane']}, {by_id[i]['severity']}] {by_id[i]['title']}  (full finding: {lane_file(manifest, run, by_id[i]['lane'])}, find it by its id)"
-            for i in b["ids"])
-        dupes = "\n".join("    - " + ", ".join(c) for c in b["clusters"] if len(c) > 1) or "    (none)"
+        items = []
+        for uid in b["ids"]:
+            u = by_unit[uid]
+            where = "; ".join(f"{m} in {lane_file(manifest, run, lane_of[m])}" for m in u["members"])
+            cites = f" cites: {', '.join(u['cites'])}." if u["cites"] else ""
+            items.append(f"    - {uid} [{u['severity']}] {u['title']}  (merges {where}.{cites})")
         values = {"LANE": "several -- see the batch list", "SEVERITY": "per item below",
-                  "FINDING_TEXT": f"a BATCH of {len(b['ids'])} findings, each judged separately:\n{items}",
-                  "CITED_EVIDENCE": "as cited in each finding inside its lane file",
-                  "PROPOSED_FIX": "as proposed in each finding inside its lane file",
+                  "FINDING_TEXT": f"a BATCH of {len(b['ids'])} merged findings, each judged separately:\n" + "\n".join(items),
+                  "CITED_EVIDENCE": "as cited in each member finding inside its lane file",
+                  "PROPOSED_FIX": "as proposed in each member finding inside its lane file",
                   "SPEC_PATH": a.spec, "PROJECT_ROOT": root}
         text = "ROLE: finding-falsifier\n" + fill(body, values) + f"""
 
 ## Run contract (added by the pipeline script -- binding)
-- This is batch {n} of {len(batches)}: {len(b['ids'])} findings grouped by seam. Try to defeat EACH id separately and give EACH its own verdict; never merge or skip an id.
-  Near-duplicate clusters inside the batch (same seam; you may share evidence, not verdicts):
-{dupes}
-- Read ONLY the listed findings in their lane files, never another lane's output.
-- Write your full reasoning to {run}/falsifiers/batch-{n}.md, and ONE file per id, {run}/falsifiers/<id with any char outside A-Za-z0-9_.- replaced by _>.json:
-  {{"id": "<id>", "verdict": "REFUTED|SURVIVES|SURVIVES-BUT-FIX-REJECTED|NEEDS-LIVE-EVIDENCE", "evidence": "<one line>"}}.
-- Final reply: {{"verdicts": [that object for every id in the batch]}} via StructuredOutput. You are a leaf agent -- spawn no sub-agents or Workflows.
+- This is batch {n} of {len(batches)}: {len(b['ids'])} merged findings (F-N), grouped by seam. Each F-N merges one or more lane findings that describe the same defect. Try to defeat EACH F-N separately and give EACH its own verdict; never skip one.
+- Read ONLY the member findings named above in their lane files, never another lane's output.
+- Write your full reasoning to {run}/falsifiers/batch-{n}.md, and ONE file per F-N, {run}/falsifiers/<F-N>.json:
+  {{"id": "<F-N>", "verdict": "REFUTED|SURVIVES|SURVIVES-BUT-FIX-REJECTED|NEEDS-LIVE-EVIDENCE", "evidence": "<one line>"}}.
+- Final reply: {{"verdicts": [that object for every F-N in the batch]}} via StructuredOutput. You are a leaf agent -- spawn no sub-agents or Workflows.
 """
         left = find_placeholders(text)
         if left:
@@ -597,27 +615,29 @@ def cmd_falsify_plan(a):
         path = run / "prompts" / f"falsifier-batch-{n}.md"
         if not a.dry:
             write(path, text)
-        plan.append({"batch": n, "ids": b["ids"], "clusters": b["clusters"], "seams": b["seams"], "prompt": str(path)})
+        plan.append({"batch": n, "ids": b["ids"], "seams": b["seams"], "prompt": str(path)})
     if errors:
         return emit({"ok": False, "errors": errors}, False)
-    return emit({"ok": True, "totalIds": len(findings), "plan": plan})
+    return emit({"ok": True, "totalUnits": len(units), "totalIds": len(findings), "plan": plan})
 
 
 def falsifier_counts(run, expected_ids):
+    """Verdict per original id, read from its merged unit's verdict file (F-N fans out to members)."""
+    unit_of = {m: u["id"] for u in (load_units(run) or []) for m in u["members"]}
     verdicts = {}
     for i in expected_ids:
-        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", i)
-        v = read_json(Path(run) / "falsifiers" / f"{safe}.json")
+        uid = unit_of.get(i, i)
+        v = read_json(Path(run) / "falsifiers" / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', uid)}.json")
         verdicts[i] = (v or {}).get("verdict", "MISSING")
     refuted = sum(1 for v in verdicts.values() if v == "REFUTED")
-    return verdicts, refuted
+    return verdicts, refuted, unit_of
 
 
 def cmd_summary(a):
     run = Path(a.run)
     labels = expand_labels(run, csv(a.lanes))
     cm = all_critical_major(run, labels)
-    verdicts, refuted = falsifier_counts(run, [f["id"] for f in cm])
+    verdicts, refuted, unit_of = falsifier_counts(run, [f["id"] for f in cm])
     raw = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0}
     surviving = {"CRITICAL": 0, "MAJOR": 0}
     for label in labels:
@@ -633,7 +653,7 @@ def cmd_summary(a):
     if adr is not None:
         data = read_json(Path(run) / "envelopes" / "adr-auditor.json", {})
         hard = bool(data.get("founder_approval_needed")) and not bool(data.get("founder_approval_marker_present"))
-    missing = [i for i, v in verdicts.items() if v == "MISSING"]
+    missing = sorted({unit_of.get(i, i) for i, v in verdicts.items() if v == "MISSING"})
     return emit({"ok": True, "raw": raw, "surviving": surviving, "falsifierDispatched": sum(1 for v in verdicts.values() if v != "MISSING"),
                  "refuted": refuted, "missingVerdicts": missing, "hardStop": hard})
 
@@ -670,7 +690,7 @@ def cmd_check_report(a):
     frontier = [l for l in ("codex-frontier", "critic-frontier") if (run / "envelopes" / f"{l}.json").is_file()]
     if not frontier:
         errors.append("Astra frontier lane: neither codex-frontier nor critic-frontier produced an envelope")
-    verdicts, refuted = falsifier_counts(run, [f["id"] for f in cm])
+    verdicts, refuted, _ = falsifier_counts(run, [f["id"] for f in cm])
     n, m = len(cm), len(cm)
     line = f"{n} dispatched over {m} CRITICAL/MAJOR"
     if not re.search(re.escape(line) + r"[^\n]*?\b" + str(refuted) + r"\s+REFUTED,\s*" + str(n - refuted) + r"\s+SURVIVES", text, re.I):
@@ -700,6 +720,7 @@ def main(argv=None):
     add("check-envelopes", cmd_check_envelopes, "lanes", "codex")
     add("codex-status", cmd_codex_status)
     add("drift-briefs", cmd_drift_briefs, "spec")
+    add("merge-check", cmd_merge_check, "lanes")
     p = add("falsify-plan", cmd_falsify_plan, "lanes", "spec", "max-batches")
     p.add_argument("--dry", action="store_true", help="print the plan without writing prompts")
     add("summary", cmd_summary, "lanes")
