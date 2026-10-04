@@ -99,16 +99,33 @@ const FALSIFIER_BATCH = { type: 'object', properties: { verdicts: { type: 'array
 const gateLog = []
 const note = (s) => { gateLog.push(s); log(s) }
 
-// Run one run_dir.py subcommand through a haiku script-runner and parse its JSON.
+// EXTRACT:BEGIN
+function lastJsonObject(text) {
+  const lines = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean)
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].startsWith('{')) continue
+    try { const j = JSON.parse(lines[i]); if (j && typeof j === 'object' && !Array.isArray(j)) return j } catch (e) { /* keep scanning upward */ }
+  }
+  return null
+}
+// EXTRACT:END
+
+// Run one run_dir.py subcommand through a script-runner and parse its JSON. The relayed stdout
+// can be mangled by a cheap model, so parse the LAST JSON-object line, retry once on sonnet, then throw.
 // soft=true returns the parsed object even when ok is false (the caller decides).
 async function py(phaseName, sub, flags, soft) {
   const cmd = `python3 ${sq(SKILL + '/scripts/run_dir.py')} ${sub} --run ${sq(RUN)} ${flags || ''}`
-  const r = await agent(
-    `ROLE: script-runner\nRun exactly this one command with the Bash tool and do nothing else. Return its exit code and its complete stdout, unmodified, via StructuredOutput.\n\n${cmd}`,
-    { label: `py:${sub}`, phase: phaseName, model: 'haiku', schema: PYOUT })
-  if (!r) throw new Error(`spec-review: script-runner for '${sub}' returned nothing`)
-  let j
-  try { j = JSON.parse(r.stdout) } catch { throw new Error(`spec-review: '${sub}' printed non-JSON (exit ${r.exit_code}): ${String(r.stdout).slice(0, 300)}`) }
+  let j = null
+  let last = ''
+  for (const model of ['haiku', 'sonnet']) {
+    const r = await agent(
+      `ROLE: script-runner\nRun exactly this one command with the Bash tool and do nothing else. Put the command's stdout in the stdout field BYTE FOR BYTE (it is JSON on one line: never summarize, reinterpret, shorten or replace it with a field from it) and its exit code in exit_code.\n\n${cmd}`,
+      { label: `py:${sub}`, phase: phaseName, model, schema: PYOUT })
+    last = r ? String(r.stdout).slice(0, 300) : '(no result)'
+    j = r ? lastJsonObject(r.stdout) : null
+    if (j) break
+  }
+  if (!j) throw new Error(`spec-review: '${sub}' printed no JSON object after a sonnet retry: ${last}`)
   if (!j.ok && !soft) throw new Error(`spec-review: '${sub}' failed: ${(j.errors || []).join('; ') || JSON.stringify(j).slice(0, 300)}`)
   return j
 }
@@ -165,8 +182,8 @@ async function prepare() {
   ].join('\n')
   const r = await agent(initPrompt, { label: 'py:init', phase: 'Prepare', model: 'haiku', schema: PYOUT })
   if (!r) throw new Error('spec-review: init agent returned nothing')
-  let init
-  try { init = JSON.parse(r.stdout) } catch { throw new Error(`spec-review: init printed non-JSON: ${String(r.stdout).slice(0, 300)}`) }
+  const init = lastJsonObject(r.stdout)
+  if (!init) throw new Error(`spec-review: init printed no JSON object: ${String(r.stdout).slice(0, 300)}`)
   if (!init.ok) throw new Error(`spec-review: init failed: ${(init.errors || []).join('; ')}`)
   note(`decisions mining: ${init.decisionsNote}`)
 

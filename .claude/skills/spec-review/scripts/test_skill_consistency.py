@@ -118,6 +118,24 @@ class ScriptSyntaxTests(unittest.TestCase):
         r = subprocess.run([node, "--check", str(tmp)], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_py_relay_json_extraction(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not installed")
+        src = WORKFLOW_JS.read_text()
+        block = src.split("// EXTRACT:BEGIN")[1].split("// EXTRACT:END")[0]
+        probe = block + """
+const eq = (a, b) => { if (JSON.stringify(a) !== JSON.stringify(b)) { console.log('FAIL', JSON.stringify(a), JSON.stringify(b)); process.exit(1) } }
+eq(lastJsonObject('{"ok":true,"n":1}'), {ok: true, n: 1})
+eq(lastJsonObject('noise\\n{"ok":false}\\n{"ok":true}\\n'), {ok: true})
+eq(lastJsonObject('102 dispatched over 102 CRITICAL/MAJOR'), null)
+eq(lastJsonObject('{"ok":true}\\ntrailing prose'), {ok: true})
+eq(lastJsonObject('[1,2]'), null)
+eq(lastJsonObject(''), null)
+"""
+        r = subprocess.run([node, "-e", probe], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
     def test_shell_wrapper_parses(self):
         r = subprocess.run(["bash", "-n", str(HERE / "run-codex-lanes.sh")], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
