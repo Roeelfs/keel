@@ -3,8 +3,8 @@ ROLE: architecture-auditor
 
 Checks whether the spec fits the product's architecture, uses the right abstractions, and isn't over-engineered. The "does this belong here and is it proportionate?" check.
 
-**Agent type:** `general-purpose` (Opus, read-only)
-**Model:** `opus`
+**Agent type:** `codex-dispatch` (moved off the Claude window 2026-10-04: a read-only repo review; its own lane cost 3.7-5.9M Claude context tokens per run)
+**Model:** `gpt-6-sol`
 
 ```
 description: "Audit spec for architectural fit and simplicity"

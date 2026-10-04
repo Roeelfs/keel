@@ -102,7 +102,7 @@ class LanesCommandTests(unittest.TestCase):
             run = make_run(tmp)
             rc, out = call("lanes", "--run", str(run), "--spec", "docs/specs/x.md", "--lanes", self.FULL)
             self.assertEqual(rc, 0, out)
-            self.assertEqual(sorted(out["codex"]), ["codex-adversarial", "codex-frontier", "codex-research", "codex-standard"])
+            self.assertEqual(sorted(out["codex"]), ["architecture-auditor", "codebase-verifier", "codex-adversarial", "codex-frontier", "codex-research", "codex-standard"])
             for label in out["claude"]:
                 text = (run / "prompts" / f"{label}.md").read_text()
                 self.assertTrue(text.startswith(f"ROLE: {label}\n"), label)
@@ -114,7 +114,11 @@ class LanesCommandTests(unittest.TestCase):
                 self.assertTrue(text.startswith(f"ROLE: {label}\n"))
                 self.assertEqual(run_dir.find_placeholders(text), [])
             tsv = (run / "codex" / "plan.tsv").read_text().splitlines()
-            self.assertEqual(len(tsv), 4)
+            self.assertEqual(len(tsv), 6)
+            for moved in ("codebase-verifier", "architecture-auditor"):
+                t = (run / "codex" / f"{moved}.prompt.md").read_text()
+                self.assertIn("You run as a Codex lane", t, moved)
+                self.assertIn("FINAL MESSAGE is the complete deliverable", t, moved)
             assigned = {q for qs in out["assignments"].values() for q in qs}
             self.assertEqual(assigned, {"Q1", "Q2", "Q3", "Q4"}, "every question is owned by some lane")
             self.assertIn("Q4", out["assignments"]["codex-frontier"])
@@ -217,6 +221,10 @@ class EnvelopeAndReportTests(unittest.TestCase):
             rc, out = call("summary", "--run", str(run), "--lanes", lanes)
             self.assertEqual(out["missingVerdicts"], ["F-2"])
             self.assertEqual((out["falsifierDispatched"], out["refuted"]), (2, 2))
+            (run / "falsifiers" / "F-2.json").write_text(json.dumps({"id": "F-2", "verdict": "SURVIVES", "evidence": "x"}))
+            (run / "falsifiers" / "AST-1.json").write_text(json.dumps({"id": "AST-1", "verdict": "SURVIVES", "evidence": "member differs"}))
+            rc, out = call("summary", "--run", str(run), "--lanes", lanes)
+            self.assertEqual((out["missingVerdicts"], out["refuted"]), ([], 1), "member override beats its unit verdict")
 
     def test_falsify_plan_requires_merge(self):
         with tempfile.TemporaryDirectory() as tmp:

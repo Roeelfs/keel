@@ -203,6 +203,33 @@ def run_contract(run, entry, questions, label=None, ids_note=None):
 # --------------------------------------------------------------------------
 # questions
 # --------------------------------------------------------------------------
+def lane_values(run, spec, root):
+    """Placeholder values every lane brief may use, whichever runtime executes it."""
+    return {
+        "SPEC_PATH": spec, "PROJECT_ROOT": root,
+        "DOSSIER_CONTENT": f"(shared file -- read {run}/dossier.md in full; design decisions in {run}/decisions.json if present)",
+        "CONTEXT_BLOCK": (Path(run) / "inputs" / "context.md").read_text(encoding="utf-8").strip(),
+        "GOAL": f"see the Goal line of {run}/inputs/context.md", "TRIGGER": f"see the Trigger line of {run}/inputs/context.md",
+        "TARGET_OUTCOME": f"see the Target outcome line of {run}/inputs/context.md",
+        "OUT_OF_SCOPE": f"see the Scope boundaries line of {run}/inputs/context.md",
+    }
+
+
+def codex_contract(run, entry, questions, spec):
+    """Delivery contract for a brief authored for a Claude lane but executed by Codex: Codex
+    cannot write the run dir, so its final message is the deliverable and an extractor builds
+    the envelope from it."""
+    qlines = "\n".join(f"  - {q['id']}: {q['text']}" for q in questions) or "  (none assigned)"
+    return f"""
+## Run contract (added by the pipeline script -- binding; it overrides any delivery or tool instructions above)
+- You run as a Codex lane, read-only. Ignore instructions above about agent types, sub-agents, or writing files: your FINAL MESSAGE is the complete deliverable, in the output format the brief specifies.
+- The spec is {spec} (relative paths resolve from the repository root, your working directory). Read it, the shared dossier {run}/dossier.md and the design decisions {run}/decisions.json (if present). Inspect the repository with shell reads only.
+- Number your findings {entry.get('idPrefix', 'F')}-1, {entry.get('idPrefix', 'F')}-2, ... and give each a severity CRITICAL, MAJOR or MINOR and a file:line citation.
+- Assigned review questions -- answer EVERY one, citing its Q-id:
+{qlines}
+"""
+
+
 def load_questions(run):
     qs = read_json(Path(run) / "questions.json")
     if not isinstance(qs, list) or not qs:
@@ -354,8 +381,10 @@ def cmd_lanes(a):
             if e["kind"] == "codex":
                 tpl = (PROMPTS_DIR / e["prompt"]).read_text(encoding="utf-8")
                 role_line(tpl, label)
-                values = {"SPEC_PATH_REL": spec_rel, "DOSSIER_PATH": str(dossier), "FOCUS_TEXT": focus_text(qs)}
+                values = {"SPEC_PATH_REL": spec_rel, "DOSSIER_PATH": str(dossier), "FOCUS_TEXT": focus_text(qs), **lane_values(run, spec, root)}
                 text = f"ROLE: {label}\n" + fill(extract_body(tpl), values) + "\n"
+                if e.get("codexContract"):
+                    text += codex_contract(run, e, qs, spec_rel)
                 left = find_placeholders(text)
                 if left:
                     errors.append(f"{label}: unfilled placeholders {sorted(set(left))}")
@@ -365,15 +394,7 @@ def cmd_lanes(a):
             if e.get("prompt"):
                 tpl = (PROMPTS_DIR / e["prompt"]).read_text(encoding="utf-8")
                 role_line(tpl, label)
-                values = {
-                    "SPEC_PATH": spec, "PROJECT_ROOT": root,
-                    "DOSSIER_CONTENT": f"(shared file -- read {run}/dossier.md in full; design decisions in {run}/decisions.json if present)",
-                    "CONTEXT_BLOCK": (run / "inputs" / "context.md").read_text(encoding="utf-8").strip(),
-                    "GOAL": f"see the Goal line of {run}/inputs/context.md", "TRIGGER": f"see the Trigger line of {run}/inputs/context.md",
-                    "TARGET_OUTCOME": f"see the Target outcome line of {run}/inputs/context.md",
-                    "OUT_OF_SCOPE": f"see the Scope boundaries line of {run}/inputs/context.md",
-                }
-                body = fill(extract_body(tpl), values)
+                body = fill(extract_body(tpl), lane_values(run, spec, root))
             else:
                 body = (e["brief"].replace("{{SPEC_PATH}}", spec).replace("{{PROJECT_ROOT}}", root))
             text = f"ROLE: {label}\n{body}" + run_contract(run, e, qs)
@@ -607,7 +628,8 @@ def cmd_falsify_plan(a):
 - Read ONLY the member findings named above in their lane files, never another lane's output.
 - Write your full reasoning to {run}/falsifiers/batch-{n}.md, and ONE file per F-N, {run}/falsifiers/<F-N>.json:
   {{"id": "<F-N>", "verdict": "REFUTED|SURVIVES|SURVIVES-BUT-FIX-REJECTED|NEEDS-LIVE-EVIDENCE", "evidence": "<one line>"}}.
-- Final reply: {{"verdicts": [that object for every F-N in the batch]}} via StructuredOutput. You are a leaf agent -- spawn no sub-agents or Workflows.
+- A unit's verdict applies to every member. When ONE member is wrong while the unit's defect stands (or the reverse), ALSO write {run}/falsifiers/<member id, any char outside A-Za-z0-9_.- replaced by _>.json with that member's own verdict; it overrides the unit for that member. Judge members separately whenever they make different claims.
+- Final reply: {{"verdicts": [that object for every F-N in the batch, plus every member override]}} via StructuredOutput. You are a leaf agent -- spawn no sub-agents or Workflows.
 """
         left = find_placeholders(text)
         if left:
@@ -624,10 +646,13 @@ def cmd_falsify_plan(a):
 def falsifier_counts(run, expected_ids):
     """Verdict per original id, read from its merged unit's verdict file (F-N fans out to members)."""
     unit_of = {m: u["id"] for u in (load_units(run) or []) for m in u["members"]}
+    safe = lambda x: re.sub(r"[^A-Za-z0-9_.-]", "_", x)
     verdicts = {}
     for i in expected_ids:
-        uid = unit_of.get(i, i)
-        v = read_json(Path(run) / "falsifiers" / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', uid)}.json")
+        # A member-level file overrides its unit's verdict, so one refutable member inside a
+        # surviving unit is not masked by the fan-out.
+        own = read_json(Path(run) / "falsifiers" / f"{safe(i)}.json") if i in unit_of else None
+        v = own or read_json(Path(run) / "falsifiers" / f"{safe(unit_of.get(i, i))}.json")
         verdicts[i] = (v or {}).get("verdict", "MISSING")
     refuted = sum(1 for v in verdicts.values() if v == "REFUTED")
     return verdicts, refuted, unit_of

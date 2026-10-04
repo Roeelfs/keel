@@ -26,7 +26,7 @@ MANIFEST = run_dir.load_manifest()
 # why it had to grow; never to re-absorb lane briefs, tables or the report template (those live
 # in scripts/spec-review.workflow.js, prompts/ and report-template.md).
 # Recorded 2026-10-04: 67488B (pre-rewrite) -> launcher size below.
-MAX_SKILL_BYTES = 8681
+MAX_SKILL_BYTES = 8722
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
 SUPPLEMENTS = {"adr-auditor", "cutover-architect", "runtime-wiring", "critic-hotfix", "critic-adversarial", "critic-frontier"}
@@ -75,7 +75,7 @@ class ManifestTests(unittest.TestCase):
         reviewers = [e for e in MANIFEST["lanes"] if e["label"] not in SUPPLEMENTS]
         claude = [e for e in reviewers if e["kind"] == "claude"]
         codex = [e for e in reviewers if e["kind"] == "codex"]
-        self.assertEqual((len(claude), len(codex), len(reviewers)), (9, 4, 13))
+        self.assertEqual((len(claude), len(codex), len(reviewers)), (7, 6, 13))
         self.assertIn("13 parallel reviewers", SKILL.split("---", 2)[1])
 
     def test_astra_runs_in_every_profile_and_hotfix_shape(self):

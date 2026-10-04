@@ -3,8 +3,8 @@ ROLE: codebase-verifier
 
 Checks the spec against the actual codebase: do referenced files exist? Are there duplicate implementations? Stale code? Repeat-fix hotspots? What is the FULL blast radius of every seam the spec changes?
 
-**Agent type:** `general-purpose` (standing default — the `Explore` type false-stopped/refused tools in 6+ documented runs; do not use it here)
-**Model:** default (sonnet — search-heavy, not reasoning-heavy)
+**Agent type:** `codex-dispatch` (moved off the Claude window 2026-10-04: a read-only repo review; its own lane cost 3.7-5.9M Claude context tokens per run)
+**Model:** `gpt-6-sol`
 
 ```
 description: "Verify spec against codebase: references, duplicates, stale code, blast radius"
