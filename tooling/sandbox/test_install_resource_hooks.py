@@ -104,15 +104,28 @@ class InstallerTests(unittest.TestCase):
             probe = subprocess.run(resource[0], shell=True, input=json.dumps({"tool_input": {"command": "git status"}}), capture_output=True, text=True)
             self.assertEqual(probe.returncode, 0, probe.stderr)
 
-    def test_fresh_codex_registration_has_no_runtime_argument(self):
+    def test_fresh_codex_registration_names_the_codex_runtime(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             self.assertTrue(installer.install(home, True)["codex_changed"])
             commands = [h["command"] for g in json.loads((home / ".codex/hooks.json").read_text())["hooks"]["PreToolUse"] for h in g["hooks"]]
             self.assertEqual(len(commands), 1)
-            self.assertNotIn("--runtime", commands[0])
+            self.assertIn("--runtime codex", commands[0])
+            self.assertNotIn("/Cellar/", commands[0])
             probe = subprocess.run(commands[0], shell=True, input=json.dumps({"tool_input": {"command": "git status"}}), capture_output=True, text=True)
             self.assertEqual(probe.returncode, 0, probe.stderr)
+
+    def test_existing_codex_entry_is_rewritten_only_on_explicit_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp); (home / ".codex").mkdir()
+            old = installer.command_for("/opt/homebrew/Cellar/python@3.14/3.14.7/bin/python3.14", home / ".claude/hooks/serialize-heavy-ops.py")
+            (home / ".codex/hooks.json").write_text(json.dumps({"hooks": {"PreToolUse": [installer.hook_entry(old)]}}))
+            self.assertFalse(installer.install(home, True)["codex_changed"])
+            self.assertIn(old, (home / ".codex/hooks.json").read_text().replace("\\\"", "\""))
+            plan = installer.install(home, True, codex_rewrite=True)
+            self.assertTrue(plan["codex_changed"]); self.assertIn("re-trust", plan["trust_required"])
+            command = json.loads((home / ".codex/hooks.json").read_text())["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+            self.assertIn("--runtime codex", command); self.assertNotIn("/Cellar/", command)
 
     def test_missing_hook_interpreter_fails_closed(self):
         for runtime in (None, 'claude'):

@@ -69,7 +69,7 @@ def applicable_resource_handlers(groups):
         for handler in group.get("hooks", []) if isinstance(group.get("hooks"), list) else []:
             if resource_handler(handler): yield group, handler
 
-def mutate_codex(config, command):
+def mutate_codex(config, command, rewrite=False):
     hooks = config.setdefault("hooks", {})
     if not isinstance(hooks, dict): raise ValueError("Codex hooks must be an object")
     groups = hooks.setdefault("PreToolUse", [])
@@ -78,7 +78,10 @@ def mutate_codex(config, command):
         if not isinstance(group, dict) or group.get("matcher") != "^Bash$" or not isinstance(group.get("hooks"), list): continue
         for handler in group["hooks"]:
             if resource_handler(handler):
-                return False  # Codex trusts the exact command; rewriting it unguards Codex until re-trusted.
+                # Codex trusts the exact command; rewriting it unguards Codex until re-trusted, so it
+                # happens only on an explicit --codex-rewrite, never as a side effect of --apply.
+                if not rewrite or handler.get("command") == command: return False
+                handler["command"] = command; return True
     groups.append(hook_entry(command)); return True
 
 def mutate_claude(config, command):
@@ -142,18 +145,31 @@ def valid_wrapper_target(wrapper, runtime):
     except OSError: return False
     return target in {SOURCE_ROOT.joinpath("with-heavy-lock").resolve(), runtime.joinpath("with-heavy-lock").resolve()}
 
-def install(home, apply):
+def stable_python():
+    """An interpreter path that survives a patch-level `brew upgrade` (opt/ symlink, not Cellar/)."""
+    executable = Path(sys.executable).absolute()
+    parts = executable.parts
+    if "Cellar" in parts:
+        i = parts.index("Cellar")
+        formula = parts[i + 1]
+        candidate = Path(*parts[:i], "opt", formula, "bin", executable.name)
+        if os.access(candidate, os.X_OK): return candidate
+    return executable
+
+def install(home, apply, codex_rewrite=False):
     validate_sources(); home = home.resolve()
     claude_dir, runtime_dir = home / ".claude" / "hooks", home / ".keel" / "resource-hooks"
     codex_path, claude_path = home / ".codex" / "hooks.json", home / ".claude" / "settings.json"
-    python, script = Path(sys.executable).resolve(), claude_dir / RESOURCE_SCRIPT
+    # Never .resolve() the interpreter: that pins a versioned Cellar path a `brew upgrade` deletes,
+    # after which the launcher denies EVERY guarded Bash call ("interpreter or script is missing").
+    python, script = stable_python(), claude_dir / RESOURCE_SCRIPT
     codex, claude = load_json(codex_path, {}), load_json(claude_path, {})
-    codex_changed = mutate_codex(codex, command_for(python, script))
+    codex_changed = mutate_codex(codex, command_for(python, script, "codex"), rewrite=codex_rewrite)
     claude_changed = mutate_claude(claude, command_for(python, script, "claude"))
     wrapper = home / ".local" / "bin" / "with-heavy-lock"; wrapper_valid = valid_wrapper_target(wrapper, runtime_dir)
     plan = {"home": str(home), "apply": apply, "codex_changed": codex_changed, "claude_changed": claude_changed,
             "wrapper_changed": not wrapper_valid, "copy_claude_hooks": list(CLAUDE_HOOKS), "copy_runtime": list(RUNTIME_FILES),
-            "trust_required": "Codex hook trust is not changed. Review, trust, and enable it in Codex before relying on it."}
+            "trust_required": ("Codex hook command REWRITTEN: the resource guard is OFF in Codex until you re-trust and enable it in Codex /hooks." if codex_changed and codex_rewrite else "Codex hook trust is not changed. Review, trust, and enable it in Codex before relying on it.")}
     plan["stale_files"] = [str(claude_dir / name) for name in CLAUDE_HOOKS
                            if not file_current(HOOK_SOURCE / name, claude_dir / name, True)]
     plan["stale_files"] += [str(runtime_dir / name) for name in RUNTIME_FILES
@@ -175,9 +191,10 @@ def install(home, apply):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--home", type=Path, default=Path.home()); parser.add_argument("--apply", action="store_true"); parser.add_argument("--check", action="store_true")
+    parser.add_argument("--codex-rewrite", action="store_true", help="rewrite an existing Codex resource hook to the current command; Codex then needs a manual re-trust")
     args = parser.parse_args(argv)
     if args.apply and args.check: parser.error("--apply and --check cannot be combined")
-    try: print(json.dumps(install(args.home, args.apply), indent=2, sort_keys=True))
+    try: print(json.dumps(install(args.home, args.apply, args.codex_rewrite), indent=2, sort_keys=True))
     except (OSError, ValueError) as error:
         print("install-resource-hooks: " + str(error), file=sys.stderr); return 2
     return 0
