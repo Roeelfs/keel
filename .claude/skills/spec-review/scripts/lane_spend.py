@@ -18,17 +18,22 @@ USAGE_KEYS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_t
 ROLE_RE = re.compile(r"^\s*ROLE:\s*(\S+)", re.M)
 
 
-def first_user_text(records):
+def first_user_text(records, limit=3):
+    """Text of the first few user messages: the Workflow harness may prepend a framing
+    message before the lane prompt, so ROLE is not always in the first one."""
+    texts = []
     for rec in records:
         msg = rec.get("message") if isinstance(rec.get("message"), dict) else rec
         if rec.get("type") != "user" and msg.get("role") != "user":
             continue
         content = msg.get("content")
         if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            return "\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
-    return ""
+            texts.append(content)
+        elif isinstance(content, list):
+            texts.append("\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"))
+        if len(texts) >= limit:
+            break
+    return "\n".join(texts)
 
 
 def agent_usage(records):

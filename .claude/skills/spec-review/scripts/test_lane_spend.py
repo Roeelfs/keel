@@ -30,6 +30,14 @@ class LaneSpendTests(unittest.TestCase):
             self.assertEqual(out["UNLABELED"]["total"], 3)
             self.assertIn("UNLABELED", out)
 
+    def test_role_found_after_a_harness_framing_message(self):
+        with tempfile.TemporaryDirectory() as d:
+            recs = [{"type": "user", "message": {"role": "user", "content": "[Workflow harness — user request] framing"}},
+                    {"type": "user", "message": {"role": "user", "content": "ROLE: finding-merger\nbrief"}},
+                    {"type": "assistant", "message": {"id": "m", "role": "assistant", "usage": {"input_tokens": 2, "output_tokens": 1}}}]
+            (Path(d) / "agent-x.jsonl").write_text("\n".join(json.dumps(r) for r in recs))
+            self.assertEqual(lane_spend.lane_spend(d)["finding-merger"]["total"], 3)
+
     def test_main_writes_file(self):
         with tempfile.TemporaryDirectory() as d:
             write_agent(d, "a", "ROLE: codex-envelope-extractor\n", [("m", {"input_tokens": 4, "output_tokens": 1})])
