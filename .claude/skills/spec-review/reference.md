@@ -166,7 +166,7 @@ A spec written in a long session accumulates blind spots. This skill breaks that
 
 ### Step 4b: Progressive Drift Investigation
 
-When the **Spec Drift Scout** returns, read its report immediately. Do not wait for Codex if the scout has already finished — use that time to dispatch narrow second-wave investigators while the Codex reviews continue.
+**Script-driven since the Workflow rewrite.** The review stage of `scripts/spec-review.workflow.js` does this itself: when the scout's envelope carries `drift_investigations`, `run_dir.py drift-briefs` materializes one investigator brief per candidate (capped at 5; the rest are logged as a user decision) and the stage runs them as `spec-drift-investigator` lanes before the coverage check. The trigger conditions and result handling below are the policy those lanes and the synthesis follow.
 
 **When to dispatch drift investigators:**
 - Scout reports `Needs Investigator: yes`
