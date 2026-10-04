@@ -207,6 +207,7 @@ def lane_values(run, spec, root):
     """Placeholder values every lane brief may use, whichever runtime executes it."""
     return {
         "SPEC_PATH": spec, "PROJECT_ROOT": root,
+        "ARCH_LENS_PATH": str(SKILL_DIR.parent / "improve-codebase-architecture" / "SKILL.md"),
         "DOSSIER_CONTENT": f"(shared file -- read {run}/dossier.md in full; design decisions in {run}/decisions.json if present)",
         "CONTEXT_BLOCK": (Path(run) / "inputs" / "context.md").read_text(encoding="utf-8").strip(),
         "GOAL": f"see the Goal line of {run}/inputs/context.md", "TRIGGER": f"see the Trigger line of {run}/inputs/context.md",

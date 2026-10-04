@@ -1,7 +1,7 @@
 ---
 license: MIT
 name: spec-review
-description: Multi-model spec verification pipeline run as Workflow scripts off the main loop. Mines the spec's context lineage into a dossier + generated review questions, runs 13 parallel reviewers (7 Claude including provider-fit, edge-case, security, observability, live-evidence premise auditor and cross-worktree drift scout + 6 Codex: codebase verifier, architecture auditor, standard, adversarial, industry research, and the Astra frontier judgment that runs in every profile) plus the investigation skill's Workflow for elevation, then a falsifier wave on every CRITICAL/MAJOR before one synthesized report; the main loop reads the report and fixes only real design defects in the spec prose. Never injects review scaffolding into the spec.
+description: Multi-model spec verification pipeline run as Workflow scripts off the main loop. Mines the spec's context lineage into a dossier + generated review questions, runs 13 parallel reviewers (7 Claude including provider-fit, edge-case, security, observability, live-evidence premise auditor and cross-worktree drift scout + 6 Codex: codebase verifier, architecture auditor, standard, adversarial, industry research, and the Astra frontier judgment that runs in every profile) plus gated supplements (ADR, cutover, runtime wiring, latency/performance architect) and the investigation skill's Workflow for elevation, then a falsifier wave on every CRITICAL/MAJOR before one synthesized report; the main loop reads the report and fixes only real design defects in the spec prose. Never injects review scaffolding into the spec.
 ---
 
 # Spec Review

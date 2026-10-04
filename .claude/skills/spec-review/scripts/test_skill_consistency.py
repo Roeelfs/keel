@@ -26,10 +26,10 @@ MANIFEST = run_dir.load_manifest()
 # why it had to grow; never to re-absorb lane briefs, tables or the report template (those live
 # in scripts/spec-review.workflow.js, prompts/ and report-template.md).
 # Recorded 2026-10-04: 67488B (pre-rewrite) -> launcher size below.
-MAX_SKILL_BYTES = 8722
+MAX_SKILL_BYTES = 8806
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
-SUPPLEMENTS = {"adr-auditor", "cutover-architect", "runtime-wiring", "critic-hotfix", "critic-adversarial", "critic-frontier"}
+SUPPLEMENTS = {"adr-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "critic-hotfix", "critic-adversarial", "critic-frontier"}
 
 
 def declared(text, key):
@@ -100,6 +100,12 @@ class ManifestTests(unittest.TestCase):
             if e["kind"] == "codex":
                 self.assertIn(e["codexClass"], {"verify", "falsifier", "research", "frontier"})
                 self.assertEqual(e["agentType"], "codex-dispatch")
+
+    def test_performance_architect_is_a_live_surface_supplement_with_a_real_lens(self):
+        e = next(x for x in MANIFEST["lanes"] if x["label"] == "performance-architect")
+        self.assertEqual((e["kind"], e["gate"], e["profiles"]), ("claude", "liveSurface", []))
+        self.assertTrue((SKILL_DIR.parent / "improve-codebase-architecture" / "SKILL.md").is_file(),
+                        "the lane reads the improve-codebase-architecture skill as its lens")
 
     def test_lanes_without_prompt_file_have_a_brief(self):
         for e in MANIFEST["lanes"]:
