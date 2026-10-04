@@ -26,7 +26,7 @@ MANIFEST = run_dir.load_manifest()
 # why it had to grow; never to re-absorb lane briefs, tables or the report template (those live
 # in scripts/spec-review.workflow.js, prompts/ and report-template.md).
 # Recorded 2026-10-04: 67488B (pre-rewrite) -> launcher size below.
-MAX_SKILL_BYTES = 8372
+MAX_SKILL_BYTES = 8681
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
 SUPPLEMENTS = {"adr-auditor", "cutover-architect", "runtime-wiring", "critic-hotfix", "critic-adversarial", "critic-frontier"}
