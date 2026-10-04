@@ -6,7 +6,7 @@
 #
 # Usage:
 #   spawn-lane.sh --mission <file|-> [--cwd <worktree>] [--worktree <name>]
-#                 [--runtime claude|codex] [--model <alias>] [--class <task-class>] [--mode <permission-mode>]
+#                 [--runtime claude|codex] [--model <alias>] [--effort low|medium|high|xhigh|max] [--class <task-class>] [--mode <permission-mode>]
 #                 [--mcp-config <file>]
 #
 #   --runtime codex   Spawn the lane on Codex instead of Claude. Separate billing pool.
@@ -40,7 +40,7 @@
 # Interactive-OAuth MCPs do not load in -p mode — only static-credential ones work.
 set -euo pipefail
 
-MISSION_SRC="" ; WORKTREE="" ; MODEL="" ; MODE="bypassPermissions" ; LANE_CWD="" ; MCP_CFG=""
+MISSION_SRC="" ; WORKTREE="" ; MODEL="" ; MODE="bypassPermissions" ; LANE_CWD="" ; MCP_CFG="" ; LANE_EFFORT="medium"
 RUNTIME="claude" ; ALLOW_NETWORK=0 ; CLASS="standard" ; CLASS_SET=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -48,6 +48,7 @@ while [ $# -gt 0 ]; do
     --cwd)        LANE_CWD="$2"; shift 2 ;;
     --worktree)   WORKTREE="$2"; shift 2 ;;
     --model)      MODEL="$2"; shift 2 ;;
+    --effort)     LANE_EFFORT="$2"; shift 2 ;;
     --runtime)    RUNTIME="$2"; shift 2 ;;
     --class)      CLASS="$2"; CLASS_SET=1; shift 2 ;;
     --allow-network) ALLOW_NETWORK=1; shift 1 ;;
@@ -233,7 +234,8 @@ the orchestrator pushes after grading. If you find yourself wanting to push, you
   exit 0
 fi
 
-ARGS=( --permission-mode "$MODE" --session-id "$(uuidgen | tr 'A-Z' 'a-z')" --model "$MODEL" )
+case "$LANE_EFFORT" in low|medium|high|xhigh|max) ;; *) echo "spawn-lane.sh: --effort must be low|medium|high|xhigh|max (got '$LANE_EFFORT')" >&2; exit 2 ;; esac
+ARGS=( --permission-mode "$MODE" --session-id "$(uuidgen | tr 'A-Z' 'a-z')" --model "$MODEL" --effort "$LANE_EFFORT" )
 [ -n "$WORKTREE" ] && ARGS+=( --worktree "$WORKTREE" )
 [ -n "$MCP_CFG" ] && ARGS+=( --mcp-config "$MCP_CFG" )
 ARGS+=( -p --output-format json --permission-prompts none )
