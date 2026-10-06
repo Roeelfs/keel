@@ -26,10 +26,10 @@ MANIFEST = run_dir.load_manifest()
 # why it had to grow; never to re-absorb lane briefs, tables or the report template (those live
 # in scripts/spec-review.workflow.js, prompts/ and report-template.md).
 # Recorded 2026-10-04: 67488B (pre-rewrite) -> launcher size below.
-MAX_SKILL_BYTES = 8806
+MAX_SKILL_BYTES = 8925
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
-SUPPLEMENTS = {"adr-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "critic-hotfix", "critic-adversarial", "critic-frontier"}
+SUPPLEMENTS = {"adr-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "critic-hotfix", "critic-adversarial", "critic-frontier"}
 
 
 def declared(text, key):
@@ -106,6 +106,13 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual((e["kind"], e["gate"], e["profiles"]), ("claude", "liveSurface", []))
         self.assertTrue((SKILL_DIR.parent / "improve-codebase-architecture" / "SKILL.md").is_file(),
                         "the lane reads the improve-codebase-architecture skill as its lens")
+
+    def test_operator_plane_architect_owns_the_operator_surface_gate(self):
+        e = next(x for x in MANIFEST["lanes"] if x["label"] == "operator-plane-architect")
+        self.assertEqual((e["kind"], e["gate"], e["profiles"], e["model"]), ("claude", "operatorSurface", [], "sonnet"))
+        text = (SKILL_DIR / "prompts" / e["prompt"]).read_text(encoding="utf-8")
+        self.assertIn("Read-only:** strictly", text)
+        self.assertIn("{{ARCH_LENS_PATH}}", text)
 
     def test_lanes_without_prompt_file_have_a_brief(self):
         for e in MANIFEST["lanes"]:

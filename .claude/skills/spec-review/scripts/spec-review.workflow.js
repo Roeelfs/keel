@@ -14,7 +14,7 @@ export const meta = {
 // MANIFEST:BEGIN
 const MANIFEST = {
   "profiles": ["full", "focused", "hotfix"],
-  "gates": ["liveSurface", "security", "cutover", "runtimeWiring"],
+  "gates": ["liveSurface", "security", "cutover", "runtimeWiring", "operatorSurface"],
   "lanes": [
     {"label": "completeness-reviewer", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "completeness-reviewer.md", "profiles": ["full"], "gate": null, "idPrefix": "COMP", "tags": ["completeness"]},
     {"label": "codebase-verifier", "kind": "codex", "agentType": "codex-dispatch", "model": "gpt-6-sol", "prompt": "codebase-verifier.md", "profiles": ["full", "focused", "hotfix"], "gate": null, "idPrefix": "CB", "tags": ["codebase"], "codexClass": "verify", "codexContract": true},
@@ -31,6 +31,7 @@ const MANIFEST = {
     {"label": "observability-auditor", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "observability-auditor.md", "profiles": ["full"], "gate": null, "idPrefix": "Obs", "tags": ["observability"]},
     {"label": "live-evidence-auditor", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "live-evidence-auditor.md", "profiles": [], "gate": "liveSurface", "idPrefix": "LE", "tags": ["live-evidence"]},
     {"label": "performance-architect", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "performance-architect.md", "profiles": [], "gate": "liveSurface", "idPrefix": "PERF", "tags": ["performance"]},
+    {"label": "operator-plane-architect", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "operator-plane-architect.md", "profiles": [], "gate": "operatorSurface", "idPrefix": "OP", "tags": []},
     {"label": "spec-drift-scout", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "spec-drift-scout.md", "profiles": ["full"], "gate": null, "idPrefix": "DRIFT", "tags": ["drift"]},
     {"label": "critic-hotfix", "kind": "critic", "agentType": "critic", "model": "fable", "prompt": null, "profiles": ["hotfix"], "gate": null, "idPrefix": "CRIT", "tags": ["completeness", "codebase", "architecture", "provider-fit", "edge-case", "security", "observability", "drift", "live-evidence", "codex-adversarial"],
       "brief": "# Hotfix critic\n\nProd-down review of the spec at {{SPEC_PATH}} (project root {{PROJECT_ROOT}}). Minutes matter: stress-test the fix for what would make it fail or make things worse (rollback safety, blast radius, data loss, the wrong root cause). Answer every assigned question; report only material findings."},
