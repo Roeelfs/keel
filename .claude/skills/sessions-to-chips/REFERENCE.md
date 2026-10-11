@@ -1,5 +1,12 @@
 # sessions-to-chips — reference
 
+> Scope: this reference applies only to the explicitly requested legacy
+> resume-chip branch. Mine-only audits use the shared contextual audit workflow
+> linked from SKILL.md and do not create chips. All filesystem discovery below
+> requires permitted access; use supported direct reads, permitted exports or
+> authorized UI when source stores are unavailable or denied. Do not bypass access
+> limits or treat incomplete work as permission to create an execution task.
+
 ## Where session data lives
 
 | Thing | Path | Notes |
@@ -36,6 +43,23 @@ Adversarial validation on real sessions surfaced one dominant failure class — 
 - **In-flight and blocked are first-class stop-states.** In-flight dispatched work → "check `<agent>`'s result, then …". Blocked → "unblock `<ticket>`, then `<the true end-game>`".
 - **Continue from the FRONTIER, not the literal last keystroke.** The continuation is the first *not-yet-done* substantive step. Two traps: (a) don't point at a sub-task that already **finished** earlier in the arc ("resume the sweep" when the sweep is done and its output saved); (b) don't treat a **wrap-up/handoff** tail ("commit locally", "bake a resume doc so a future session can continue") as the mission — the next action is the mission's Next-Step / top pending item from the summary + persisted state, not redoing the bookkeeping.
 - **A self-authored handoff wins — carry it, don't reinvent it.** If the session wrote its own resume artifact (`session-resume-YYYY-MM-DD.md`, a "Resume path:" block, an explicit "Next Step / Optional Next Step"), anchor the `continuationPhrase` on it: name the artifact to load and lead with its stated first action/priority. The session already decided what comes next; re-deriving a different plan loses that signal (e.g. a session that named its top-priority item plus a sweep's results in its own resume doc — carry that ordering, don't re-derive a different one).
+
+## Manager / sub-session structure
+
+| Thing | Rule |
+|---|---|
+| Lineage source | `spawnedFrom.sessionId` in each `local_*.json` (plus `spawnedFrom.taskId`/`title`). A root has `spawnedFrom: null`. Verified 2026-10-11: "Built-in apps concept exploration" (root) → 4 "Spec …" chips. |
+| Category | The sidebar group label (e.g. "Apps") is a UI grouping, **not stored in the session JSON**. A category is the lineage root, or a name from `--categories` / the user. |
+| Manager | One per category; coordinates, never implements. Title `[Manager] <root title verbatim>` (or `[Manager] <category>` when synthetic). |
+| Map | Durable markdown at `~/.claude/sessions-to-chips/maps/`. Holds the detail (status table, ordering, overlaps, open decisions); the manager prompt only points at it (≤ ~1500 chars). |
+| Sub-chip specs | `<stem>.chips.json`, one entry per sub-session: `cli, title, tldr, prompt, dependsOn, spawn`. The manager spawns them; the skill does not. |
+| Consolidation | Phase between Mine and Manage. High-confidence merges (same ticket/artifact or strict subset) are applied before spawn; medium/low merges, drops and open calls become the manager's owed decisions. A merge never loses a `remainingWork` item. |
+| Playbook | `MANAGER_PLAYBOOK.md` is the manager's decision procedure (merge/split/drop/re-order rules, escalation gates, close-out, write-back to the overlay `LEARNINGS.md`). Improve it there, once; prompts only point at it. |
+| Fan-out | First wave ≤ 5 concurrent sub-chips; later waves follow `dependsOn`. |
+| Nesting | Exactly two levels. A sub-session that itself has children belongs in its own category (re-run `group_sessions.py --root` on it), not a third level. |
+| Overlap | Two sub-sessions on one artifact → the map names the owner; the other's chip says "do not edit X; coordinate via the manager". |
+
+Gotchas: a `--grep` target set that includes a child but not its parent makes the child its own root (the parent is outside the set) — pass `--root` to pull the full subtree. A manager is not spawn-pinnable to a model (chips run on the desktop's model).
 
 ## Completion criteria (isComplete)
 
