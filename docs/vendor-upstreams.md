@@ -152,7 +152,7 @@ No upstream interface stubs were adopted.
 ### Marketing skills
 
 - Source: <https://github.com/coreyhaines31/marketingskills>
-- Adopted upstream commit: `5b2c0007766c6a1cf1d53fd8fc73e979e0821022`
+- Adopted upstream commit: `1efedbc5148b54b2f0f6c6c9fe0be62e151c7fff` (2026-10-11; previously `5b2c0007766c6a1cf1d53fd8fc73e979e0821022`)
 - License: MIT, copyright Corey Haines (2025); each adopted skill carries the upstream
   `LICENSE` notice.
 - Adopted only the already-installed `copywriting` (2.0.2), `copy-editing` (2.0.0),
@@ -168,6 +168,14 @@ No upstream interface stubs were adopted.
   so no local copywriting delta remains. The only packaging adaptation is bringing
   three repo-level integration guides into the skill and making their links portable.
   The refresh adds upstream's `checklist.md` and `content-distribution.md` references.
+- 2026-10-11 resync: three-way merged `copywriting`, `copy-editing` and `content-strategy`
+  (SKILL.md, evals, references); added `copywriting/references/ai-tells.md`. Kept the
+  skill-relative integration-guide links in `headless-cms.md` over upstream's new absolute
+  GitHub URLs; the three integration guides are unchanged upstream. Trailing whitespace in
+  `copy-frameworks.md` stays trimmed. Upstream's new catalog entries (ad-creative, ads,
+  ai-seo, cold-email, launch, lead-magnets, marketing-loops, marketing-plan,
+  programmatic-seo, prospecting, public-relations, referrals, revops, sales-enablement,
+  seo-audit, site-architecture, sms, social, video) were not added.
 - Upstream's cross-skill mentions (`cro`, `emails`, `popups`, `offers`, `social`,
   `launch`, and related marketing skills) remain descriptive references; this refresh
   deliberately does not add those catalog entries.
