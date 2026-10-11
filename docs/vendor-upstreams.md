@@ -26,8 +26,8 @@ never here.
 ## Matt Pocock skills
 
 - Source: <https://github.com/mattpocock/skills>
-- Last adopted upstream commit: `c55ee46073ed923f86ce59a5eb3b6d895095d1b7`
-- Reviewed / adopted: 2026-09-27
+- Last adopted upstream commit: `49dd158d1076134a641b33efb035946536778336`
+- Reviewed / adopted: 2026-10-11
 
 ### Adopted (his latest is canonical)
 
@@ -57,7 +57,8 @@ are now adopted, with Linear added as a **first-class tracker option** (see delt
 | `setup-matt-pocock-skills` | added first-class **Linear** tracker option + `issue-tracker-linear.md` seed (Linear MCP + Wayfinding ops); default-posture stays generic | Linear support is a public-useful addition; the per-repo default is configured, not hard-coded |
 | `triage` | `AGENT-BRIEF.md` "GitHub issue or PR" → tracker-neutral wording | tracker-abstracted |
 | `grill-with-docs`, `implement`, `improve-codebase-architecture`, `to-spec`, `to-tickets`, `triage`, `wayfinder` | omit `disable-model-invocation: true` | preserve existing model-invoked reach used by composed engineering flows |
-| `ask-matt` | omit router entries for uninstalled `to-questionnaire` and `wait-what`; describe investigation as adversarially cross-verified | route only to installed flows, with the actual investigation contract |
+| `ask-matt` | omit router entries for uninstalled `to-questionnaire`, `wait-what`, `implement-spec`, `pr` and `retro`; describe investigation as adversarially cross-verified | route only to installed flows, with the actual investigation contract |
+| `domain-modeling` and every adopted skill that names it | keep the `CONTEXT.md` / `CONTEXT-MAP.md` / `CONTEXT-FORMAT.md` convention; upstream renamed it to `GLOSSARY.md` / `GLOSSARY-MAP.md` / `GLOSSARY-FORMAT.md` on 2026-10-07 (`d80fa0f`, `e484a80`). Provisional, awaiting a ruling | consumer repos of keel use `CONTEXT.md` today |
 | all | `license: MIT` metadata | retain existing vendored license metadata |
 | all | strip `agents/openai.yaml` | Claude-first, marker-free |
 
@@ -75,6 +76,8 @@ the remaining adopted skills).
   keel's `standards-spec-review` (`/review`) is already a fork of it. Not installed;
   instead its one genuine improvement — the **Fowler 12-smell baseline** — is cherry-picked
   into `standards-spec-review`'s Standards sub-agent prompt.
+- **Newly stable or new upstream, 2026-10-11** (`implement-spec`, `pr`, `retro`, `chief-of-staff`) — not
+  installed; no bulk installs. `chief-of-staff` is still `in-progress` (beta) upstream.
 - **Deprecated upstream** (`design-an-interface`, `qa`, `request-refactor-plan`,
   `ubiquitous-language`) — skipped; upstream marks them deprecated.
 - **Matt-personal / niche net-new** (`scaffold-exercises`, `obsidian-vault`, `edit-article`,
@@ -108,6 +111,25 @@ its local-only `issue-tracker-linear.md`, `tdd/SKILL.md` and `mocking.md`,
 `writing-for-agents/SKILL.md`. All other adopted support files match upstream.
 No upstream interface stubs or new catalog entries were adopted.
 
+## 2026-10-11 adoption receipt
+
+Resynced the 24-skill catalog from immutable upstream
+`49dd158d1076134a641b33efb035946536778336`, using previous adopted upstream
+`c55ee46073ed923f86ce59a5eb3b6d895095d1b7` as the three-way base. Changed
+adopted skills: `ask-matt`, `diagnosing-bugs`, `grilling`, `handoff`, `implement`,
+`setup-matt-pocock-skills` (SKILL.md, `issue-tracker-github.md`,
+`issue-tracker-gitlab.md`, `triage-labels.md`), `tdd`, `teach`, `to-tickets`,
+`wayfinder`, `wizard/template.sh`. Upstream's `GLOSSARY.md` rename was reversed
+in the staged upstream tree before merging (see the delta table), so no adopted
+file changed for it. Three conflicts (`ask-matt`, `implement`, `wayfinder`)
+resolved by adopting upstream wording and re-applying the `/review`,
+`/investigation` and uninstalled-flow deltas.
+
+`resolving-merge-conflicts` was removed upstream (`daa01d8`) but is held
+unchanged with its approved deltas pending a ruling. `implement-spec`, `pr`,
+`retro` and `chief-of-staff` are new upstream entries and were not adopted.
+No upstream interface stubs were adopted.
+
 ## Update procedure (resync to a newer upstream)
 
 1. Fetch upstream; pin its immutable commit and retain the old adopted commit.
@@ -130,7 +152,7 @@ No upstream interface stubs or new catalog entries were adopted.
 ### Marketing skills
 
 - Source: <https://github.com/coreyhaines31/marketingskills>
-- Adopted upstream commit: `5b2c0007766c6a1cf1d53fd8fc73e979e0821022`
+- Adopted upstream commit: `1efedbc5148b54b2f0f6c6c9fe0be62e151c7fff` (2026-10-11; previously `5b2c0007766c6a1cf1d53fd8fc73e979e0821022`)
 - License: MIT, copyright Corey Haines (2025); each adopted skill carries the upstream
   `LICENSE` notice.
 - Adopted only the already-installed `copywriting` (2.0.2), `copy-editing` (2.0.0),
@@ -146,6 +168,14 @@ No upstream interface stubs or new catalog entries were adopted.
   so no local copywriting delta remains. The only packaging adaptation is bringing
   three repo-level integration guides into the skill and making their links portable.
   The refresh adds upstream's `checklist.md` and `content-distribution.md` references.
+- 2026-10-11 resync: three-way merged `copywriting`, `copy-editing` and `content-strategy`
+  (SKILL.md, evals, references); added `copywriting/references/ai-tells.md`. Kept the
+  skill-relative integration-guide links in `headless-cms.md` over upstream's new absolute
+  GitHub URLs; the three integration guides are unchanged upstream. Trailing whitespace in
+  `copy-frameworks.md` stays trimmed. Upstream's new catalog entries (ad-creative, ads,
+  ai-seo, cold-email, launch, lead-magnets, marketing-loops, marketing-plan,
+  programmatic-seo, prospecting, public-relations, referrals, revops, sales-enablement,
+  seo-audit, site-architecture, sms, social, video) were not added.
 - Upstream's cross-skill mentions (`cro`, `emails`, `popups`, `offers`, `social`,
   `launch`, and related marketing skills) remain descriptive references; this refresh
   deliberately does not add those catalog entries.
@@ -153,7 +183,7 @@ No upstream interface stubs or new catalog entries were adopted.
 ### Langfuse skill
 
 - Source: <https://github.com/langfuse/skills>
-- Adopted upstream commit: `104acd9aa7b1f431066cd9fe4b0b431a0188e642`
+- Adopted upstream commit: `b86532b77f16f1e27c7cffa32bb632aa3cd9a352` (2026-10-11; previously `104acd9aa7b1f431066cd9fe4b0b431a0188e642`)
 - License: MIT, copyright Langfuse GmbH (2026); the adopted skill carries the upstream
   `LICENSE` notice.
 - Adopted the already-installed `langfuse` skill and complete `references/` directory.
@@ -162,6 +192,9 @@ No upstream interface stubs or new catalog entries were adopted.
   setup, and v4 migration references. Fixed one upstream sibling-reference link in
   `references/instrumentation.md` to point to the adjacent `cli.md`. No new catalog
   entries were added.
+- 2026-10-11 resync: only `references/setting-up-evals.md` changed for the installed
+  skill (one evaluator-naming line); `SKILL.md` is unchanged upstream. Upstream's new
+  `migrate-to-langfuse` skill was not added.
 - Historical comparison: the old `SKILL.md` exactly matches upstream commit
   `d48c5b8b434dc34550053699e8403c23f231446d`; old supporting references match upstream
   history and contain no local-only adaptations. Packaging fixes the instrumentation
