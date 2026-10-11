@@ -183,7 +183,7 @@ No upstream interface stubs were adopted.
 ### Langfuse skill
 
 - Source: <https://github.com/langfuse/skills>
-- Adopted upstream commit: `104acd9aa7b1f431066cd9fe4b0b431a0188e642`
+- Adopted upstream commit: `b86532b77f16f1e27c7cffa32bb632aa3cd9a352` (2026-10-11; previously `104acd9aa7b1f431066cd9fe4b0b431a0188e642`)
 - License: MIT, copyright Langfuse GmbH (2026); the adopted skill carries the upstream
   `LICENSE` notice.
 - Adopted the already-installed `langfuse` skill and complete `references/` directory.
@@ -192,6 +192,9 @@ No upstream interface stubs were adopted.
   setup, and v4 migration references. Fixed one upstream sibling-reference link in
   `references/instrumentation.md` to point to the adjacent `cli.md`. No new catalog
   entries were added.
+- 2026-10-11 resync: only `references/setting-up-evals.md` changed for the installed
+  skill (one evaluator-naming line); `SKILL.md` is unchanged upstream. Upstream's new
+  `migrate-to-langfuse` skill was not added.
 - Historical comparison: the old `SKILL.md` exactly matches upstream commit
   `d48c5b8b434dc34550053699e8403c23f231446d`; old supporting references match upstream
   history and contain no local-only adaptations. Packaging fixes the instrumentation
