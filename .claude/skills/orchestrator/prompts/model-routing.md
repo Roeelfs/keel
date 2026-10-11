@@ -4,7 +4,7 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 
 ## Models
 
-**Claude:** Fable 5.1 (alias `fable`) is the highest-capability final/security gate; Opus 5.5 (alias `opus`) starts complex agentic coding and architecture; Sonnet 5 is the routine-development tier; Haiku 4.5 is the high-volume mining tier.
+**Claude:** Fable 5.1 (alias `fable`) is the highest-capability final/security gate; Opus 5.5 (alias `opus`) starts complex agentic coding and architecture; Sonnet 5.5 (alias `sonnet`) is the routine-development tier; Haiku 5.5 (alias `haiku`) is the high-volume mining tier.
 
 > Keep Fable + Opus in the deep-review panel for model diversity even though the vendor now documents Fable as the most capable widely released model.
 
