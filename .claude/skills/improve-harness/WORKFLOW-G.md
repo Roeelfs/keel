@@ -35,6 +35,39 @@ The gap between the last two rows is the finding that shaped the fix: turns end 
 
 **Report the dispatched-vs-surviving count for the log itself.** An empty `reply-shape.jsonl` means the hook never fired — a dead instrument, not a quiet harness. Say which.
 
+## Codex completion pilot — observe before enforcing
+
+Run the offline [completion audit](scripts/codex_completion_audit.py) once during this
+lane, when Codex transcripts are in scope:
+
+```sh
+python3 <improve-harness-dir>/scripts/codex_completion_audit.py \
+  --sessions-root ~/.codex/sessions --max-files 100 --limit 10 \
+  --exclude-session <current-session-id>
+```
+
+Save the JSON report in the private run artifacts. The report contains local paths;
+keep it out of public skill seeds. Text is omitted by default. Use `--include-text`
+only for local inspection, and redact before sharing excerpts. This is an offline
+sampling command, not a Stop hook, scheduler, or continuation mechanism.
+
+Report inspected, excluded, malformed, and selected counts alongside every rate.
+Headless `source=exec` sessions are excluded by default; use `--include-exec` only
+for a separately labeled lane cohort. An originator containing “Desktop” does not
+prove the turn was user-facing. Explicit `next_action:` handoffs are reported
+separately from Next steps headings. Both are lexical observations; an absent marker is a review candidate,
+not a premature-stop verdict. A present marker or “none” is not proof of completion.
+For each selected root turn, inspect its accepted task record and label it manually:
+verified completion, legitimate external gate, premature stop, or unknown. Preserve
+the source path/turn/line identifiers so another run can reproduce the judgment.
+
+The pilot's task checkpoint belongs in the task's existing plan/state owner. Record
+acceptance evidence, remaining work, and the executable next action there. Measure
+manual continuation nudges and repeated completed milestones separately from footer
+coverage. Unknown scope or missing evidence stays unknown. Do not infer improvement
+from a small sample, and do not convert this auditor into an enforcing hook without
+real-transcript replay and proof that the actual runtime fires the relevant event.
+
 ## Part 3 — rank by tier, not by appeal
 
 Every recommendation carries a **tier**, and the tiers are ordered by how little they depend on model compliance:

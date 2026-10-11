@@ -87,6 +87,30 @@ Under `~/.claude/orchestrator/programs/`, per program. Declaring them is the fir
 
 **3. `<slug>.state.md` — the at-wake state file.** Current step, the last *verified* fact per lane, and an `## AT-WAKE` section naming exactly what to do on the next wake. This is the compact-survivable layer: prescribed JSON snapshots were never once written on this pattern's whole history, while markdown state files referenced by name from consecutive wake prompts demonstrably survive compaction.
 
+Use this completion checkpoint inside that same state file. For an ordinary task with an
+existing accepted plan or issue, keep the checkpoint there instead of creating a program.
+Evidence may be links; do not copy the underlying logs or duplicate another task ledger.
+
+```markdown
+## Completion checkpoint
+Accepted outcome: <the requested result and scope>
+Done when: <observable acceptance conditions>
+Verified: <condition -> evidence path/URL and revision; unknown stays unverified>
+Remaining: <unfinished accepted work, or none with supporting evidence>
+
+## AT-WAKE
+Next action: <one executable action, or none when the accepted outcome is verified>
+Owner: <agent/person responsible for that action>
+Prerequisite: <exact external state/approval required, or none>
+Stop condition: <completion, explicit stop, or the named external gate>
+```
+
+Update at a milestone or legitimate stopping boundary. If the next action is reachable
+and authorized, execute it before ending the turn. At an external gate, leave this pointer
+and prerequisite; do not schedule a retry. In the final reply, list remaining actions in
+order, with owner/prerequisite where needed, or state that no requested work remains.
+
+
 ## Membership and collisions
 
 - **Reason only about YOUR lanes.** Every machine-wide list (`list_sessions`, `claude agents --json`, worktree registry) is FILTERED to manifest membership: lanes you spawned, sessions you explicitly adopted (record the adoption), branches matching your claims. Foreign activity is never your progress and never your stall — note it only where it overlaps your claims.
