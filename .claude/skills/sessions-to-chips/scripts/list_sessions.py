@@ -13,6 +13,11 @@ Usage:
   list_sessions.py --account <account-id>  # filter by account-uuid substring
   list_sessions.py --grep "ABC-3"        # filter by title substring (case-insensitive)
   list_sessions.py --json                # machine-readable (pipe to jq / a workflow)
+  list_sessions.py --tree [--grep T]     # lineage forest: parent session -> the chips it spawned
+
+Lineage: a chip's JSON carries spawnedFrom.sessionId = the session that spawned it. That is
+the sidebar's top-level / sub-level structure (a parent row with its chips nested under it).
+`group_sessions.py` turns this lineage into one manager-led group per category.
 """
 import json, glob, os, sys, argparse, datetime
 
@@ -42,6 +47,8 @@ def load_all():
             "account": acct,
             "title": d.get("title") or "",
             "cli": d.get("cliSessionId") or "",
+            "sessionId": d.get("sessionId") or os.path.basename(f)[:-5],
+            "parentSessionId": (d.get("spawnedFrom") or {}).get("sessionId") or "",
             "branch": d.get("branch") or "",
             "worktree": d.get("cwd") or d.get("worktreePath") or "",
             "worktreeName": d.get("worktreeName") or "",
@@ -52,11 +59,27 @@ def load_all():
         })
     return rows
 
+def print_tree(rows):
+    """Forest of the listed rows. A row whose parent is not in `rows` is printed as a root."""
+    by_id = {r["sessionId"]: r for r in rows}
+    kids = {}
+    for r in rows:
+        p = r["parentSessionId"]
+        kids.setdefault(p if p in by_id else "", []).append(r)
+    def walk(r, depth):
+        pr = f" PR#{r['pr']}/{r['prState']}" if r["pr"] else ""
+        print(f"{'    ' * depth}{'└─ ' if depth else ''}{r['title']}  [{r['cli'][:8]}]{pr}")
+        for c in sorted(kids.get(r["sessionId"], []), key=lambda x: x["lastActivityAt"]):
+            walk(c, depth + 1)
+    for r in kids.get("", []):
+        walk(r, 0)
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--account")
     ap.add_argument("--grep")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--tree", action="store_true", help="print the spawnedFrom lineage forest")
     a = ap.parse_args()
     rows = load_all()
     if a.account:
@@ -64,6 +87,9 @@ def main():
     if a.grep:
         rows = [r for r in rows if a.grep.lower() in r["title"].lower()]
     rows.sort(key=lambda r: r["lastActivityAt"], reverse=True)
+    if a.tree:
+        print_tree(rows)
+        return
     if a.json:
         print(json.dumps(rows, indent=2))
         return

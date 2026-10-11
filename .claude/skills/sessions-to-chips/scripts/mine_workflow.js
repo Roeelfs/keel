@@ -1,13 +1,22 @@
 export const meta = {
   name: 'mine-sessions-to-chips',
   description: 'Mine N Claude sessions in parallel for overall goal + exact continuation point to author resume chips',
-  phases: [{ title: 'Mine', detail: 'one read-only agent per session' }],
+  phases: [
+    { title: 'Mine', detail: 'one read-only agent per session' },
+    { title: 'Consolidate', detail: 'one sonnet reviewer per category group proposes merges/drops across the mined sessions' },
+    { title: 'Manage', detail: 'one read-only synthesis agent per category group -> manager chip + map + sub-chip specs' },
+  ],
 }
 
 // Invoke via the Workflow tool:
 //   Workflow({ scriptPath: "<skill>/scripts/mine_workflow.js",
 //             args: { mineScript: "<skill>/scripts/mine_session.py",
 //                     sessions: [ { idx, title, cli, worktreeName, branch, pr, transcript }, ... ] } })
+// OPTIONAL `groups` (from group_sessions.py): [{ category, manager:{title,cli}|null, memberClis:[cli,...] }].
+//   When present, phase 2 synthesizes ONE manager chip per group from the mined results.
+//   Phase 2 (Consolidate) reviews the mined group and merges what is clearly one piece of work;
+//   the rest is handed to the manager as decisions it owns (see MANAGER_PLAYBOOK.md).
+//   Returns { ok, failed, consolidations, managers:[{category, managerTitle, managerTldr, managerPrompt, mapMarkdown, subChips[]}] }.
 // Pass `transcript` (abs path from find_transcript.py) so agents don't re-glob.
 // Pass `title` VERBATIM — it is the desktop session name and becomes the chip title unchanged.
 // GOTCHAS baked in: `args` can arrive as a STRING (JSON.parse it); `process` is undefined;
@@ -85,10 +94,123 @@ JUDGEMENT
 
 Return ONLY the structured object.`,
     { label: `mine:${s.worktreeName || s.idx}`, phase: 'Mine', schema: SCHEMA, agentType: 'Explore', model: 'sonnet' }
-  ).then(r => r ? { ...r, idx: s.idx } : { idx: s.idx, _failed: true, title: s.title })
+  ).then(r => r ? { ...r, idx: s.idx, _cli: s.cli } : { idx: s.idx, _failed: true, title: s.title })
 ))
 
 const ok = results.filter(r => r && !r._failed)
 const failed = results.filter(r => !r || r._failed)
 log(`mined ${ok.length}/${sessions.length} sessions; ${failed.length} failed`)
-return { ok, failed }
+
+// ---- Phase 2: one manager per category group -------------------------------------------
+const groups = input.groups || []
+const MGR_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  required: ['category', 'managerTitle', 'managerTldr', 'managerPrompt', 'mapMarkdown', 'subChips'],
+  properties: {
+    category: { type: 'string' },
+    managerTitle: { type: 'string', description: 'If the group has a real top-level session: "[Manager] " + its ORIGINAL title verbatim. Otherwise "[Manager] <category>".' },
+    managerTldr: { type: 'string', description: '1-2 plain sentences: the category mission + that this session coordinates N sub-sessions, it does not do their work.' },
+    managerPrompt: { type: 'string', description: 'LEAN cold-start prompt for the manager (<= ~1500 chars): CATEGORY GOAL (one outcome), the MAP PATH to read first (the caller fills in `{{MAP_PATH}}` and `{{CHIPS_PATH}}` verbatim — keep the placeholders; add {{PLAYBOOK_PATH}} as the decision playbook for the manager), the manager contract (spawn each sub-chip from the chips file in dependsOn order via spawn_task, skip isComplete, never do sub-session work itself, update the map status table as chips report, one decision at a time to the human), and any category-level GATE (prod mutation, founder decision). Pointers, not payloads — the map holds the detail.' },
+    mapMarkdown: { type: 'string', description: 'The MAP document the manager reads (full detail lives here, not in the prompt): (1) category goal + victory-condition; (2) a status table, one row per sub-session: title | state (done / open PR / blocked / interrupted / not started) | PR+branch | what remains | dependsOn; (3) ordering + which sub-sessions are independent (parallel) vs sequenced; (4) cross-session overlap/conflicts (two sessions touching one file/ADR/ticket) and who owns it; (5) category-level open decisions; (6) for the manager itself: its own prior state if it is a real session.' },
+    subChips: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['cli', 'mergedFrom', 'title', 'tldr', 'prompt', 'dependsOn', 'spawn'],
+        properties: {
+          cli: { type: 'string', description: 'cliSessionId of the mined sub-session this chip resumes (for a merged unit: the first member)' },
+          mergedFrom: { type: 'array', items: { type: 'string' }, description: 'cli ids folded into this chip by a high-confidence merge; just [cli] when not merged.' },
+          title: { type: 'string', description: 'chipTitle verbatim' },
+          tldr: { type: 'string' },
+          prompt: { type: 'string', description: 'the mined chipPrompt, unchanged except: add one line "Your manager is the session titled <managerTitle>; report your PR/outcome there." and keep the ⚠️ WORKTREE NOTE first when present.' },
+          dependsOn: { type: 'array', items: { type: 'string' }, description: 'cli ids that must land/report first. Empty when independent.' },
+          spawn: { type: 'boolean', description: 'false when the sub-session isComplete (report only, no chip).' },
+        },
+      },
+    },
+  },
+}
+
+const CONS_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  required: ['category', 'merges', 'drops', 'keepSeparate', 'managerDecisions'],
+  properties: {
+    category: { type: 'string' },
+    merges: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['memberClis', 'mergedTitle', 'mergedGoal', 'rationale', 'confidence'],
+        properties: {
+          memberClis: { type: 'array', items: { type: 'string' }, description: '2+ cli ids that are really ONE piece of work (same ticket/artifact, one is a strict subset or a follow-up of the other, or they would edit the same files).' },
+          mergedTitle: { type: 'string', description: 'The ORIGINAL title of the member that carries the mission (verbatim), not a new invented name.' },
+          mergedGoal: { type: 'string', description: 'One outcome sentence covering all members.' },
+          rationale: { type: 'string', description: 'Cite the concrete overlap: shared ticket id, file, ADR, or one session\'s output feeding the other.' },
+          confidence: { type: 'string', enum: ['high', 'medium', 'low'], description: 'high = same ticket/artifact or strict subset, safe to apply with no human or manager judgement. medium/low = plausible; the manager decides.' },
+        },
+      },
+    },
+    drops: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false, required: ['cli', 'reason'],
+        properties: { cli: { type: 'string' }, reason: { type: 'string', description: 'superseded by <cli>, duplicate of <cli>, or already done — name the evidence.' } },
+      },
+    },
+    keepSeparate: { type: 'array', items: { type: 'string' }, description: 'cli ids that look related but must stay separate, with the reason appended after a colon.' },
+    managerDecisions: { type: 'array', items: { type: 'string' }, description: 'Judgement calls you could not settle from the mined data (ordering, ownership, scope cut, merge vs split). Each one phrased as a question with your recommended answer. 0-5 items; empty is fine.' },
+  },
+}
+
+const consolidations = await parallel(groups.map((g) => () => {
+  const members = ok.filter(r => (g.memberClis || []).includes(r._cli))
+  return agent(
+`You are the CONSOLIDATION REVIEWER for ONE category of Claude Code sessions. READ-ONLY. The goal is FEWER, more concise units of work with no lost obligations — not a tidy-looking list.
+
+CATEGORY: ${g.category}
+MINED SESSIONS (JSON):
+${JSON.stringify(members.map(m => ({ cli: m._cli, title: m.title, sessionGoal: m.sessionGoal, lastState: m.lastState, remainingWork: m.remainingWork, isComplete: m.isComplete, prState: m.prState, branch: m.branch, gitState: m.gitState })), null, 1)}
+
+JUDGE
+- MERGE only when two or more sessions are one piece of work: same ticket/artifact, one a strict subset or direct follow-up of another, or they would edit the same files. Different tickets that merely share a theme are NOT merges.
+- A merge never loses a remainingWork item: the union must survive. If a merged unit would exceed one session's reasonable scope (more than ~3 independent deliverables), downgrade confidence to medium.
+- DROP only with named evidence (superseded by / duplicate of / already merged+baked). Never drop for being old.
+- Anything you cannot settle from the data goes to managerDecisions with your recommended answer. Do not guess.
+- confidence=high ONLY where a wrong merge is cheap to undo and the evidence is a shared ticket id or identical artifact.
+Return ONLY the structured object.`,
+    { label: `consolidate:${g.category}`.slice(0, 60), phase: 'Consolidate', schema: CONS_SCHEMA, agentType: 'general-purpose', model: 'sonnet' }
+  ).then(r => r || { category: g.category, _failed: true })
+}))
+log(`consolidated ${consolidations.filter(c => c && !c._failed).length}/${groups.length} groups`)
+
+const managers = await parallel(groups.map((g, gi) => () => {
+  const members = ok.filter(r => (g.memberClis || []).includes(r._cli))
+  const cons = consolidations[gi] && !consolidations[gi]._failed ? consolidations[gi] : { merges: [], drops: [], keepSeparate: [], managerDecisions: [] }
+  return agent(
+`You are the MANAGER-AUTHOR for ONE category of Claude Code sessions. READ-ONLY: no edits, no builds, no pushes. Your input is the already-mined result for every sub-session in the category; you do not re-mine transcripts.
+
+CATEGORY: ${g.category}
+TOP-LEVEL (manager) SESSION: ${g.manager ? g.manager.title + ' [' + g.manager.cli + ']' : '(none — synthetic manager)'}
+
+MINED SUB-SESSIONS (JSON):
+${JSON.stringify(members, null, 1)}
+
+CONSOLIDATION REVIEW (a prior reviewer's proposals):
+${JSON.stringify(cons, null, 1)}
+
+Produce the manager chip, the MAP, and one sub-chip spec per sub-session (spawn=false for isComplete ones).
+RULES
+- If the TOP-LEVEL session appears in MINED SUB-SESSIONS (its cli matches), it is the manager's OWN prior state: put it in the map section 6 and in managerPrompt's goal, and do NOT emit a subChip for it.
+- APPLY merges whose confidence is "high": emit ONE subChip for the merged unit (cli = the first memberClis entry, mergedFrom = all memberClis, prompt = a single 5-part prompt whose REMAINING STEPS is the union of the members'). Do NOT apply medium/low merges: list each in the map under "Decisions owed to the manager" with its rationale and your recommendation, and keep the members as separate subChips until the manager decides.
+- Honour drops (spawn=false, noted in the map with the evidence). Carry managerDecisions into that same map section verbatim.
+- The manager COORDINATES. It never implements sub-session work and never re-derives a sub-session's plan; each sub-chip carries its own mined prompt.
+- Detect real dependencies from the mined goals/stop-states (blocked-on, shared files/ADRs/tickets, one's output feeding another). Do not invent ordering: independent sub-sessions get empty dependsOn so they spawn together (cap the first wave at 5).
+- Map status must not overclaim: use each sub-session's isComplete / prState / lastState exactly; an open bake or unmerged PR is not done.
+- If two sub-sessions overlap on the same artifact, say so in the map and name which one owns it.
+- managerPrompt keeps the literal placeholders {{MAP_PATH}}, {{CHIPS_PATH}} and {{PLAYBOOK_PATH}}; the caller substitutes them.
+Return ONLY the structured object.`,
+    { label: `manage:${g.category}`.slice(0, 60), phase: 'Manage', schema: MGR_SCHEMA, agentType: 'general-purpose', model: 'sonnet' }
+  ).then(r => r || { category: g.category, _failed: true })
+}))
+
+return { ok, failed, consolidations: consolidations.filter(c => c && !c._failed), managers: managers.filter(m => m && !m._failed), managersFailed: managers.filter(m => !m || m._failed).map(m => m && m.category) }
