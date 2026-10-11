@@ -26,8 +26,8 @@ never here.
 ## Matt Pocock skills
 
 - Source: <https://github.com/mattpocock/skills>
-- Last adopted upstream commit: `c55ee46073ed923f86ce59a5eb3b6d895095d1b7`
-- Reviewed / adopted: 2026-09-27
+- Last adopted upstream commit: `49dd158d1076134a641b33efb035946536778336`
+- Reviewed / adopted: 2026-10-11
 
 ### Adopted (his latest is canonical)
 
@@ -57,7 +57,8 @@ are now adopted, with Linear added as a **first-class tracker option** (see delt
 | `setup-matt-pocock-skills` | added first-class **Linear** tracker option + `issue-tracker-linear.md` seed (Linear MCP + Wayfinding ops); default-posture stays generic | Linear support is a public-useful addition; the per-repo default is configured, not hard-coded |
 | `triage` | `AGENT-BRIEF.md` "GitHub issue or PR" → tracker-neutral wording | tracker-abstracted |
 | `grill-with-docs`, `implement`, `improve-codebase-architecture`, `to-spec`, `to-tickets`, `triage`, `wayfinder` | omit `disable-model-invocation: true` | preserve existing model-invoked reach used by composed engineering flows |
-| `ask-matt` | omit router entries for uninstalled `to-questionnaire` and `wait-what`; describe investigation as adversarially cross-verified | route only to installed flows, with the actual investigation contract |
+| `ask-matt` | omit router entries for uninstalled `to-questionnaire`, `wait-what`, `implement-spec`, `pr` and `retro`; describe investigation as adversarially cross-verified | route only to installed flows, with the actual investigation contract |
+| `domain-modeling` and every adopted skill that names it | keep the `CONTEXT.md` / `CONTEXT-MAP.md` / `CONTEXT-FORMAT.md` convention; upstream renamed it to `GLOSSARY.md` / `GLOSSARY-MAP.md` / `GLOSSARY-FORMAT.md` on 2026-10-07 (`d80fa0f`, `e484a80`). Provisional, awaiting a ruling | consumer repos of keel use `CONTEXT.md` today |
 | all | `license: MIT` metadata | retain existing vendored license metadata |
 | all | strip `agents/openai.yaml` | Claude-first, marker-free |
 
@@ -75,6 +76,8 @@ the remaining adopted skills).
   keel's `standards-spec-review` (`/review`) is already a fork of it. Not installed;
   instead its one genuine improvement — the **Fowler 12-smell baseline** — is cherry-picked
   into `standards-spec-review`'s Standards sub-agent prompt.
+- **Newly stable or new upstream, 2026-10-11** (`implement-spec`, `pr`, `retro`, `chief-of-staff`) — not
+  installed; no bulk installs. `chief-of-staff` is still `in-progress` (beta) upstream.
 - **Deprecated upstream** (`design-an-interface`, `qa`, `request-refactor-plan`,
   `ubiquitous-language`) — skipped; upstream marks them deprecated.
 - **Matt-personal / niche net-new** (`scaffold-exercises`, `obsidian-vault`, `edit-article`,
@@ -107,6 +110,25 @@ its local-only `issue-tracker-linear.md`, `tdd/SKILL.md` and `mocking.md`,
 `triage/AGENT-BRIEF.md`, `wayfinder/SKILL.md`, and
 `writing-for-agents/SKILL.md`. All other adopted support files match upstream.
 No upstream interface stubs or new catalog entries were adopted.
+
+## 2026-10-11 adoption receipt
+
+Resynced the 24-skill catalog from immutable upstream
+`49dd158d1076134a641b33efb035946536778336`, using previous adopted upstream
+`c55ee46073ed923f86ce59a5eb3b6d895095d1b7` as the three-way base. Changed
+adopted skills: `ask-matt`, `diagnosing-bugs`, `grilling`, `handoff`, `implement`,
+`setup-matt-pocock-skills` (SKILL.md, `issue-tracker-github.md`,
+`issue-tracker-gitlab.md`, `triage-labels.md`), `tdd`, `teach`, `to-tickets`,
+`wayfinder`, `wizard/template.sh`. Upstream's `GLOSSARY.md` rename was reversed
+in the staged upstream tree before merging (see the delta table), so no adopted
+file changed for it. Three conflicts (`ask-matt`, `implement`, `wayfinder`)
+resolved by adopting upstream wording and re-applying the `/review`,
+`/investigation` and uninstalled-flow deltas.
+
+`resolving-merge-conflicts` was removed upstream (`daa01d8`) but is held
+unchanged with its approved deltas pending a ruling. `implement-spec`, `pr`,
+`retro` and `chief-of-staff` are new upstream entries and were not adopted.
+No upstream interface stubs were adopted.
 
 ## Update procedure (resync to a newer upstream)
 
