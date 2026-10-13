@@ -161,6 +161,30 @@ class EnvelopeAndReportTests(unittest.TestCase):
             self.assertEqual(out["unanswered"], {"edge-case-miner": ["Q1"]})
             self.assertEqual(out["codexUnanswered"], {"codex-adversarial": ["Q3"]})
 
+    def test_put_envelope_writes_the_returned_envelope_and_refuses_a_mangled_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = make_run(tmp)
+            path = run / "envelopes" / "codex-frontier.json"
+            env = {"lane": "codex-frontier", "verdict": "redesign", "answered_questions": ["Q4"],
+                   "findings": [{"id": "FR-1", "severity": "CRITICAL", "title": "it's `wrong` \u2014 $HOME \U0001f600"}]}
+            text = json.dumps(env, ensure_ascii=False)
+            put = lambda t, s, lane="codex-frontier": call("put-envelope", "--run", str(run), "--lane", lane, "--json", t, "--sum", str(s))
+            # A relay that changed one character, a wrong lane and a malformed finding all write nothing.
+            for t, s, lane in ((text.replace("FR-1", "FR-2"), run_dir.text_sum(text), "codex-frontier"),
+                               (text, run_dir.text_sum(text), "codex-standard"),
+                               (text.replace("CRITICAL", "HIGH"), run_dir.text_sum(text.replace("CRITICAL", "HIGH")), "codex-frontier"),
+                               ("{not json", run_dir.text_sum("{not json"), "codex-frontier")):
+                rc, out = put(t, s, lane)
+                self.assertEqual(rc, 1, out)
+                self.assertFalse(list((run / "envelopes").iterdir()))
+            rc, out = call("check-envelopes", "--run", str(run), "--lanes", "codex-frontier", "--codex", "codex-frontier")
+            self.assertEqual(out["missing"], ["codex-frontier: missing or unparsable"])
+            rc, out = put(text, run_dir.text_sum(text))
+            self.assertEqual((rc, out["findings"]), (0, 1), out)
+            self.assertEqual(json.loads(path.read_text()), env)
+            rc, out = call("check-envelopes", "--run", str(run), "--lanes", "codex-frontier", "--codex", "codex-frontier")
+            self.assertEqual((out["missing"], out["criticalMajor"]), ([], {"codex-frontier": ["FR-1"]}))
+
     def test_duplicate_ids_and_bad_severity_are_invalid(self):
         with tempfile.TemporaryDirectory() as tmp:
             run = make_run(tmp)

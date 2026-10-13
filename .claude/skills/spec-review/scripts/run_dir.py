@@ -452,16 +452,49 @@ def cmd_drift_briefs(a):
     return emit({"ok": True, "briefs": briefs, "dropped": max(0, len(items) - 5)})
 
 
-def read_envelope(run, label):
-    env = read_json(Path(run) / "envelopes" / f"{label}.json")
+def envelope_error(env):
     if not isinstance(env, dict):
-        return None, "missing or unparsable"
+        return "missing or unparsable"
     if not isinstance(env.get("answered_questions"), list) or not isinstance(env.get("findings"), list):
-        return None, "answered_questions/findings missing"
+        return "answered_questions/findings missing"
     for f in env["findings"]:
         if not isinstance(f, dict) or not f.get("id") or f.get("severity") not in SEVERITIES or not f.get("title"):
-            return None, f"malformed finding {f!r}"
-    return env, None
+            return f"malformed finding {f!r}"
+    return None
+
+
+def read_envelope(run, label):
+    env = read_json(Path(run) / "envelopes" / f"{label}.json")
+    err = envelope_error(env)
+    return (None, err) if err else (env, None)
+
+
+def text_sum(text):
+    """Checksum over UTF-16 code units; textSum in spec-review.workflow.js computes the same number."""
+    h = 0
+    data = text.encode("utf-16-le")
+    for i in range(0, len(data), 2):
+        h = (h * 31 + int.from_bytes(data[i:i + 2], "little")) & 0xFFFFFFFF
+    return h
+
+
+def cmd_put_envelope(a):
+    """Write the envelope an agent RETURNED. The JSON travels inside a relayed command, so the
+    caller's checksum must match before anything is written: a mangled relay writes nothing."""
+    if str(text_sum(a.json)) != a.sum:
+        return emit({"ok": False, "errors": [f"{a.lane}: envelope JSON does not match its checksum (relay mangled it); nothing written"]}, False)
+    try:
+        env = json.loads(a.json)
+    except ValueError:
+        env = None
+    err = envelope_error(env)
+    if not err and env.get("lane") != a.lane:
+        err = f"envelope names lane {env.get('lane')!r}"
+    if err:
+        return emit({"ok": False, "errors": [f"{a.lane}: {err}; nothing written"]}, False)
+    path = Path(a.run) / "envelopes" / f"{a.lane}.json"
+    write(path, json.dumps(env, indent=1) + "\n")
+    return emit({"ok": True, "lane": a.lane, "path": str(path), "findings": len(env["findings"])})
 
 
 def cmd_check_envelopes(a):
@@ -762,6 +795,7 @@ def main(argv=None):
     add("init", cmd_init, "spec", "root", "sid", "runtime", "skill-dir")
     add("lanes", cmd_lanes, "spec", "lanes")
     add("check-envelopes", cmd_check_envelopes, "lanes", "codex")
+    add("put-envelope", cmd_put_envelope, "lane", "json", "sum")
     add("codex-status", cmd_codex_status)
     add("drift-briefs", cmd_drift_briefs, "spec")
     add("merge-check", cmd_merge_check, "lanes")

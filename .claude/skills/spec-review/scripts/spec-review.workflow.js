@@ -117,16 +117,22 @@ function lastJsonObject(text) {
   }
   return null
 }
+// Checksum over UTF-16 code units; text_sum in run_dir.py computes the same number.
+function textSum(text) {
+  let h = 0
+  for (let i = 0; i < text.length; i++) h = (Math.imul(h, 31) + text.charCodeAt(i)) >>> 0
+  return h
+}
 // EXTRACT:END
 
 // Run one run_dir.py subcommand through a script-runner and parse its JSON. The relayed stdout
 // can be mangled by a cheap model, so parse the LAST JSON-object line, retry once on sonnet, then throw.
 // soft=true returns the parsed object even when ok is false (the caller decides).
-async function py(phaseName, sub, flags, soft) {
+async function py(phaseName, sub, flags, soft, models) {
   const cmd = `python3 ${sq(SKILL + '/scripts/run_dir.py')} ${sub} --run ${sq(RUN)} ${flags || ''}`
   let j = null
   let last = ''
-  for (const model of ['haiku', 'sonnet']) {
+  for (const model of models || ['haiku', 'sonnet']) {
     const r = await agent(
       `ROLE: script-runner\nRun exactly this one command with the Bash tool and do nothing else. Put the command's stdout in the stdout field BYTE FOR BYTE (it is JSON on one line: never summarize, reinterpret, shorten or replace it with a field from it) and its exit code in exit_code.\n\n${cmd}`,
       { label: `py:${sub}`, phase: phaseName, model, schema: PYOUT })
@@ -137,6 +143,23 @@ async function py(phaseName, sub, flags, soft) {
   if (!j) throw new Error(`spec-review: '${sub}' printed no JSON object after a sonnet retry: ${last}`)
   if (!j.ok && !soft) throw new Error(`spec-review: '${sub}' failed: ${(j.errors || []).join('; ') || JSON.stringify(j).slice(0, 300)}`)
   return j
+}
+
+// The workflow, not the agent, writes the envelope file: an agent can return a valid envelope
+// through StructuredOutput and still skip its own file write. run_dir.py refuses a JSON that
+// does not match the checksum, so a failed write leaves no file and check-envelopes reports it.
+async function putEnvelope(phaseName, label, env) {
+  const text = JSON.stringify(env)
+  const flags = `--lane ${sq(label)} --sum ${textSum(text)} --json ${sq(text)}`
+  let why = ''
+  for (const model of ['haiku', 'sonnet']) {
+    try {
+      const r = await py(phaseName, 'put-envelope', flags, true, [model])
+      if (r.ok) return
+      why = (r.errors || []).join('; ')
+    } catch (e) { why = String(e.message || e) }
+  }
+  note(`${label}: envelope NOT written: ${why}`)
 }
 
 // The gate rule: a lane runs when its profile lists it OR its domain gate fired.
@@ -288,12 +311,13 @@ async function synthesize() {
   if (subs.length) await py('Synthesize', 'lanes', `--spec ${sq(SPEC)} --lanes ${sq(labelsOf(subs).join(','))}`)
 
   const extractors = live.map((e) => () => agent(
-    `ROLE: codex-envelope-extractor\nRead the Codex lane output ${RUN}/codex/${e.label}.out.md (the lane's full findings; do not edit it). List EVERY finding in it, then write ${RUN}/envelopes/${e.label}.json: {"lane": "${e.label}", "verdict": "<the lane's verdict word, or ''>", "answered_questions": [<the Q-ids the lane answered; assigned ids are in ${RUN}/assignments.json under "${e.label}">], "findings": [{"id": "${e.idPrefix}-1", "severity": "...", "title": "<one line>"}, ...]} with ids ${e.idPrefix}-1.. in file order. ${SEV_MAP} ${e.label === 'codex-research' ? 'Research items use severity ELEVATE or CAUTION, never CRITICAL/MAJOR/MINOR.' : ''} ${e.label === 'codex-frontier' ? 'Frontier: each of its items (1) most-likely-wrong decision, (2) the cross-cutting risks, (3) best-in-class delta becomes a finding; use its stated severity, else MAJOR (CRITICAL when its verdict is redesign for item 1).' : ''} Never drop a finding to keep the envelope short. Reply with the same object via StructuredOutput.`,
+    `ROLE: codex-envelope-extractor\nRead the Codex lane output ${RUN}/codex/${e.label}.out.md (the lane's full findings; do not edit it). List EVERY finding in it and build this envelope object: {"lane": "${e.label}", "verdict": "<the lane's verdict word, or ''>", "answered_questions": [<the Q-ids the lane answered; assigned ids are in ${RUN}/assignments.json under "${e.label}">], "findings": [{"id": "${e.idPrefix}-1", "severity": "...", "title": "<one line>"}, ...]} with ids ${e.idPrefix}-1.. in file order. ${SEV_MAP} ${e.label === 'codex-research' ? 'Research items use severity ELEVATE or CAUTION, never CRITICAL/MAJOR/MINOR.' : ''} ${e.label === 'codex-frontier' ? 'Frontier: each of its items (1) most-likely-wrong decision, (2) the cross-cutting risks, (3) best-in-class delta becomes a finding; use its stated severity, else MAJOR (CRITICAL when its verdict is redesign for item 1).' : ''} Never drop a finding to keep the envelope short. Reply with that object via StructuredOutput; write no file (the workflow saves your reply as ${RUN}/envelopes/${e.label}.json).`,
     { label: e.label + ':extract', phase: 'Synthesize', agentType: 'general-purpose', model: 'sonnet', schema: ENVELOPE }))
   const critics = subs.map((e) => () => agent(`ROLE: ${e.label}\n${laneBrief(RUN + '/prompts/' + e.label + '.md')}`, { ...laneAgent(e), phase: 'Synthesize' }))
   const got = await parallel([...extractors, ...critics])
   const mkLabels = [...live, ...subs].map((e) => e.label)
   mkLabels.forEach((l, i) => { if (!got[i]) note(`${l}: FAILED (extractor/critic returned nothing)`) })
+  await parallel(live.map((e, i) => ({ e, env: got[i] })).filter((x) => x.env).map((x) => () => putEnvelope('Synthesize', x.e.label, { ...x.env, lane: x.e.label })))
 
   // Mechanical envelope + coverage + manifest-presence check over everything that ran.
   const planned = [...labelsOf(PLAN.run).filter((l) => !codex.some((c) => c.label === l)), ...codex.map((c) => c.label), ...labelsOf(subs)]
