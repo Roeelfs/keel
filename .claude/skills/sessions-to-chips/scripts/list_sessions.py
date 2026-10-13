@@ -17,7 +17,7 @@ Usage:
 
 Lineage: a chip's JSON carries spawnedFrom.sessionId = the session that spawned it. That is
 the sidebar's top-level / sub-level structure (a parent row with its chips nested under it).
-`group_sessions.py` turns this lineage into one manager-led group per category.
+`group_sessions.py` turns this lineage into one group per category (origin session + members).
 """
 import json, glob, os, sys, argparse, datetime
 

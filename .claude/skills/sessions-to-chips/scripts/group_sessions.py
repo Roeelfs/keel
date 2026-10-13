@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Group a target set of desktop sessions into manager-led categories.
+"""Group a target set of desktop sessions into categories (one origin + its members).
 
 Structure the sidebar already has: a TOP-LEVEL session with chips nested under it
-(`spawnedFrom.sessionId` in each chip's local_*.json). One category = one manager +
-its sub-sessions. This script computes that, deterministically, from the store.
+(`spawnedFrom.sessionId` in each chip's local_*.json). One category = one origin session +
+the sessions it spawned. This script computes that, deterministically, from the store.
 
 Usage:
   group_sessions.py --grep "Spec "                       # target set by title substring
@@ -11,8 +11,8 @@ Usage:
   group_sessions.py --root "Built-in apps concept"       # a root session + its whole subtree
   options: --categories cats.json   {"Apps": ["title substr", ...], ...}  explicit overrides
            --include-archived       default skips archived rows
-Output (stdout, JSON): {"groups":[{category, manager, members[], source}], "unplaced":[...]}
-  manager  = the topmost ancestor present in the set (or the root named by --root)
+Output (stdout, JSON): {"groups":[{category, origin, members[], source}], "unplaced":[...]}
+  origin   = the topmost ancestor present in the set (or the root named by --root)
   source   = "lineage" | "categories-file" | "singletons"
 Sessions with no lineage and no --categories hit land in `unplaced`: the caller (a mining
 agent or the human) must assign a category — never guess one from a single title.
@@ -51,7 +51,11 @@ def main():
     by_id = {r["sessionId"]: r for r in rows}
 
     if a.root:
-        roots = [r for r in rows if a.root.lower() in r["title"].lower()]
+        needle = a.root.lower()
+        roots = [r for r in rows if needle in r["title"].lower()]
+        if len(roots) > 1:  # prefer an exact title, then drop role-prefixed chips from earlier runs
+            exact = [r for r in roots if r["title"].lower() == needle]
+            roots = exact or [r for r in roots if not r["title"].startswith("[Manager]")] or roots
         if len(roots) != 1:
             sys.exit(f"--root matched {len(roots)} sessions; narrow it: " + "; ".join(r["title"] for r in roots))
         target = [roots[0]] + subtree(rows, roots[0]["sessionId"])
@@ -75,7 +79,7 @@ def main():
         for cat, needles in json.load(open(a.categories)).items():
             ms = [r for r in target if any(n.lower() in r["title"].lower() for n in needles)]
             if ms:
-                groups[cat] = {"category": cat, "manager": None, "members": ms, "source": "categories-file"}
+                groups[cat] = {"category": cat, "origin": None, "members": ms, "source": "categories-file"}
                 placed.update(r["sessionId"] for r in ms)
     for r in target:
         if r["sessionId"] in placed:
@@ -83,7 +87,7 @@ def main():
         t = top(r)
         if t["sessionId"] == r["sessionId"] and not any(c["parentSessionId"] == r["sessionId"] for c in target):
             continue  # a childless root: handled below
-        g = groups.setdefault(t["sessionId"], {"category": t["title"], "manager": t, "members": [], "source": "lineage"})
+        g = groups.setdefault(t["sessionId"], {"category": t["title"], "origin": t, "members": [], "source": "lineage"})
         if r["sessionId"] != t["sessionId"]:
             g["members"].append(r)
         placed.add(r["sessionId"])
@@ -91,7 +95,7 @@ def main():
     out = {"groups": [], "unplaced": [slim(r) for r in unplaced]}
     for g in groups.values():
         out["groups"].append({"category": g["category"], "source": g["source"],
-                              "manager": slim(g["manager"]) if g["manager"] else None,
+                              "origin": slim(g["origin"]) if g["origin"] else None,
                               "members": [slim(m) for m in sorted(g["members"], key=lambda x: x["lastActivityAt"])]})
     out["groups"].sort(key=lambda g: g["category"].lower())
     print(json.dumps(out, indent=2))
