@@ -26,10 +26,12 @@ MANIFEST = run_dir.load_manifest()
 # why it had to grow; never to re-absorb lane briefs, tables or the report template (those live
 # in scripts/spec-review.workflow.js, prompts/ and report-template.md).
 # Recorded 2026-10-04: 67488B (pre-rewrite) -> launcher size below.
-MAX_SKILL_BYTES = 8925
+# 2026-10-13: 8925 -> 9254. Added the legalSurface gate to Step 1 and the hardStopReasons sentence to Step 5
+# (the legal-auditor lane); both are launcher decisions the main loop makes, so they cannot live elsewhere.
+MAX_SKILL_BYTES = 9254
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
-SUPPLEMENTS = {"adr-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "critic-hotfix", "critic-adversarial", "critic-frontier"}
+SUPPLEMENTS = {"adr-auditor", "legal-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "critic-hotfix", "critic-adversarial", "critic-frontier"}
 
 
 def declared(text, key):
@@ -106,6 +108,23 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual((e["kind"], e["gate"], e["profiles"]), ("claude", "liveSurface", []))
         self.assertTrue((SKILL_DIR.parent / "improve-codebase-architecture" / "SKILL.md").is_file(),
                         "the lane reads the improve-codebase-architecture skill as its lens")
+
+    def test_legal_auditor_runs_in_every_full_review_and_by_gate_elsewhere(self):
+        e = next(x for x in MANIFEST["lanes"] if x["label"] == "legal-auditor")
+        self.assertEqual((e["kind"], e["agentType"], e["gate"], e["profiles"]), ("claude", "legal-auditor", "legalSurface", ["full"]))
+        for field in ("register_found", "sources_read", "legal_commitment_breach", "founder_approval_marker_present"):
+            self.assertIn(field, e["brief"], f"the brief must ask for envelope field {field}")
+            self.assertIn(field + ":", WORKFLOW_JS.read_text(), f"the ENVELOPE schema must carry {field}")
+
+    def test_every_named_agent_lane_has_an_agent_file_with_a_model(self):
+        agents_dir = SKILL_DIR.parents[1] / "agents"
+        generic = {"general-purpose", "codex-dispatch"}
+        named = sorted({e["agentType"] for e in MANIFEST["lanes"] if e["agentType"] not in generic})
+        self.assertIn("legal-auditor", named)
+        for name in named:
+            path = agents_dir / f"{name}.md"
+            self.assertTrue(path.is_file(), f"lane agentType {name} has no agent file at {path}")
+            self.assertRegex(path.read_text().split("---", 2)[1], r"(?m)^model: \S+", f"{name}.md frontmatter must pin a model")
 
     def test_operator_plane_architect_owns_the_operator_surface_gate(self):
         e = next(x for x in MANIFEST["lanes"] if x["label"] == "operator-plane-architect")
