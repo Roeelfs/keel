@@ -4,6 +4,7 @@ single source of lane data, and everything else (prompt files, SKILL.md) must ag
 
 Run: python3 -m unittest discover -s .claude/skills/spec-review/scripts
 """
+import json
 import re
 import shutil
 import subprocess
@@ -146,8 +147,19 @@ eq(lastJsonObject('{"ok":true}\\ntrailing prose'), {ok: true})
 eq(lastJsonObject('[1,2]'), null)
 eq(lastJsonObject(''), null)
 """
+        # The workflow's checksum must equal run_dir.text_sum, or put-envelope refuses every write.
+        sample = '{"title":"it\'s `x` \u2014 \u05e2\u05d1\u05e8\u05d9\u05ea \U0001f600 $HOME"}'
+        probe += f"eq(textSum({json.dumps(sample)}), {run_dir.text_sum(sample)})\n"
         r = subprocess.run([node, "-e", probe], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_workflow_not_the_extractor_writes_codex_envelopes(self):
+        src = WORKFLOW_JS.read_text()
+        prompt = next(l for l in src.splitlines() if "ROLE: codex-envelope-extractor" in l)
+        self.assertIn("write no file", prompt)
+        self.assertNotIn("then write", prompt)
+        self.assertIn("putEnvelope('Synthesize', x.e.label", src)
+        self.assertIn("'put-envelope'", src)
 
     def test_shell_wrapper_parses(self):
         r = subprocess.run(["bash", "-n", str(HERE / "run-codex-lanes.sh")], capture_output=True, text=True)
