@@ -1,24 +1,25 @@
 export const meta = {
   name: 'mine-sessions-to-chips',
-  description: 'Mine N Claude sessions in parallel for overall goal + exact continuation point to author resume chips',
+  description: 'Mine N Claude sessions in parallel, then narrate each category as one story + unit ledger for a single orchestrator',
   phases: [
-    { title: 'Mine', detail: 'one read-only agent per session' },
-    { title: 'Consolidate', detail: 'one sonnet reviewer per category group proposes merges/drops across the mined sessions' },
-    { title: 'Manage', detail: 'one read-only synthesis agent per category group -> manager chip + map + sub-chip specs' },
+    { title: 'Mine', detail: 'one read-only agent per session: goal, state AND the intelligence it produced' },
+    { title: 'Narrate', detail: 'one sonnet narrator per category: the story, settled calls, merged/retired units' },
   ],
 }
 
 // Invoke via the Workflow tool:
 //   Workflow({ scriptPath: "<skill>/scripts/mine_workflow.js",
-//             args: { mineScript: "<skill>/scripts/mine_session.py",
-//                     sessions: [ { idx, title, cli, worktreeName, branch, pr, transcript }, ... ] } })
-// OPTIONAL `groups` (from group_sessions.py): [{ category, manager:{title,cli}|null, memberClis:[cli,...] }].
-//   When present, phase 2 synthesizes ONE manager chip per group from the mined results.
-//   Phase 2 (Consolidate) reviews the mined group and merges what is clearly one piece of work;
-//   the rest is handed to the manager as decisions it owns (see MANAGER_PLAYBOOK.md).
-//   Returns { ok, failed, consolidations, managers:[{category, managerTitle, managerTldr, managerPrompt, mapMarkdown, subChips[]}] }.
+//             args: { mineScript: "<skill>/scripts/mine_session.py", date: "YYYY-MM-DD",
+//                     sessions: [ { idx, title, cli, worktreeName, branch, pr, transcript }, ... ],
+//                     groups: [ { category, origin:{title,cli}|null, memberClis:[cli,...] oldest->newest } ] } })
+// `groups` comes from group_sessions.py (omit for a single flat set; then no Narrate phase runs).
+// Returns { ok, failed, stories:[{category, flat, done, orchestratorTitle, orchestratorTldr,
+//   orchestratorPrompt, storyMarkdown, units[], warnings[]}], storiesFailed }.
+//   - ONE orchestrator per category (orchestratorPrompt); flat=true -> a single unit, spawn it directly.
+//   - storyMarkdown is the one artifact: narrative + established calls + unit ledger + unit prompts.
+//   - warnings[] lists any obligation the narrator tried to drop; the script re-adds it as a unit.
 // Pass `transcript` (abs path from find_transcript.py) so agents don't re-glob.
-// Pass `title` VERBATIM — it is the desktop session name and becomes the chip title unchanged.
+// Pass `title` VERBATIM - it is the desktop session name and becomes the chip title unchanged.
 // GOTCHAS baked in: `args` can arrive as a STRING (JSON.parse it); `process` is undefined;
 // Date.now()/Math.random() throw. Agents are READ-ONLY (no verify / heavy ops / push).
 
@@ -28,7 +29,7 @@ const mineScript = input.mineScript
 
 const SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['idx', 'title', 'branch', 'worktree', 'prState', 'sessionGoal', 'lastState', 'continuationPhrase', 'gitState', 'remainingWork', 'isComplete', 'chipTitle', 'chipTldr', 'chipPrompt'],
+  required: ['idx', 'title', 'branch', 'worktree', 'prState', 'sessionGoal', 'lastState', 'continuationPhrase', 'gitState', 'remainingWork', 'isComplete', 'contribution', 'established', 'deadEnds', 'produces', 'needs', 'openQuestions', 'chipTitle', 'chipTldr', 'chipPrompt'],
   properties: {
     idx: { type: 'number' },
     title: { type: 'string', description: 'the ORIGINAL desktop session title, passed in, echoed back verbatim' },
@@ -48,6 +49,12 @@ const SCHEMA = {
       },
     },
     remainingWork: { type: 'array', items: { type: 'string' }, description: 'concrete ordered steps to truly finish the mission. Empty if genuinely complete.' },
+    contribution: { type: 'string', description: '1-3 sentences: what this session ESTABLISHED for the mission (a finding, a decision, a built artifact) as distinct from lastState, which is progress against its goal. The category narrative is built from these.' },
+    established: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['claim', 'evidence'], properties: { claim: { type: 'string' }, evidence: { type: 'string', description: 'the PR/ticket comment/ADR/path/test that settled it' } } }, description: 'Durable calls, verified facts and discovered constraints a successor must NOT re-derive or re-litigate. Only claims the transcript actually settled with evidence; empty is fine.' },
+    deadEnds: { type: 'array', items: { type: 'string' }, description: 'Hypotheses or approaches this session FALSIFIED or abandoned, one line each with the reason. Prevents a successor re-running a disproven theory.' },
+    produces: { type: 'array', items: { type: 'string' }, description: 'Concrete artifacts other sessions may depend on: PR #, spec path, ticket id, ADR, migration, dataset.' },
+    needs: { type: 'array', items: { type: 'string' }, description: 'Inputs this session was waiting on from OUTSIDE itself: another session\'s output, a ticket, a founder decision.' },
+    openQuestions: { type: 'array', items: { type: 'string' }, description: 'Questions the session raised and did not close.' },
     isComplete: { type: 'boolean', description: 'true ONLY if PR MERGED AND post-merge tail (bake/verify, issue closed, no self-named follow-up) is also done.' },
     chipTitle: { type: 'string', description: 'The ORIGINAL session title (the `title` field) echoed back VERBATIM — keep the name the user recognizes. Do NOT rewrite it into a new imperative. Only trim trailing detail if it exceeds ~70 chars, never the recognizable lead.' },
     chipTldr: { type: 'string', description: '1-2 plain-English sentences; no file paths/code — the mission + what resuming it does.' },
@@ -86,6 +93,12 @@ STEPS
 5. PR state (if a PR #): \`gh pr view <#> --json state,title,url,mergedAt,mergeStateStatus,statusCheckRollup\`. If NO PR: \`git ls-remote --heads origin <branch>\`.
 6. Lightly ground remaining work where the transcript names a follow-up (issue ID in title, "bake on staging" tail, open review). You MAY grep + read your project's instruction files (CLAUDE.md / AGENTS.md). Do NOT attempt the work.
 
+INTELLIGENCE (this is what a later narrator stitches into the category story; capture it from the transcript, never invent it)
+- contribution: what this session ESTABLISHED, not how far it got. A decision, a verified fact, a built artifact.
+- established: only calls the session settled WITH evidence (PR, ticket comment, ADR, test). A hunch is an openQuestion, not an established claim.
+- deadEnds: theories falsified or approaches abandoned, with why.
+- produces / needs: the handoffs between this session and others (PR #, spec path, ticket, another session's output, a founder decision).
+
 JUDGEMENT
 - chipTitle = the ORIGINAL title above, VERBATIM. Do not invent a new imperative title; the user navigates by these names.
 - isComplete=true ONLY if PR MERGED AND the post-merge tail it itself named (bake/verify, issue close) is done. A merged PR with a "now bake / verify in prod / follow-up <ticket>" tail is NOT complete.
@@ -101,116 +114,195 @@ const ok = results.filter(r => r && !r._failed)
 const failed = results.filter(r => !r || r._failed)
 log(`mined ${ok.length}/${sessions.length} sessions; ${failed.length} failed`)
 
-// ---- Phase 2: one manager per category group -------------------------------------------
+// ---- Phase 2: one NARRATOR per category -> ONE story + a unit ledger ----------------------------
+// The narrator reads the mined intelligence of every member, tells the category's story, and
+// decides merges/retirements itself (single decision layer).
+// The script (not an LLM) renders the story file and the orchestrator prompt, so unit prompts and
+// titles reach the user verbatim from the mined results.
 const groups = input.groups || []
-const MGR_SCHEMA = {
+const date = input.date || ''
+
+const NARR_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['category', 'managerTitle', 'managerTldr', 'managerPrompt', 'mapMarkdown', 'subChips'],
+  required: ['category', 'thesis', 'storyline', 'established', 'conflicts', 'openFront', 'units', 'retired', 'gates'],
   properties: {
     category: { type: 'string' },
-    managerTitle: { type: 'string', description: 'If the group has a real top-level session: "[Manager] " + its ORIGINAL title verbatim. Otherwise "[Manager] <category>".' },
-    managerTldr: { type: 'string', description: '1-2 plain sentences: the category mission + that this session coordinates N sub-sessions, it does not do their work.' },
-    managerPrompt: { type: 'string', description: 'LEAN cold-start prompt for the manager (<= ~1500 chars): CATEGORY GOAL (one outcome), the MAP PATH to read first (the caller fills in `{{MAP_PATH}}` and `{{CHIPS_PATH}}` verbatim — keep the placeholders; add {{PLAYBOOK_PATH}} as the decision playbook for the manager), the manager contract (spawn each sub-chip from the chips file in dependsOn order via spawn_task, skip isComplete, never do sub-session work itself, update the map status table as chips report, one decision at a time to the human), and any category-level GATE (prod mutation, founder decision). Pointers, not payloads — the map holds the detail.' },
-    mapMarkdown: { type: 'string', description: 'The MAP document the manager reads (full detail lives here, not in the prompt): (1) category goal + victory-condition; (2) a status table, one row per sub-session: title | state (done / open PR / blocked / interrupted / not started) | PR+branch | what remains | dependsOn; (3) ordering + which sub-sessions are independent (parallel) vs sequenced; (4) cross-session overlap/conflicts (two sessions touching one file/ADR/ticket) and who owns it; (5) category-level open decisions; (6) for the manager itself: its own prior state if it is a real session.' },
-    subChips: {
+    thesis: { type: 'string', description: 'ONE sentence: the outcome the whole category is driving toward (a victory-condition, not a list of tickets or activities).' },
+    storyline: { type: 'array', items: { type: 'string' }, description: '4-10 beats in CAUSAL order. Each beat: which session (by title) found or decided what, and why that forced the next beat. Handoffs (one session\'s produces = another\'s needs) are beats. Not a per-session dump.' },
+    established: {
       type: 'array',
+      description: 'The category\'s settled calls, de-duplicated from the members. A successor must not re-derive or re-litigate these.',
+      items: { type: 'object', additionalProperties: false, required: ['claim', 'evidence'], properties: { claim: { type: 'string' }, evidence: { type: 'string', description: 'the PR/ticket/ADR/path/test that settled it, with the session title' } } },
+    },
+    conflicts: {
+      type: 'array',
+      description: 'Where two sessions assert different outcomes for the same thing (status, design choice, artifact owner). Resolve from evidence; needsHuman=true only when evidence cannot settle it AND it is a founder/product or prod-mutation call.',
+      items: { type: 'object', additionalProperties: false, required: ['what', 'resolution', 'needsHuman'], properties: { what: { type: 'string' }, resolution: { type: 'string', description: 'the call + the evidence, or your recommendation if needsHuman' }, needsHuman: { type: 'boolean' } } },
+    },
+    openFront: { type: 'array', items: { type: 'string' }, description: 'What is genuinely unproven or unbuilt at category level (bakes owed, decisions not yet taken). Honest: never list as done what is merged-but-unbaked.' },
+    units: {
+      type: 'array',
+      description: 'The FEWEST units of remaining work. One unit = one fresh session\'s mission.',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['cli', 'mergedFrom', 'title', 'tldr', 'prompt', 'dependsOn', 'spawn'],
+        required: ['cli', 'mergedFrom', 'mergeEvidence', 'dependsOn', 'title', 'tldr', 'prompt'],
         properties: {
-          cli: { type: 'string', description: 'cliSessionId of the mined sub-session this chip resumes (for a merged unit: the first member)' },
-          mergedFrom: { type: 'array', items: { type: 'string' }, description: 'cli ids folded into this chip by a high-confidence merge; just [cli] when not merged.' },
-          title: { type: 'string', description: 'chipTitle verbatim' },
-          tldr: { type: 'string' },
-          prompt: { type: 'string', description: 'the mined chipPrompt, unchanged except: add one line "Your manager is the session titled <managerTitle>; report your PR/outcome there." and keep the ⚠️ WORKTREE NOTE first when present.' },
-          dependsOn: { type: 'array', items: { type: 'string' }, description: 'cli ids that must land/report first. Empty when independent.' },
-          spawn: { type: 'boolean', description: 'false when the sub-session isComplete (report only, no chip).' },
+          cli: { type: 'string', description: 'cliSessionId of the carrier member (for a merged unit: the member whose mission leads).' },
+          mergedFrom: { type: 'array', items: { type: 'string' }, description: 'all member cli ids this unit covers, carrier included; just [cli] when not merged.' },
+          mergeEvidence: { type: 'string', description: 'merged unit: the shared ticket/artifact/files that make it one piece of work. Empty string when not merged.' },
+          dependsOn: { type: 'array', items: { type: 'string' }, description: 'cli ids of units whose OUTPUT this unit needs. Empty when independent.' },
+          title: { type: 'string', description: 'merged unit: the carrier\'s ORIGINAL title verbatim. Unmerged: empty string (the caller copies it).' },
+          tldr: { type: 'string', description: 'merged unit only; empty string otherwise.' },
+          prompt: { type: 'string', description: 'merged unit only: ONE 5-part prompt (GOAL, DONE, STOPPED, CONTINUE FROM HERE, REMAINING STEPS = union of members\') opening with a WORKTREE NOTE for every member worktree holding uncommitted/unpushed work. Empty string for an unmerged unit — the caller copies the mined chipPrompt unchanged.' },
         },
       },
     },
+    retired: {
+      type: 'array',
+      description: 'Members that get NO unit: isComplete, or named evidence they are superseded by / duplicate of another member. Never retire for age.',
+      items: { type: 'object', additionalProperties: false, required: ['cli', 'reason'], properties: { cli: { type: 'string' }, reason: { type: 'string' } } },
+    },
+    gates: { type: 'array', items: { type: 'string' }, description: 'Human-only steps (prod mutation, founder decision). Each names the unit it blocks.' },
   },
 }
 
-const CONS_SCHEMA = {
-  type: 'object', additionalProperties: false,
-  required: ['category', 'merges', 'drops', 'keepSeparate', 'managerDecisions'],
-  properties: {
-    category: { type: 'string' },
-    merges: {
-      type: 'array',
-      items: {
-        type: 'object', additionalProperties: false,
-        required: ['memberClis', 'mergedTitle', 'mergedGoal', 'rationale', 'confidence'],
-        properties: {
-          memberClis: { type: 'array', items: { type: 'string' }, description: '2+ cli ids that are really ONE piece of work (same ticket/artifact, one is a strict subset or a follow-up of the other, or they would edit the same files).' },
-          mergedTitle: { type: 'string', description: 'The ORIGINAL title of the member that carries the mission (verbatim), not a new invented name.' },
-          mergedGoal: { type: 'string', description: 'One outcome sentence covering all members.' },
-          rationale: { type: 'string', description: 'Cite the concrete overlap: shared ticket id, file, ADR, or one session\'s output feeding the other.' },
-          confidence: { type: 'string', enum: ['high', 'medium', 'low'], description: 'high = same ticket/artifact or strict subset, safe to apply with no human or manager judgement. medium/low = plausible; the manager decides.' },
-        },
-      },
-    },
-    drops: {
-      type: 'array',
-      items: {
-        type: 'object', additionalProperties: false, required: ['cli', 'reason'],
-        properties: { cli: { type: 'string' }, reason: { type: 'string', description: 'superseded by <cli>, duplicate of <cli>, or already done — name the evidence.' } },
-      },
-    },
-    keepSeparate: { type: 'array', items: { type: 'string' }, description: 'cli ids that look related but must stay separate, with the reason appended after a colon.' },
-    managerDecisions: { type: 'array', items: { type: 'string' }, description: 'Judgement calls you could not settle from the mined data (ordering, ownership, scope cut, merge vs split). Each one phrased as a question with your recommended answer. 0-5 items; empty is fine.' },
-  },
+function narratorPrompt(g, members) {
+  const slim = members.map(m => ({
+    cli: m._cli, title: m.title, sessionGoal: m.sessionGoal, lastState: m.lastState,
+    contribution: m.contribution, established: m.established, deadEnds: m.deadEnds,
+    produces: m.produces, needs: m.needs, openQuestions: m.openQuestions,
+    remainingWork: m.remainingWork, isComplete: m.isComplete, prState: m.prState,
+    branch: m.branch, worktree: m.worktree, gitState: m.gitState, chipPrompt: m.chipPrompt,
+  }))
+  return `You are the NARRATOR for ONE category of Claude Code sessions. READ-ONLY: no edits, no builds, no pushes, no re-mining. Understand the intelligence inside these sessions, tell the category's story as ONE coherent narrative, then reduce what remains to the fewest units of work. You are the only decision layer: nobody downstream re-decides your merges or retirements, so decide them.
+
+CATEGORY: ${g.category}
+ORIGIN SESSION (the top-level thread that spawned the rest): ${g.origin ? g.origin.title + ' [' + g.origin.cli + ']' : '(none)'}
+
+MEMBERS, oldest to newest (already mined; JSON):
+${JSON.stringify(slim, null, 1)}
+
+DO, IN ORDER
+1. THESIS: the one outcome the whole category is driving toward.
+2. STORYLINE: 4-10 beats in CAUSAL order. Use each member's contribution / established / deadEnds / produces / needs to find handoffs: when one member's needs is another's produces, that is a beat and a dependsOn. Name sessions by title.
+3. ESTABLISHED: merge the members' established claims into the category's settled calls, each with its evidence.
+4. CONFLICTS: where members disagree on the same fact, settle it from evidence (PR state, merged commit, a later session overriding an earlier one) and say how.
+5. UNITS: reduce remaining work to the fewest units.
+   - Merge members ONLY when they are one piece of work: same ticket/artifact, one a strict subset or direct follow-up of the other, or they would edit the same files. Different tickets that merely share a theme stay separate. Put the shared evidence in mergeEvidence.
+   - A merge never loses an obligation: every member's remainingWork survives in the merged prompt. A merged unit with more than ~3 independent deliverables should be split instead.
+   - Retire a member (no unit) only when isComplete, or with named evidence that another member supersedes or duplicates it. Never retire for age.
+   - The origin session is a normal member: it gets a unit only if it has implementation work of its own left.
+   - dependsOn is a real input->output dependency only; independent units get [].
+   - If unsure whether to merge, keep separate and say why in the storyline: a wrong merge hides an obligation, a wrong split costs one extra chip.
+6. GATES: human-only steps (prod mutation, founder decision), each naming the unit it blocks.
+
+Do not overclaim: use each member's isComplete / prState / lastState as given; a merged-but-unbaked PR is not done. A step a member explicitly ruled out stays ruled out.
+Return ONLY the structured object.`
 }
 
-const consolidations = await parallel(groups.map((g) => () => {
-  const members = ok.filter(r => (g.memberClis || []).includes(r._cli))
-  return agent(
-`You are the CONSOLIDATION REVIEWER for ONE category of Claude Code sessions. READ-ONLY. The goal is FEWER, more concise units of work with no lost obligations — not a tidy-looking list.
+function assemble(g, members, n) {
+  const byCli = Object.fromEntries(members.map(m => [m._cli, m]))
+  const warnings = []
+  const covered = new Set()
 
-CATEGORY: ${g.category}
-MINED SESSIONS (JSON):
-${JSON.stringify(members.map(m => ({ cli: m._cli, title: m.title, sessionGoal: m.sessionGoal, lastState: m.lastState, remainingWork: m.remainingWork, isComplete: m.isComplete, prState: m.prState, branch: m.branch, gitState: m.gitState })), null, 1)}
+  const units = n.units.map((u) => {
+    const from = (u.mergedFrom && u.mergedFrom.length ? u.mergedFrom : [u.cli]).filter((c) => {
+      if (byCli[c]) return true
+      warnings.push(`unit ${u.cli} references unknown member ${c}`)
+      return false
+    })
+    from.forEach(c => covered.add(c))
+    const carrier = byCli[u.cli] || byCli[from[0]]
+    const merged = from.length > 1
+    if (merged && !u.prompt) warnings.push(`merged unit ${u.cli} came back without a merged prompt; carrier prompt used, so the union of remainingWork is NOT guaranteed`)
+    return {
+      cli: u.cli, mergedFrom: from, mergeEvidence: u.mergeEvidence || '',
+      title: u.title || (carrier && carrier.chipTitle) || '',
+      tldr: u.tldr || (carrier && carrier.chipTldr) || '',
+      prompt: (merged && u.prompt) ? u.prompt : ((carrier && carrier.chipPrompt) || u.prompt || ''),
+      dependsOn: u.dependsOn || [],
+      state: carrier ? carrier.prState : '',
+      stoppedAt: carrier ? carrier.lastState : '',
+    }
+  })
 
-JUDGE
-- MERGE only when two or more sessions are one piece of work: same ticket/artifact, one a strict subset or direct follow-up of another, or they would edit the same files. Different tickets that merely share a theme are NOT merges.
-- A merge never loses a remainingWork item: the union must survive. If a merged unit would exceed one session's reasonable scope (more than ~3 independent deliverables), downgrade confidence to medium.
-- DROP only with named evidence (superseded by / duplicate of / already merged+baked). Never drop for being old.
-- Anything you cannot settle from the data goes to managerDecisions with your recommended answer. Do not guess.
-- confidence=high ONLY where a wrong merge is cheap to undo and the evidence is a shared ticket id or identical artifact.
-Return ONLY the structured object.`,
-    { label: `consolidate:${g.category}`.slice(0, 60), phase: 'Consolidate', schema: CONS_SCHEMA, agentType: 'general-purpose', model: 'sonnet' }
-  ).then(r => r || { category: g.category, _failed: true })
+  n.retired.forEach(x => {
+    covered.add(x.cli)
+    const m = byCli[x.cli]
+    if (m && !m.isComplete && (m.remainingWork || []).length) warnings.push(`retired with owed work: "${m.title}" (${x.reason})`)
+  })
+
+  // Guard against a silently lost obligation: any incomplete member the narrator left out gets its own unit.
+  members.forEach((m) => {
+    if (covered.has(m._cli) || m.isComplete || !(m.remainingWork || []).length) return
+    warnings.push(`"${m.title}" had owed work but was in no unit; added as its own unit`)
+    units.push({ cli: m._cli, mergedFrom: [m._cli], mergeEvidence: '', title: m.chipTitle, tldr: m.chipTldr, prompt: m.chipPrompt, dependsOn: [], state: m.prState, stoppedAt: m.lastState })
+  })
+
+  const orchestratorTitle = '[Manager] ' + (g.origin ? g.origin.title : g.category)
+  const gates = n.gates || []
+  const flat = units.length === 1
+  const done = units.length === 0
+  const idxOf = Object.fromEntries(units.map((u, i) => [u.cli, i + 1]))
+  const ctxLines = (n.established || []).map(e => `- ${e.claim} (${e.evidence})`).join('\n')
+
+  const finalUnits = units.map((u) => ({
+    ...u,
+    prompt: flat
+      ? `${u.prompt}\n\nCATEGORY CONTEXT: ${n.thesis}\nAlready established, do not re-litigate:\n${ctxLines || '- (nothing recorded)'}`
+      : `${u.prompt}\n\nSTORY: read {{STORY_PATH}} first; its Established section lists calls already settled, so do not re-litigate them. The orchestrator for this category is the session titled "${orchestratorTitle}"; report your PR/outcome there.`,
+  }))
+
+  const deadEnds = members.flatMap(m => (m.deadEnds || []).map(d => `- ${d} (${m.title})`))
+  const originState = g.origin && byCli[g.origin.cli] ? byCli[g.origin.cli] : null
+  const storyMarkdown = [
+    `# ${g.category}${date ? ' (' + date + ')' : ''}`,
+    `## Mission\n${n.thesis}`,
+    originState ? `## Where the origin session stopped\n${originState.lastState}` : '',
+    `## How we got here\n${(n.storyline || []).map((b, i) => `${i + 1}. ${b}`).join('\n')}`,
+    `## Established (do not re-derive)\n${(n.established || []).map(e => `- ${e.claim} — ${e.evidence}`).join('\n') || '- (none recorded)'}`,
+    (n.conflicts || []).length ? `## Conflicts\n${n.conflicts.map(c => `- ${c.what} -> ${c.resolution}${c.needsHuman ? ' **[needs human]**' : ''}`).join('\n')}` : '',
+    (n.openFront || []).length ? `## Open front\n${n.openFront.map(o => `- ${o}`).join('\n')}` : '',
+    deadEnds.length ? `## Dead ends (do not retry)\n${deadEnds.join('\n')}` : '',
+    `## Units of work\n| # | unit | state | depends on | stopped at |\n|---|---|---|---|---|\n` + units.map((u, i) =>
+      `| ${i + 1} | ${u.title}${u.mergedFrom.length > 1 ? ' (merged ' + u.mergedFrom.length + ': ' + u.mergeEvidence + ')' : ''} | ${u.state} | ${u.dependsOn.map(d => idxOf[d] ? '#' + idxOf[d] : d).join(', ') || '-'} | ${String(u.stoppedAt).replace(/\|/g, '/').replace(/\n/g, ' ').slice(0, 160)} |`).join('\n'),
+    gates.length ? `## Gates (human)\n${gates.map(x => `- ${x}`).join('\n')}` : '',
+    (n.retired || []).length ? `## Retired (no unit)\n${n.retired.map(r => `- ${(byCli[r.cli] || {}).title || r.cli}: ${r.reason}`).join('\n')}` : '',
+    `## Unit prompts (spawn as written, in dependsOn order)\n` + finalUnits.map((u, i) => `### ${i + 1}. ${u.title}\n~~~~\n${u.prompt}\n~~~~`).join('\n\n'),
+  ].filter(Boolean).join('\n\n')
+
+  const orchestratorPrompt = flat || done ? null :
+`You are the single orchestrator for "${g.category}". You own its narrative AND dispatch its remaining work.
+
+GOAL: ${n.thesis}
+
+READ FIRST: {{STORY_PATH}}. It holds how the work got here, what is already established (do not re-litigate), open conflicts, and one unit per piece of remaining work, each with a ready prompt.
+
+CONTRACT
+1. Verify the facts you act on (gh pr view, git worktree list --porcelain); a story row is a claim, not proof.
+2. Settle every open conflict yourself and record the call plus its reason in the story. Escalate only for a prod mutation, a founder/product decision, or an unrecoverable conflict, one question at a time.
+3. Spawn each unit yourself with spawn_task, from THIS session, so it nests under you in the sidebar. Order by dependsOn, title and prompt as written; independent units together, first wave at most 5. Do not do a unit's work yourself.
+4. Keep the Units table current as units report; merged is not baked. Do not poll CI.
+5. Close out with ONE summary to the human: shipped (PR + mergedAt), parked and why, still unproven. Append any generalizable call to ~/.claude/skills-overlay/sessions-to-chips/LEARNINGS.md.
+GATES: ${gates.length ? gates.join('; ') : 'none'}`
+
+  return {
+    category: g.category, flat, done, orchestratorTitle,
+    orchestratorTldr: `Single orchestrator for "${g.category}": holds the story and dispatches ${units.length} unit(s); does not do their work.`,
+    orchestratorPrompt, storyMarkdown, units: finalUnits, warnings,
+  }
+}
+
+const stories = await parallel(groups.map((g) => () => {
+  const members = (g.memberClis || []).map(c => ok.find(r => r._cli === c)).filter(Boolean)
+  return agent(narratorPrompt(g, members),
+    { label: `narrate:${g.category}`.slice(0, 60), phase: 'Narrate', schema: NARR_SCHEMA, agentType: 'general-purpose', model: 'sonnet' }
+  ).then(r => r ? assemble(g, members, r) : { category: g.category, _failed: true })
+   .catch(() => ({ category: g.category, _failed: true }))
 }))
-log(`consolidated ${consolidations.filter(c => c && !c._failed).length}/${groups.length} groups`)
 
-const managers = await parallel(groups.map((g, gi) => () => {
-  const members = ok.filter(r => (g.memberClis || []).includes(r._cli))
-  const cons = consolidations[gi] && !consolidations[gi]._failed ? consolidations[gi] : { merges: [], drops: [], keepSeparate: [], managerDecisions: [] }
-  return agent(
-`You are the MANAGER-AUTHOR for ONE category of Claude Code sessions. READ-ONLY: no edits, no builds, no pushes. Your input is the already-mined result for every sub-session in the category; you do not re-mine transcripts.
-
-CATEGORY: ${g.category}
-TOP-LEVEL (manager) SESSION: ${g.manager ? g.manager.title + ' [' + g.manager.cli + ']' : '(none — synthetic manager)'}
-
-MINED SUB-SESSIONS (JSON):
-${JSON.stringify(members, null, 1)}
-
-CONSOLIDATION REVIEW (a prior reviewer's proposals):
-${JSON.stringify(cons, null, 1)}
-
-Produce the manager chip, the MAP, and one sub-chip spec per sub-session (spawn=false for isComplete ones).
-RULES
-- If the TOP-LEVEL session appears in MINED SUB-SESSIONS (its cli matches), it is the manager's OWN prior state: put it in the map section 6 and in managerPrompt's goal, and do NOT emit a subChip for it.
-- APPLY merges whose confidence is "high": emit ONE subChip for the merged unit (cli = the first memberClis entry, mergedFrom = all memberClis, prompt = a single 5-part prompt whose REMAINING STEPS is the union of the members'). Do NOT apply medium/low merges: list each in the map under "Decisions owed to the manager" with its rationale and your recommendation, and keep the members as separate subChips until the manager decides.
-- Honour drops (spawn=false, noted in the map with the evidence). Carry managerDecisions into that same map section verbatim.
-- The manager COORDINATES. It never implements sub-session work and never re-derives a sub-session's plan; each sub-chip carries its own mined prompt.
-- Detect real dependencies from the mined goals/stop-states (blocked-on, shared files/ADRs/tickets, one's output feeding another). Do not invent ordering: independent sub-sessions get empty dependsOn so they spawn together (cap the first wave at 5).
-- Map status must not overclaim: use each sub-session's isComplete / prState / lastState exactly; an open bake or unmerged PR is not done.
-- If two sub-sessions overlap on the same artifact, say so in the map and name which one owns it.
-- managerPrompt keeps the literal placeholders {{MAP_PATH}}, {{CHIPS_PATH}} and {{PLAYBOOK_PATH}}; the caller substitutes them.
-Return ONLY the structured object.`,
-    { label: `manage:${g.category}`.slice(0, 60), phase: 'Manage', schema: MGR_SCHEMA, agentType: 'general-purpose', model: 'sonnet' }
-  ).then(r => r || { category: g.category, _failed: true })
-}))
-
-return { ok, failed, consolidations: consolidations.filter(c => c && !c._failed), managers: managers.filter(m => m && !m._failed), managersFailed: managers.filter(m => !m || m._failed).map(m => m && m.category) }
+return {
+  ok, failed,
+  stories: stories.filter(s => s && !s._failed),
+  storiesFailed: stories.filter(s => !s || s._failed).map(s => s && s.category),
+}

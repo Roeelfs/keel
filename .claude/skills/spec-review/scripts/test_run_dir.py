@@ -94,7 +94,7 @@ class AssignmentTests(unittest.TestCase):
 
 
 class LanesCommandTests(unittest.TestCase):
-    FULL = ("completeness-reviewer,codebase-verifier,architecture-auditor,adr-auditor,provider-fit-auditor,edge-case-miner,"
+    FULL = ("completeness-reviewer,codebase-verifier,architecture-auditor,adr-auditor,legal-auditor,provider-fit-auditor,edge-case-miner,"
             "security-miner,observability-auditor,spec-drift-scout,codex-standard,codex-adversarial,codex-research,codex-frontier")
 
     def test_full_set_materializes_cleanly(self):
@@ -343,8 +343,65 @@ class BatchingTests(unittest.TestCase):
             (run / "envelopes" / "adr-auditor.json").write_text(json.dumps(data))
             rc, out = call("summary", "--run", str(run), "--lanes", "adr-auditor")
             self.assertTrue(out["hardStop"])
+            self.assertEqual(out["hardStopReasons"], ["adr"])
             self.assertEqual(out["raw"]["CRITICAL"], 1)
             self.assertEqual(out["missingVerdicts"], ["ADR-1"])
+
+    def legal_summary(self, extra, findings=(), planned="legal-auditor", write=True):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = make_run(tmp)
+            if write:
+                envelope(run, "legal-auditor", list(findings), [])
+                path = run / "envelopes" / "legal-auditor.json"
+                path.write_text(json.dumps({**json.loads(path.read_text()), **extra}))
+            lanes = "legal-auditor" if write else ""
+            return call("summary", "--run", str(run), "--lanes", lanes, "--planned", planned)[1]
+
+    def test_legal_breach_without_marker_hard_stops(self):
+        out = self.legal_summary({"register_found": True, "sources_read": ["docs/terms.md"], "legal_commitment_breach": True,
+                                  "founder_approval_marker_present": False}, [("LEG-1", "CRITICAL")])
+        self.assertEqual((out["hardStop"], out["hardStopReasons"]), (True, ["legal"]))
+
+    def test_legal_breach_with_marker_does_not_stop(self):
+        out = self.legal_summary({"register_found": True, "sources_read": ["docs/terms.md"], "legal_commitment_breach": True,
+                                  "founder_approval_marker_present": True}, [("LEG-1", "CRITICAL")])
+        self.assertEqual((out["hardStop"], out["hardStopReasons"]), (False, []))
+
+    def test_legal_non_breach_finding_does_not_stop(self):
+        out = self.legal_summary({"register_found": True, "sources_read": ["docs/privacy.md"], "legal_commitment_breach": False},
+                                 [("LEG-1", "MAJOR")])
+        self.assertFalse(out["hardStop"])
+        self.assertEqual(out["raw"]["MAJOR"], 1)
+
+    def test_planned_legal_lane_with_no_envelope_is_a_stop_reason(self):
+        out = self.legal_summary({}, write=False)
+        self.assertEqual((out["hardStop"], out["hardStopReasons"]), (True, ["legal-auditor-envelope-missing"]))
+
+    def test_clean_legal_verdict_that_read_nothing_is_rejected(self):
+        out = self.legal_summary({"register_found": True, "sources_read": []})
+        self.assertEqual(out["hardStopReasons"], ["legal-auditor-read-no-sources"])
+
+    def test_no_register_receipt_is_not_a_stop(self):
+        out = self.legal_summary({"register_found": False, "sources_read": []}, [("LEG-1", "CAUTION")])
+        self.assertEqual((out["hardStop"], out["hardStopReasons"]), (False, []))
+
+    def test_unplanned_gate_lanes_are_not_demanded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = make_run(tmp)
+            envelope(run, "edge-case-miner", [], [])
+            out = call("summary", "--run", str(run), "--lanes", "edge-case-miner", "--planned", "edge-case-miner")[1]
+            self.assertEqual((out["hardStop"], out["hardStopReasons"]), (False, []))
+
+    def test_adr_and_legal_stop_together(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = make_run(tmp)
+            for label, extra in (("adr-auditor", {"founder_approval_needed": True}),
+                                 ("legal-auditor", {"register_found": True, "sources_read": ["a.md"], "legal_commitment_breach": True})):
+                envelope(run, label, [], [])
+                path = run / "envelopes" / f"{label}.json"
+                path.write_text(json.dumps({**json.loads(path.read_text()), **extra}))
+            out = call("summary", "--run", str(run), "--lanes", "adr-auditor,legal-auditor", "--planned", "adr-auditor,legal-auditor")[1]
+            self.assertEqual(out["hardStopReasons"], ["adr", "legal"])
 
 
 class DriftBriefTests(unittest.TestCase):

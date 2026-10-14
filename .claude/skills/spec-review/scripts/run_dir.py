@@ -692,6 +692,28 @@ def falsifier_counts(run, expected_ids):
     return verdicts, refuted, unit_of
 
 
+# Lanes whose verdict can stop the review: label -> (reason, envelope flag that fires it).
+GATE_LANES = {"adr-auditor": ("adr", "founder_approval_needed"), "legal-auditor": ("legal", "legal_commitment_breach")}
+
+
+def hard_stop_reasons(run, planned):
+    """Why the review must stop. A planned gate lane with no usable envelope is a reason, never a silent pass."""
+    reasons = []
+    for label, (reason, flag) in GATE_LANES.items():
+        if label not in planned:
+            continue
+        env, _ = read_envelope(run, label)
+        if env is None:
+            reasons.append(f"{label}-envelope-missing")
+            continue
+        if env.get(flag) and not env.get("founder_approval_marker_present"):
+            reasons.append(reason)
+        # A legal verdict that read no source bound nothing; only the no-register receipt may do that.
+        if label == "legal-auditor" and env.get("register_found") is not False and not env.get("sources_read"):
+            reasons.append(f"{label}-read-no-sources")
+    return reasons
+
+
 def cmd_summary(a):
     run = Path(a.run)
     labels = expand_labels(run, csv(a.lanes))
@@ -707,14 +729,10 @@ def cmd_summary(a):
     for f in cm:
         if verdicts.get(f["id"]) != "REFUTED":
             surviving[f["severity"]] += 1
-    adr, _ = read_envelope(run, "adr-auditor")
-    hard = False
-    if adr is not None:
-        data = read_json(Path(run) / "envelopes" / "adr-auditor.json", {})
-        hard = bool(data.get("founder_approval_needed")) and not bool(data.get("founder_approval_marker_present"))
+    reasons = hard_stop_reasons(run, set(csv(a.planned)) or set(labels))
     missing = sorted({unit_of.get(i, i) for i, v in verdicts.items() if v == "MISSING"})
     return emit({"ok": True, "raw": raw, "surviving": surviving, "falsifierDispatched": sum(1 for v in verdicts.values() if v != "MISSING"),
-                 "refuted": refuted, "missingVerdicts": missing, "hardStop": hard})
+                 "refuted": refuted, "missingVerdicts": missing, "hardStop": bool(reasons), "hardStopReasons": reasons})
 
 
 def cmd_check_report(a):
@@ -783,7 +801,7 @@ def main(argv=None):
     add("merge-check", cmd_merge_check, "lanes")
     p = add("falsify-plan", cmd_falsify_plan, "lanes", "spec", "max-batches")
     p.add_argument("--dry", action="store_true", help="print the plan without writing prompts")
-    add("summary", cmd_summary, "lanes")
+    add("summary", cmd_summary, "lanes", "planned")
     add("check-report", cmd_check_report, "lanes", "manifest", "skipped", "publish")
     a = ap.parse_args(argv)
     a.skill_dir = getattr(a, "skill_dir", "") or str(SKILL_DIR)

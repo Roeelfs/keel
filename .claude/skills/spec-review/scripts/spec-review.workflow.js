@@ -14,13 +14,15 @@ export const meta = {
 // MANIFEST:BEGIN
 const MANIFEST = {
   "profiles": ["full", "focused", "hotfix"],
-  "gates": ["liveSurface", "security", "cutover", "runtimeWiring", "operatorSurface"],
+  "gates": ["liveSurface", "security", "cutover", "runtimeWiring", "operatorSurface", "legalSurface"],
   "lanes": [
     {"label": "completeness-reviewer", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "completeness-reviewer.md", "profiles": ["full"], "gate": null, "idPrefix": "COMP", "tags": ["completeness"]},
     {"label": "codebase-verifier", "kind": "codex", "agentType": "codex-dispatch", "model": "gpt-6-sol", "prompt": "codebase-verifier.md", "profiles": ["full", "focused", "hotfix"], "gate": null, "idPrefix": "CB", "tags": ["codebase"], "codexClass": "verify", "codexContract": true},
     {"label": "architecture-auditor", "kind": "codex", "agentType": "codex-dispatch", "model": "gpt-6-sol", "prompt": "architecture-auditor.md", "profiles": ["full"], "gate": null, "idPrefix": "ARCH", "tags": ["architecture"], "codexClass": "falsifier", "codexContract": true},
     {"label": "adr-auditor", "kind": "claude", "agentType": "adr-auditor", "model": null, "prompt": null, "profiles": ["full"], "gate": null, "idPrefix": "ADR", "tags": [],
       "brief": "# ADR-conformance gate\n\nAudit the spec at {{SPEC_PATH}} (project root {{PROJECT_ROOT}}): classify EVERY spec decision CONFORMS | STRAYS | NEEDS-APPROVAL against the Accepted ADRs and platform invariants. Any spec that changes an Accepted ADR or invariant without an explicit founder-approval marker is a HARD STOP: record it as a CRITICAL finding. In your envelope JSON (both the file and the final reply) also set founder_approval_needed (true when the spec changes an Accepted ADR/invariant) and founder_approval_marker_present (true when an explicit founder-approval marker for that change exists in the spec or dossier)."},
+    {"label": "legal-auditor", "kind": "claude", "agentType": "legal-auditor", "model": null, "prompt": null, "profiles": ["full"], "gate": "legalSurface", "idPrefix": "LEG", "tags": [],
+      "brief": "# Legal-conformance gate\n\nAudit the spec at {{SPEC_PATH}} (project root {{PROJECT_ROOT}}) with your agent method: locate the project's legal register through the instructions file's `### Legal docs` pointer, read every source it names, and classify EVERY legal-relevant spec decision BOUND | BREACHES | UNDISCLOSED | DOC-UPDATE-OWED | NEEDS-COUNSEL on the TECHNICAL axis (what is built: recipients, data categories, purposes, retention, access) and the UX axis (what the user is shown and asked: disclosure and its moment, consent and acceptance capture, refusal). Bind only to RECORDED commitments; never rule on what the law requires. A spec that breaches an in-force commitment without an explicit founder-approval marker is a HARD STOP: record it as a CRITICAL finding. With no register, emit the single no-register finding your method defines and nothing else. In your envelope JSON (both the file and the final reply) also set register_found, sources_read (every path you read), class_counts, legal_commitment_breach (true when the spec breaches an in-force commitment) and founder_approval_marker_present (true only when you read a `## Legal Conformance` approval section for that change yourself)."},
     {"label": "cutover-architect", "kind": "claude", "agentType": "cutover-architect", "model": null, "prompt": null, "profiles": [], "gate": "cutover", "idPrefix": "CUT", "tags": [],
       "brief": "# Cutover-structure lane (3c)\n\nThe spec at {{SPEC_PATH}} (project root {{PROJECT_ROOT}}) rewrites/replaces/migrates/cuts over an existing capability, gives one a second plane/profile/twin/runtime, or edits ONE representation of a contract that greppably has others. Run your agent method: build the Contract x Representation matrix and count hand-maintained representations per contract AFTER the change; every contract left at >=2 without a fail-closed parity instrument invoked by the mandatory local gate is CRITICAL; write the MIGRATE ledger (what the old code knew that the owner must inherit) and the post-change probes that print the count. Findings file ends with a line `Verdict: STRUCTURED | COEXISTS`."},
     {"label": "runtime-wiring", "kind": "claude", "agentType": "general-purpose", "model": null, "prompt": null, "profiles": [], "gate": "runtimeWiring", "idPrefix": "RW", "tags": [],
@@ -87,6 +89,10 @@ const ENVELOPE = {
     findings: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, severity: { type: 'string', enum: ['CRITICAL', 'MAJOR', 'MINOR', 'ELEVATE', 'CAUTION'] }, title: { type: 'string' }, cites: { type: 'array', items: { type: 'string' } } }, required: ['id', 'severity', 'title'] } },
     founder_approval_needed: { type: 'boolean' },
     founder_approval_marker_present: { type: 'boolean' },
+    register_found: { type: 'boolean' },
+    sources_read: { type: 'array', items: { type: 'string' } },
+    class_counts: { type: 'object' },
+    legal_commitment_breach: { type: 'boolean' },
     drift_investigations: { type: 'array', items: { type: 'object', properties: { drift_id: { type: 'string' }, narrow_question: { type: 'string' } }, required: ['drift_id', 'narrow_question'] } },
   },
   required: ['lane', 'answered_questions', 'findings'],
@@ -176,6 +182,13 @@ function planLanes() {
 }
 const PLAN = planLanes()
 const labelsOf = (arr) => arr.map((e) => e.label)
+// Hard-stop wording, keyed by run_dir.py's hardStopReasons. An unknown reason is a gate-lane defect.
+const HARD = {
+  adr: 'the adr-auditor found the spec changes an Accepted ADR/invariant with no founder-approval marker',
+  legal: 'the legal-auditor found the spec breaches an in-force legal commitment with no founder-approval marker',
+}
+const hardText = (sum) => (sum.hardStopReasons || []).map((r) => HARD[r] || `gate lane defect (${r}): relaunch that lane, its verdict is not usable`).join('; ')
+const PLANNED = sq(labelsOf(PLAN.run).join(','))
 if (!labelsOf(PLAN.run).includes('codex-frontier')) throw new Error('spec-review: the Astra frontier lane is non-droppable in every profile')
 
 function laneAgent(e) {
@@ -270,9 +283,9 @@ async function review() {
     if (!chk.ok) throw new Error(`spec-review: question coverage / envelope contract still failing after repair: ${(chk.errors || []).join('; ')}`)
   }
   ;(chk.missing || []).forEach((m) => note(`envelope missing: ${m}`))
-  const sum = await py('Review', 'summary', `--lanes ${sq(present.join(','))}`)
-  if (sum.hardStop) note('ADR HARD STOP: the spec changes an Accepted ADR/invariant with no founder-approval marker; no fixes may be applied until the founder decides')
-  return { stage: 'review', runDir: RUN, paths: { lanes: RUN + '/lanes', envelopes: RUN + '/envelopes' }, counts: sum.raw, hardStop: sum.hardStop, lanesWithEnvelope: present, gateLog }
+  const sum = await py('Review', 'summary', `--lanes ${sq(present.join(','))} --planned ${PLANNED}`)
+  if (sum.hardStop) note(`HARD STOP: ${hardText(sum)}; no fixes may be applied until the founder decides`)
+  return { stage: 'review', runDir: RUN, paths: { lanes: RUN + '/lanes', envelopes: RUN + '/envelopes' }, counts: sum.raw, hardStop: sum.hardStop, hardStopReasons: sum.hardStopReasons, lanesWithEnvelope: present, gateLog }
 }
 
 // ---------------------------------------------------------------------------
@@ -346,17 +359,17 @@ async function synthesize() {
   const runF = (b) => agent(`ROLE: finding-falsifier\n${laneBrief(b.prompt)}`,
     { label: `falsify:batch-${b.batch}`, phase: 'Synthesize', agentType: 'general-purpose', model: 'sonnet', schema: FALSIFIER_BATCH })
   await parallel(fp.plan.map((b) => () => runF(b)))
-  let sum = await py('Synthesize', 'summary', `--lanes ${sq(ok.join(','))}`)
+  let sum = await py('Synthesize', 'summary', `--lanes ${sq(ok.join(','))} --planned ${PLANNED}`)
   if (sum.missingVerdicts.length) {
     const redo = fp.plan.filter((b) => b.ids.some((i) => sum.missingVerdicts.includes(i)))
     note(`falsifier retry for batch(es) ${redo.map((b) => b.batch).join(', ')}: missing ${sum.missingVerdicts.join(', ')}`)
     await parallel(redo.map((b) => () => runF(b)))
-    sum = await py('Synthesize', 'summary', `--lanes ${sq(ok.join(','))}`)
+    sum = await py('Synthesize', 'summary', `--lanes ${sq(ok.join(','))} --planned ${PLANNED}`)
     if (sum.missingVerdicts.length) throw new Error(`spec-review: falsifier verdict missing for ${sum.missingVerdicts.join(', ')}`)
   }
   if (sum.falsifierDispatched !== total) throw new Error(`spec-review: verdicts-per-id mismatch (${sum.falsifierDispatched} ids with verdicts vs ${total})`)
   note(`falsifier wave: ${fp.totalUnits} units (${total} ids) in ${fp.plan.length} batches, ${sum.refuted} ids REFUTED`)
-  if (sum.hardStop) note('ADR HARD STOP surfaced in report.md')
+  if (sum.hardStop) note(`HARD STOP surfaced in report.md (${(sum.hardStopReasons || []).join(', ')})`)
 
   // Manifest: every planned lane is listed as run, FAILED, or SKIPPED (gate: ...).
   const rows = [
@@ -380,7 +393,7 @@ async function synthesize() {
     `- Surviving Obs-/Sec-/LE- CRITICAL/MAJOR not applied as spec prose go under "Carried obligations".`,
     `- The Lane manifest section reproduces this table verbatim (a lane with status FAILED or DEAD keeps that status; verdict lines say "timed-out/<status> -- backfilled by <substitute>" where a substitute ran):`,
     '| Lane | Status | Agent / model |', '|---|---|---|', ...rows,
-    ...(sum.hardStop ? ['- ADR HARD STOP: open the report with a bold HARD STOP banner: the adr-auditor found the spec changes an Accepted ADR/invariant with no founder-approval marker; no fixes until the founder decides.'] : []),
+    ...(sum.hardStop ? [`- HARD STOP: open the report with a bold HARD STOP banner: ${hardText(sum)}; no fixes until the founder decides.`] : []),
     '- No placeholder text may remain: no {{...}}, no <FOCUS...>, no <ALL_CAPS> tokens.',
     'Reply via StructuredOutput with the path only.',
   ].join('\n')
@@ -400,7 +413,7 @@ async function synthesize() {
   return {
     stage: 'synthesize', reportPath: RUN + '/report.md', reviewPath: A.reviewPath || null,
     counts: { raw: sum.raw, surviving: sum.surviving, refuted: sum.refuted, falsifierDispatched: total },
-    hardStop: sum.hardStop, failedLanes: failed, gateLog,
+    hardStop: sum.hardStop, hardStopReasons: sum.hardStopReasons, failedLanes: failed, gateLog,
   }
 }
 

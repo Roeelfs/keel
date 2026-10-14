@@ -1,7 +1,7 @@
 ---
 license: MIT
 name: sessions-to-chips
-description: Deep-mine scoped Claude desktop sessions for overall goals, steering, last state and unique remaining work, and group them by category into one manager chip + map + sub-chip specs per category (the manager spawns its own sub-chips). Supports read-only mining/audits and explicitly requested resume chips. Use for session mining, parked-session context, overlap review or picking up prior work. Context access must use permitted supported interfaces; creating execution tasks requires explicit authorization.
+description: Deep-mine scoped Claude desktop sessions for goals, steering, last state, the intelligence each produced (settled calls, dead ends, handoffs) and unique remaining work, then narrate each category as ONE story with a unit ledger run by a single orchestrator chip. Supports read-only mining/audits and explicitly requested resume chips. Use for session mining, parked-session context, overlap review or picking up prior work. Context access must use permitted supported interfaces; creating execution tasks requires explicit authorization.
 ---
 
 # sessions → completion chips
@@ -35,68 +35,55 @@ extraction helpers and existing output contracts remain separate.
 
 ## Legacy resume-chip workflow
 
-Turn a set of Claude Code desktop sessions into **manager-led categories**: one **manager chip** per category, a durable **map**, and one cold-start **sub-chip spec** per sub-session. The sidebar is two-level (a top-level session with the chips it spawned nested under it); this workflow mirrors that. You spawn only the managers — each manager spawns its own sub-chips. Flat mode (one chip per session, no managers) still applies when the set has no lineage and the user says so. A good sub-chip carries the session's **overall goal** (the through-line mission that survived every compaction) and the **exact phrase to continue from where it stopped** — not a vague "do the last mission from the session". Fast path: 5 steps, scripts do the deterministic parts, one Workflow mines all sessions in parallel.
+Turn a set of Claude Code desktop sessions into **one story per category, run by one orchestrator**. A category is an origin session plus the sessions it spawned (the sidebar nesting). The workflow reads what each session *found and decided*, not only where it stopped, tells the category as a single narrative, reduces what remains to the fewest units of work, and gives the whole thing to **one orchestrator chip** that dispatches those units.
 
-**What "deep mining" means here:** don't read only the tail. `mine_session.py` surfaces the whole arc — the ORIGINAL GOAL (first human message), the USER STEERING ARC (every human turn, so you see how intent evolved), the LATEST SESSION SUMMARY (the freshest compaction digest: the canonical "Primary Request and Intent / Pending Tasks / Next Step" block — the single richest source of goal+state), and the EXACT LAST USER INSTRUCTION, plus the tail (last assistant text, todos, recent tool uses) for where/why it stopped. The chip is authored by *reasoning over the goal*, then naming the precise next action.
+There is exactly one decision layer. The **narrator** decides merges, retirements and conflicts once, with evidence. The **orchestrator** verifies facts and dispatches. **Units** do the work and inherit the settled calls. No later tier re-decides.
+
+**What "deep mining" means here:** `mine_session.py` surfaces the whole arc: the ORIGINAL GOAL, the USER STEERING ARC (every human turn), the LATEST SESSION SUMMARY (freshest compaction digest, the richest single source), the EXACT LAST USER INSTRUCTION, and the tail. Each mining agent turns that into two things: **state** (goal, last state, the paste-ready `continuationPhrase`, remaining work) and **intelligence** (`contribution`, evidence-backed `established` calls, `deadEnds`, `produces` / `needs` handoffs, `openQuestions`). The narrator stitches the intelligence into the story; the state becomes the units.
 
 `SCR=~/.claude/skills/sessions-to-chips/scripts`
 
 ## 1. Find the target sessions
-Desktop sessions (all accounts, dead included) live in `~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/local_*.json` — NOT `~/.claude/sessions/` (that's live-only).
+Desktop sessions (all accounts, dead included) live in `~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/local_*.json`, NOT `~/.claude/sessions/` (live-only).
 
 ```bash
 python3 $SCR/list_sessions.py                  # all accounts grouped
-python3 $SCR/list_sessions.py --account <account-id>   # "another account" = a different account-uuid
+python3 $SCR/list_sessions.py --account <account-id>
 python3 $SCR/list_sessions.py --grep "ABC-3"   # match titles from a screenshot
+python3 $SCR/list_sessions.py --tree --grep "<term>"   # sidebar nesting
 ```
-If the user gave a screenshot/pinned list, match those titles to rows here (title match is more reliable than the leveldb `pinnedOrder`). Each row gives `cli` (cliSessionId), `branch`, `worktreeName`, `pr`/`prState`. Confirm the set with the user if any title is ambiguous or unmatched.
+Match screenshot titles to rows here (more reliable than the leveldb `pinnedOrder`). Each row gives `cli`, `branch`, `worktreeName`, `pr`/`prState`. Confirm the set if any title is ambiguous or unmatched.
 
-## 2. Locate transcripts
+## 2. Locate transcripts and group
 ```bash
-python3 $SCR/find_transcript.py <cli1> <cli2> ...   # searches ALL project dirs
-```
-GOTCHA: transcripts are per-worktree (`~/.claude/projects/<worktree-slug>/<cli>.jsonl`), not the main project dir.
-
-## 2b. Group into categories (manager + subs)
-```bash
-python3 $SCR/list_sessions.py --tree --grep "<term>"       # see the sidebar structure first
-python3 $SCR/group_sessions.py --root "<top-level title>"   # a manager + its whole subtree
+python3 $SCR/find_transcript.py <cli1> <cli2> ...   # transcripts are per-worktree, searched across ALL project dirs
+python3 $SCR/group_sessions.py --root "<top-level title>"   # an origin + its whole subtree
 python3 $SCR/group_sessions.py --grep "Spec " [--categories cats.json]
 ```
-Lineage is `spawnedFrom.sessionId`: the topmost ancestor present in the set is the **manager**, everything under it is a **sub-session**. Sessions with no lineage land in `unplaced` — assign each a category with the user or a `--categories` file (`{"Apps": ["title substr", ...]}`); never guess a category from one title. A category with a single session needs no manager: it falls back to a flat chip. Confirm the groups with the user before mining when `unplaced` is non-empty or a category spans more than ~8 sessions.
+Lineage is `spawnedFrom.sessionId`: the topmost ancestor present in the set is the category's **origin**; everything under it is a **member**. Sessions with no lineage land in `unplaced`: assign them with the user or a `--categories` file (`{"Apps": ["title substr", ...]}`), never by guessing from one title. Confirm the groups before mining when `unplaced` is non-empty or a category spans more than ~8 sessions.
 
-## 3. Mine all sessions in parallel (Workflow)
-Build `sessions: [{idx,title,cli,worktreeName,branch,pr,transcript}]` (transcript = abs path from step 2; **pass `title` verbatim — it's the session name and becomes the chip title unchanged**), then:
+## 3. Mine and narrate (one Workflow)
+Build `sessions: [{idx,title,cli,worktreeName,branch,pr,transcript}]` (**`title` verbatim**; it becomes the chip title unchanged), then:
 ```
 Workflow({ scriptPath: "<SCR>/mine_workflow.js",
-           args: { mineScript: "<SCR>/mine_session.py", sessions: [...],
-                   groups: [{category, manager:{title,cli}|null, memberClis:[...]}] } })
+           args: { mineScript: "<SCR>/mine_session.py", date: "<YYYY-MM-DD>", sessions: [...],
+                   groups: [{category, origin:{title,cli}|null, memberClis:[...oldest->newest]}] } })
 ```
-`groups` comes from step 2b (omit it for flat mode). Include the manager's own session in `sessions` **and** its cli in `memberClis` so the manager chip inherits its prior state. Returns `{ok:[{...spec per session}], failed:[], managers:[{category, managerTitle, managerTldr, managerPrompt, mapMarkdown, subChips[]}], managersFailed:[]}`. Each agent deep-mines the whole arc (via `mine_session.py` — goal + steering arc + latest compaction summary + last instruction + tail), reasons over the **goal**, checks git/PR state, and returns:
-- `sessionGoal` — the overall mission (2-4 sentences, the through-line, not the last step).
-- `lastState` — what got done + the exact stop point.
-- **`continuationPhrase`** — the paste-ready, user's-voice instruction that resumes from that exact point.
-- `gitState{uncommitted,unpushed}`, `remainingWork[]`, `isComplete`.
-- `chipTitle` (**= the original session name, verbatim**) / `chipTldr` / `chipPrompt` (5-part: GOAL → DONE → STOPPED → CONTINUE-FROM-HERE → REMAINING STEPS).
+Include the origin's own session in `sessions` **and** its cli in `memberClis`, so the story carries its prior state. Omit `groups` for a flat set (no narration). Returns `{ok, failed, stories[], storiesFailed}`.
 
-Agents are read-only. If you'd rather not run the Workflow, `python3 $SCR/mine_session.py <transcript>` prints the same deep arc for one session by hand.
+Each `stories[]` entry: `orchestratorTitle` / `orchestratorTldr` / `orchestratorPrompt`, `storyMarkdown`, `units[]`, `flat`, `done`, `warnings[]`. `warnings` lists any obligation the narrator tried to drop; the script re-adds it as its own unit, so check it, then check the merges it did apply (`mergeEvidence` names the shared ticket/artifact).
 
-## 3b. Consolidate (built into the workflow)
-Between mining and manager authoring, `mine_workflow.js` runs one **sonnet reviewer per category**. It reads the mined results and returns `merges` (with `high|medium|low` confidence), `drops` (with named evidence), `keepSeparate` and `managerDecisions`. High-confidence merges are applied directly, so you spawn fewer sub-chips. Medium/low merges and the open judgement calls are **not** applied: they go into the map under "Decisions owed to the manager", and the manager settles them using [MANAGER_PLAYBOOK.md](MANAGER_PLAYBOOK.md). Check `consolidations[]` in the result when something looks over-merged: the rationale names the shared ticket/artifact.
+## 4. Persist the story, then spawn the orchestrator
+Per story:
+- `done` (no units): report the category as done; nothing to spawn.
+- `flat` (one unit): spawn that unit directly with `spawn_task`; its prompt already carries the category context inline. No orchestrator.
+- otherwise:
+  1. **Persist first.** Write `storyMarkdown` to `~/.claude/sessions-to-chips/maps/<YYYY-MM-DD>-<category-slug>.md`, replacing every `{{STORY_PATH}}` (in the file and in `orchestratorPrompt`) with that absolute path.
+  2. Call `mcp__ccd_session__spawn_task` **once per category** with `orchestratorTitle` / `orchestratorTldr` / `orchestratorPrompt`. This is the only spawn you do.
+  3. The orchestrator reads the story, verifies the facts it acts on, settles any leftover conflict itself, spawns each unit from the story's *Unit prompts* in `dependsOn` order (independent units together, first wave at most 5), keeps the Units table current, and escalates only at a real gate (prod mutation, founder decision, unrecoverable conflict).
 
-## 4. Decide who gets work
-- `isComplete:true` (PR merged **and** post-merge tail done) → **no sub-chip**; it stays a row in the map, marked done.
-- everything else → one sub-chip spec (`spawn:true`).
-- a category whose sub-sessions are all complete → no manager; report the category as done.
+Unit titles stay the **original session names** verbatim. The orchestrator is titled `[Manager] <origin title>` so its row is not a twin of the parked origin session. The sidebar nests by whichever session calls `spawn_task`, so the orchestrator must spawn its units itself: runner session > `[Manager]` orchestrator > units.
 
-## 5. Write the map, then spawn the managers
-Per manager in `managers[]`:
-1. **Persist first** (a deliverable blocked on a spawn goes to disk before you report it). Write `mapMarkdown` to `~/.claude/sessions-to-chips/maps/<YYYY-MM-DD>-<category-slug>.md` and `subChips` as JSON to `<same-stem>.chips.json`. Substitute those two absolute paths for `{{MAP_PATH}}` / `{{CHIPS_PATH}}`, and the absolute path of this skill's `MANAGER_PLAYBOOK.md` for `{{PLAYBOOK_PATH}}`, in `managerPrompt`.
-2. Call `mcp__ccd_session__spawn_task` **once per category** with `managerTitle` / `managerTldr` / `managerPrompt`. This is the only spawn you do.
-3. The manager reads the map and the playbook, settles the owed merge/split/order decisions itself, then spawns each `spawn:true` entry of the chips file via `spawn_task` in `dependsOn` order (independent entries together, first wave capped at 5), keeps the map's status table current, and never does sub-session work itself. It escalates to the human only at a real gate (prod mutation, a founder decision, unresolvable conflict).
+**Critical:** `spawn_task` creates a FRESH worktree. If a unit's `gitState` is uncommitted or unpushed, its prompt MUST open with the WORKTREE NOTE telling the session to `cd` into the existing worktree (the mining agents do this; verify before sending).
 
-Sub-chip titles stay the **original session names** verbatim; only the manager chip is prefixed `[Manager]`. Each sub-chip's prompt already opens with the overall goal and leads into the exact `continuationPhrase`, so a fresh session inherits the mission, not a stray last task.
-
-**Critical:** `spawn_task` spins up a FRESH worktree — for managers too (a manager that is a real top-level session keeps its prior worktree in the map, not in its cwd). If `gitState.uncommitted` or `gitState.unpushed`, the chipPrompt MUST start with a ⚠️ note telling the spawned session to `cd` into the existing worktree first (else the work is invisible). The mining agents do this when flagged, but verify before sending.
-
-See [REFERENCE.md](REFERENCE.md) for chip-prompt rules, completion criteria, and the gotchas that cost retries. Also read the private overlay if present: `~/.claude/skills-overlay/sessions-to-chips/LEARNINGS.md` (adopter-private; never in this public repo) — it accumulates project-specific examples (real session titles, named incidents, exact verify-gate commands) that sharpen the chip authoring for your own setup.
+See [REFERENCE.md](REFERENCE.md) for the story structure, chip-prompt rules, completion criteria and the gotchas that cost retries. Also read the private overlay if present: `~/.claude/skills-overlay/sessions-to-chips/LEARNINGS.md` (adopter-private) for project-specific examples and gate commands; the orchestrator appends generalizable calls there at close-out.

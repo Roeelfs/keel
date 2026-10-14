@@ -44,22 +44,38 @@ Adversarial validation on real sessions surfaced one dominant failure class — 
 - **Continue from the FRONTIER, not the literal last keystroke.** The continuation is the first *not-yet-done* substantive step. Two traps: (a) don't point at a sub-task that already **finished** earlier in the arc ("resume the sweep" when the sweep is done and its output saved); (b) don't treat a **wrap-up/handoff** tail ("commit locally", "bake a resume doc so a future session can continue") as the mission — the next action is the mission's Next-Step / top pending item from the summary + persisted state, not redoing the bookkeeping.
 - **A self-authored handoff wins — carry it, don't reinvent it.** If the session wrote its own resume artifact (`session-resume-YYYY-MM-DD.md`, a "Resume path:" block, an explicit "Next Step / Optional Next Step"), anchor the `continuationPhrase` on it: name the artifact to load and lead with its stated first action/priority. The session already decided what comes next; re-deriving a different plan loses that signal (e.g. a session that named its top-priority item plus a sweep's results in its own resume doc — carry that ordering, don't re-derive a different one).
 
-## Manager / sub-session structure
+## Category story / orchestrator structure
+
+One category = one **story** (a markdown file) + one **orchestrator** chip. Units are rows in the story, not separate pre-authored artifacts; there is no second decision tier.
 
 | Thing | Rule |
 |---|---|
-| Lineage source | `spawnedFrom.sessionId` in each `local_*.json` (plus `spawnedFrom.taskId`/`title`). A root has `spawnedFrom: null`. Verified 2026-10-11: "Built-in apps concept exploration" (root) → 4 "Spec …" chips. |
+| Lineage source | `spawnedFrom.sessionId` in each `local_*.json` (plus `spawnedFrom.taskId`/`title`). A root has `spawnedFrom: null`. |
 | Category | The sidebar group label (e.g. "Apps") is a UI grouping, **not stored in the session JSON**. A category is the lineage root, or a name from `--categories` / the user. |
-| Manager | One per category; coordinates, never implements. Title `[Manager] <root title verbatim>` (or `[Manager] <category>` when synthetic). |
-| Map | Durable markdown at `~/.claude/sessions-to-chips/maps/`. Holds the detail (status table, ordering, overlaps, open decisions); the manager prompt only points at it (≤ ~1500 chars). |
-| Sub-chip specs | `<stem>.chips.json`, one entry per sub-session: `cli, title, tldr, prompt, dependsOn, spawn`. The manager spawns them; the skill does not. |
-| Consolidation | Phase between Mine and Manage. High-confidence merges (same ticket/artifact or strict subset) are applied before spawn; medium/low merges, drops and open calls become the manager's owed decisions. A merge never loses a `remainingWork` item. |
-| Playbook | `MANAGER_PLAYBOOK.md` is the manager's decision procedure (merge/split/drop/re-order rules, escalation gates, close-out, write-back to the overlay `LEARNINGS.md`). Improve it there, once; prompts only point at it. |
-| Fan-out | First wave ≤ 5 concurrent sub-chips; later waves follow `dependsOn`. |
-| Nesting | Exactly two levels. A sub-session that itself has children belongs in its own category (re-run `group_sessions.py --root` on it), not a third level. |
-| Overlap | Two sub-sessions on one artifact → the map names the owner; the other's chip says "do not edit X; coordinate via the manager". |
+| Origin | The topmost session in the category. Its own state is the story's "Where the origin session stopped"; it gets a unit only if it has implementation work of its own left. |
+| Narrator | One sonnet agent per category, the **only** decision layer. Reads every member's mined state + intelligence and decides merges, retirements, conflicts and gates with evidence. |
+| Story | `~/.claude/sessions-to-chips/maps/<date>-<slug>.md`. Sections: Mission, origin state, How we got here (causal beats), Established (do not re-derive), Conflicts, Open front, Dead ends, Units table, Gates, Retired, Unit prompts. One file, one source of truth. |
+| Orchestrator | One chip per category, titled `[Manager] <origin title>` (a bare origin title would be a twin of the parked origin row). Owns the narrative and dispatches units; never does a unit's work. Its prompt is script-templated (goal, story path, five-point contract, gates), never LLM-drifted. |
+| Unit | One fresh session's mission, with the mined 5-part prompt unchanged (merged units: one prompt, REMAINING STEPS = union). Each prompt ends with a pointer to the story and the orchestrator's title. |
+| Merge | Only same ticket/artifact, strict subset/direct follow-up, or same files. Evidence recorded in the unit row. A merge never loses a `remainingWork` item; if unsure, keep separate (a wrong split costs one chip, a wrong merge hides an obligation). |
+| Guard | After narration the script re-adds any incomplete member with owed work that is in no unit and in no `retired` entry, and reports it in `warnings`. |
+| Fan-out | First wave at most 5 concurrent units; later waves follow `dependsOn`. |
+| Sidebar nesting | Set by `spawnedFrom.sessionId` = the session that called `spawn_task`. Verified 2026-10-13 against the store: each `[Manager]` chip is a child of the runner session and its units are children of the manager (deeper levels appear when a unit spawns its own). So the orchestrator must call `spawn_task` itself. |
+| Decision tiers | Exactly one orchestrator level. A member that itself has children is its own category (re-run `group_sessions.py --root` on it). |
+| Overlap | Two units on one artifact: the narrator merges them, or names the owner and the other prompt says "do not edit X". |
+| Flat / done | One unit left: spawn it directly with the category context inline. Zero units: report done. |
 
-Gotchas: a `--grep` target set that includes a child but not its parent makes the child its own root (the parent is outside the set) — pass `--root` to pull the full subtree. A manager is not spawn-pinnable to a model (chips run on the desktop's model).
+### Intelligence fields (what the story is built from)
+
+| Field | Meaning | Guard |
+|---|---|---|
+| `contribution` | What the session established for the mission (finding, decision, artifact), distinct from progress. | Not "how far it got". |
+| `established` | Settled calls, each with the PR/ticket/ADR/test that settled it. | A hunch is an `openQuestion`, never an established claim. |
+| `deadEnds` | Falsified theories / abandoned approaches, with why. | Prevents a successor re-running a disproven idea. |
+| `produces` / `needs` | Handoffs: artifacts others depend on / inputs awaited from outside. | One session's `needs` = another's `produces` is a story beat and a `dependsOn`. |
+| `openQuestions` | Raised and not closed. | Feeds the story's Open front. |
+
+Gotchas: a `--grep` target set that includes a child but not its parent makes the child its own root; pass `--root` to pull the full subtree. `--root` prefers an exact title and ignores leftover `[Manager]`-prefixed chips from earlier runs. A chip cannot be pinned to a model (it runs on the desktop's model).
 
 ## Completion criteria (isComplete)
 
