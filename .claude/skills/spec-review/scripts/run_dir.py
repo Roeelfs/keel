@@ -618,7 +618,14 @@ def cmd_merge_check(a):
     findings = all_critical_major(run, expand_labels(run, csv(a.lanes)))
     raw = read_json(run / "merged.raw.json")
     if raw is None:
-        return emit({"ok": False, "errors": ["merged.raw.json missing"], "totalIds": len(findings), "ids": finding_index(findings)}, False)
+        # The index goes to a file, never stdout: a 60+ id one-line JSON gets mangled when relayed
+        # through the script-runner model, which made the whole stage fail (CYN-2850).
+        idx = run / "merge-index.txt"
+        write(idx, "\n".join(
+            f"- {f['id']} [{f['lane']}, {f['severity']}] {f['title']}"
+            + (f" (cites {', '.join(f['cites'])})" if f.get("cites") else "")
+            for f in finding_index(findings)) + "\n")
+        return emit({"ok": False, "errors": ["merged.raw.json missing"], "totalIds": len(findings), "indexPath": str(idx)}, False)
     units, errors = validate_merged(raw, findings)
     if errors:
         return emit({"ok": False, "errors": errors, "totalIds": len(findings)}, False)

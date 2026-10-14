@@ -205,7 +205,10 @@ class EnvelopeAndReportTests(unittest.TestCase):
             envelope(run, "edge-case-miner", [("EC-1", "CRITICAL"), ("EC-2", "MINOR")], ["Q1"])
             rc, out = call("merge-check", "--run", str(run), "--lanes", "edge-case-miner")
             self.assertEqual(rc, 1)
-            self.assertEqual([f["id"] for f in out["ids"]], ["EC-1"])
+            self.assertNotIn("ids", out)
+            lines = open(out["indexPath"]).read().splitlines()
+            self.assertEqual(len(lines), 1)
+            self.assertIn("EC-1 [edge-case-miner, CRITICAL]", lines[0])
 
     def test_merge_check_rejects_gaps_and_double_membership(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -333,13 +333,11 @@ async function synthesize() {
   // Merge before falsify: one merger clusters the CRITICAL/MAJOR lane findings that describe the
   // same defect into F-N units; run_dir.py rejects any id left out or placed twice.
   let mc = await py('Synthesize', 'merge-check', `--lanes ${sq(ok.join(','))}`, true)
-  const idList = (mc.ids || []).map((f) => `  - ${f.id} [${f.lane}, ${f.severity}] ${f.title}${f.cites ? ' (cites ' + f.cites.join(', ') + ')' : ''}`).join('\n')
   const mergePrompt = [
     'ROLE: finding-merger',
-    `Cluster the ${mc.totalIds} CRITICAL/MAJOR findings below into units, one unit per distinct underlying defect. Findings from different lanes that describe the same mechanism, boundary or missing guarantee belong together even when worded differently; findings that merely touch the same file but describe different defects stay apart. A single-member unit is fine.`,
+    `Cluster the ${mc.totalIds} CRITICAL/MAJOR findings listed in ${mc.indexPath || RUN + '/merge-index.txt'} (one line per id: id, lane, severity, title; Read it) into units, one unit per distinct underlying defect. Findings from different lanes that describe the same mechanism, boundary or missing guarantee belong together even when worded differently; findings that merely touch the same file but describe different defects stay apart. A single-member unit is fine.`,
     `Read the full findings where a title is ambiguous: Claude lanes in ${RUN}/lanes/<lane>.md, Codex lanes in ${RUN}/codex/<lane>.out.md (find each by its id). Do not judge whether a finding is true; that is the falsifiers' job.`,
-    `Findings:\n${idList}`,
-    `Write ${RUN}/merged.raw.json: a JSON list of {"title": "<one line naming the defect>", "seam": "<the component/file/contract it lives in>", "members": [<original ids>], "cites": ["<path:line>", ...]}. EVERY id above must appear in exactly one unit's members. Reply via StructuredOutput with the number of units.`,
+    `Write ${RUN}/merged.raw.json: a JSON list of {"title": "<one line naming the defect>", "seam": "<the component/file/contract it lives in>", "members": [<original ids>], "cites": ["<path:line>", ...]}. EVERY id in that file must appear in exactly one unit's members. Reply via StructuredOutput with the number of units.`,
     'You are a leaf agent: spawn no sub-agents or Workflows.',
   ].join('\n')
   const MERGED = { type: 'object', properties: { units: { type: 'number' } }, required: ['units'] }
