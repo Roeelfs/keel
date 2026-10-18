@@ -76,14 +76,30 @@ Each `stories[]` entry: `orchestratorTitle` / `orchestratorTldr` / `orchestrator
 ## 4. Persist the story, then spawn the orchestrator
 Per story:
 - `done` (no units): report the category as done; nothing to spawn.
-- `flat` (one unit): spawn that unit directly with `spawn_task`; its prompt already carries the category context inline. No orchestrator.
+- `flat` (one unit): start that unit directly (standalone, per the rules below); its prompt already carries the category context inline. No orchestrator.
 - otherwise:
   1. **Persist first.** Write `storyMarkdown` to `~/.claude/sessions-to-chips/maps/<YYYY-MM-DD>-<category-slug>.md`, replacing every `{{STORY_PATH}}` (in the file and in `orchestratorPrompt`) with that absolute path.
-  2. Call `mcp__ccd_session__spawn_task` **once per category** with `orchestratorTitle` / `orchestratorTldr` / `orchestratorPrompt`. This is the only spawn you do.
-  3. The orchestrator reads the story, verifies the facts it acts on, settles any leftover conflict itself, spawns each unit from the story's *Unit prompts* in `dependsOn` order (independent units together, first wave at most 5), keeps the Units table current, and escalates only at a real gate (prod mutation, founder decision, unrecoverable conflict).
+  2. Start **one standalone manager per category** with `mcp__ccd_session__start_session` (`spawn_task` where that is what the host offers), passing `orchestratorTitle` / `orchestratorTldr` / `orchestratorPrompt`. This is the only start you do. See **Manager sessions are standalone** below for the required arguments.
+  3. The orchestrator reads the story, verifies the facts it acts on, settles any leftover conflict itself, starts each unit from the story's *Unit prompts* in `dependsOn` order (independent units together, first wave at most 5), keeps the Units table current, and escalates only at a real gate (prod mutation, founder decision, unrecoverable conflict).
 
-Unit titles stay the **original session names** verbatim. The orchestrator is titled `[Manager] <origin title>` so its row is not a twin of the parked origin session. The sidebar nests by whichever session calls `spawn_task`, so the orchestrator must spawn its units itself: runner session > `[Manager]` orchestrator > units.
+Unit titles stay the **original session names** verbatim. The orchestrator is titled `[Manager] <origin title>` so its row is not a twin of the parked origin session.
 
-**Critical:** `spawn_task` creates a FRESH worktree. If a unit's `gitState` is uncommitted or unpushed, its prompt MUST open with the WORKTREE NOTE telling the session to `cd` into the existing worktree (the mining agents do this; verify before sending).
+### Manager sessions are standalone (never attached to the dispatcher)
+
+The session running this skill is only the **dispatcher**. Each `[Manager]` must stand on its own, with no link back to the dispatcher. Measured failures (2026-10-14) that this rule prevents:
+
+- **Always `use_worktree: true` (and `context: "fresh"`).** `use_worktree: false` makes the manager share the dispatcher's checkout; the app then refuses to detach it ("a session that shares its parent's checkout can't be moved to top level"), and archiving the dispatcher or the manager drags its children along. A manager started this way can only be recovered by archive plus re-dispatch.
+- **Pin model and effort on purpose.** Managers only read, verify and dispatch: `model: sonnet`, `effort: medium`. Tell each manager to pin its units the same way unless a unit prompt states a reason for more.
+- **Do not use `initiation: "user_asked"` from an automated turn.** A Workflow-completion or other session's note is not the user speaking; the app refuses the start. Use `own_initiative` there (it becomes a card), or start from the turn where the user asked. Say in the manager prompt that if its own start is refused for the same reason, it proposes the unit as a card and starts it when the human says so.
+- **Check for an existing live `[Manager]` before dispatching** one for the same category (`list_sessions`). Two managers on one category collide on the same worktrees and PRs. Re-dispatch means: archive the old one first, and confirm none of its children has live work (`archive_session` is refused while a child works, and archiving it archives that child).
+- **A duplicate title is not an error to guess through.** Take the most recently active non-archived row per title, and say which one you picked.
+
+**Critical:** a started session gets a FRESH worktree. If a unit's `gitState` is uncommitted or unpushed, its prompt MUST open with the WORKTREE NOTE telling the session to `cd` into the existing worktree (the mining agents do this; verify before sending).
+
+### Mechanics that cost retries
+
+- `Workflow({scriptPath})` only loads a script inside the working directory. Copy `mine_workflow.js` into the dispatcher's worktree, run it, and delete the copy afterwards.
+- A background Workflow returns the story JSON under `result` in its task output file (`json.load(...)["result"]`), not at the top level.
+- Never name a scratch script after a stdlib module (`select.py`, `json.py`): Python imports it ahead of the standard library and the script fails with a circular import.
 
 See [REFERENCE.md](REFERENCE.md) for the story structure, chip-prompt rules, completion criteria and the gotchas that cost retries. Also read the private overlay if present: `~/.claude/skills-overlay/sessions-to-chips/LEARNINGS.md` (adopter-private) for project-specific examples and gate commands; the orchestrator appends generalizable calls there at close-out.

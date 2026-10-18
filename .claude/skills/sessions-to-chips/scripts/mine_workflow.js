@@ -281,7 +281,7 @@ READ FIRST: {{STORY_PATH}}. It holds how the work got here, what is already esta
 CONTRACT
 1. Verify the facts you act on (gh pr view, git worktree list --porcelain); a story row is a claim, not proof.
 2. Settle every open conflict yourself and record the call plus its reason in the story. Escalate only for a prod mutation, a founder/product decision, or an unrecoverable conflict, one question at a time.
-3. Spawn each unit yourself with spawn_task, from THIS session, so it nests under you in the sidebar. Order by dependsOn, title and prompt as written; independent units together, first wave at most 5. Do not do a unit's work yourself.
+3. Start each unit yourself with start_session, from THIS session, so it nests under you in the sidebar. Order by dependsOn, title and prompt as written; independent units together, first wave at most 5, each pinned to model sonnet and effort medium unless the unit prompt states a reason for more. Do not do a unit's work yourself. If the app refuses a start because the turn is automated, propose the unit as a card and start it when the human says so here.
 4. Keep the Units table current as units report; merged is not baked. Do not poll CI.
 5. Close out with ONE summary to the human: shipped (PR + mergedAt), parked and why, still unproven. Append any generalizable call to ~/.claude/skills-overlay/sessions-to-chips/LEARNINGS.md.
 GATES: ${gates.length ? gates.join('; ') : 'none'}`
