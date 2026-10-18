@@ -102,4 +102,18 @@ The session running this skill is only the **dispatcher**. Each `[Manager]` must
 - A background Workflow returns the story JSON under `result` in its task output file (`json.load(...)["result"]`), not at the top level.
 - Never name a scratch script after a stdlib module (`select.py`, `json.py`): Python imports it ahead of the standard library and the script fails with a circular import.
 
+## Wrap-up mode (checkpoint before an account switch or a usage cap)
+
+Run this **instead of mining** when the goal is fewer, converged sessions and a state that survives the switch: session history is not readable from the other account, so everything must live in git, Linear and a note. It is a checkpoint, **not a full stop**: running builds and lanes finish, nothing new starts.
+
+```bash
+python3 -I $SCR/wrapup_roster.py --date <YYYY-MM-DD>   # {managers, superseded, unmanaged, counts}; sends nothing
+python3 -I $SCR/wrapup_status.py --date <YYYY-MM-DD>   # one-shot: which sessions have written their note
+```
+1. **Roster.** `managers` is the newest live `[Manager]` per category; `superseded` are older managers of the same category (not messaged, listed with their live children); `unmanaged` are recent live sessions no manager parents. The slug match is by title, so near-duplicates (two managers for one program under different titles) need a human eye before sending.
+2. **Send** (explicit user go-ahead required: it wakes every session and spends usage). Use `SendMessage` by **session id**, never by name. Each manager gets its `message` ([WRAPUP_MESSAGE.md](WRAPUP_MESSAGE.md)); each unmanaged session gets its own ([WRAPUP_UNMANAGED_MESSAGE.md](WRAPUP_UNMANAGED_MESSAGE.md)). The manager message tells the manager to checkpoint its children itself, so the dispatcher never messages grandchildren.
+3. **What each session does:** finish in-flight work to a checkpoint, push its own branch once or record worktree/branch/PR, post one Linear comment and set state per ticket it touched, archive only DONE-and-merged children, and write `~/.claude/sessions-to-chips/wrapup/<date>-<slug>.md` with the surviving set, the gate blocking each item, "Linear owed", "Owed to the founder", and a paste-ready continuation phrase. Merges, deploys and prod writes still need the human's in-session go-ahead; a blocked item with its gate named is a finished checkpoint.
+4. **Converge.** Do not poll. When a session's note arrives, run `wrapup_status.py` once. The dispatcher's closing message lists: notes written, notes missing, the founder decisions collected from the notes (most blocking first), and the before/after session counts.
+5. After the switch, resume from the notes: run the mine-and-narrate flow with `group_sessions.py --root "[Manager] <category>"`; each note supplies the surviving set and its continuation phrases.
+
 See [REFERENCE.md](REFERENCE.md) for the story structure, chip-prompt rules, completion criteria and the gotchas that cost retries. Also read the private overlay if present: `~/.claude/skills-overlay/sessions-to-chips/LEARNINGS.md` (adopter-private) for project-specific examples and gate commands; the orchestrator appends generalizable calls there at close-out.
