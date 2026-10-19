@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -252,6 +253,42 @@ class EnvelopeAndReportTests(unittest.TestCase):
             (run / "falsifiers" / "AST-1.json").write_text(json.dumps({"id": "AST-1", "verdict": "SURVIVES", "evidence": "member differs"}))
             rc, out = call("summary", "--run", str(run), "--lanes", lanes)
             self.assertEqual((out["missingVerdicts"], out["refuted"]), ([], 1), "member override beats its unit verdict")
+
+    def test_ledger_row_goes_to_the_caller_path_only_and_is_idempotent(self):
+        lanes = "edge-case-miner"
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "run").mkdir()
+            run = make_run(Path(tmp) / "run")
+            envelope(run, lanes, [("F-1", "CRITICAL"), ("F-2", "MAJOR"), ("F-3", "MAJOR"), ("F-4", "MAJOR")], [])
+            call("merge-check", "--run", str(run), "--lanes", lanes)
+            for fid, verdict in (("F-1", "REFUTED"), ("F-2", "SURVIVES"), ("F-3", "SURVIVES-BUT-FIX-REJECTED"),
+                                 ("F-4", "NEEDS-LIVE-EVIDENCE")):
+                (run / "falsifiers" / f"{fid}.json").write_text(json.dumps({"id": fid, "verdict": verdict, "evidence": "x"}))
+            rc, out = call("ledger", "--run", str(run), "--lanes", lanes)
+            self.assertEqual(rc, 1, "no path and no env var must refuse, never guess a location")
+            self.assertIn("no ledger path", out["errors"][0])
+            ledger = Path(tmp) / "nested" / "ledger.jsonl"
+            rc, out = call("ledger", "--run", str(run), "--lanes", lanes, "--spec", "s.md", "--path", str(ledger))
+            self.assertEqual(rc, 0, out)
+            self.assertEqual({k: out["row"][k] for k in ("spec", "dispatched", "refuted", "survives", "fix_rejected", "needs_live")},
+                             {"spec": "s.md", "dispatched": 4, "refuted": 1, "survives": 1, "fix_rejected": 1, "needs_live": 1})
+            call("ledger", "--run", str(run), "--lanes", lanes, "--spec", "s.md", "--path", str(ledger))
+            rows = [json.loads(l) for l in ledger.read_text().splitlines()]
+            self.assertEqual(len(rows), 1, "a retried stage must not double-count a run")
+            self.assertEqual(set(rows[0]), {"date", "spec", "dispatched", "refuted", "survives", "fix_rejected", "needs_live"})
+
+    def test_ledger_path_can_come_from_the_environment(self):
+        lanes = "edge-case-miner"
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "run").mkdir()
+            run = make_run(Path(tmp) / "run")
+            envelope(run, lanes, [("F-1", "CRITICAL")], [])
+            call("merge-check", "--run", str(run), "--lanes", lanes)
+            ledger = Path(tmp) / "env.jsonl"
+            with mock.patch.dict("os.environ", {"SPEC_REVIEW_LEDGER": str(ledger)}):
+                rc, out = call("ledger", "--run", str(run), "--lanes", lanes)
+            self.assertEqual(rc, 0, out)
+            self.assertTrue(ledger.is_file())
 
     def test_falsify_plan_requires_merge(self):
         with tempfile.TemporaryDirectory() as tmp:

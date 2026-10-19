@@ -1,5 +1,5 @@
 """Up to `slots` machine-wide heavy jobs, each observed as its complete process tree."""
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 import fcntl
 import json
@@ -172,6 +172,19 @@ def caller_runtime():
             return 'codex'
         pid = parent
     return None
+
+
+# A Codex exec yields to the model after about this long, and the runner would keep waiting past
+# it. A deferral inside one exec is the useful outcome: the agent retries from fresh state instead
+# of idling on a long queue wait (the configured wait can be several minutes).
+CODEX_WAIT_CAP_SECONDS = 45
+
+
+def cap_wait_for_codex(policy):
+    """Apply the Codex ceiling after every other source (file and KEEL_HEAVY_WAIT_MAX) has set the wait."""
+    if policy.wait_seconds <= CODEX_WAIT_CAP_SECONDS or caller_runtime() != 'codex':
+        return policy
+    return replace(policy, wait_seconds=CODEX_WAIT_CAP_SECONDS)
 
 
 def working_directory():
@@ -884,6 +897,7 @@ def main():
             return 64
         if valid_lease(directory):
             os.execvpe(command[0], command, child_environment(policy, os.environ['KEEL_HEAVY_JOB_ID']))
+        policy = cap_wait_for_codex(policy)
         if policy.governor_mode == 'enforce':
             broker_result = run_broker_if_wrapper(directory, policy, command)
             if broker_result is not None:

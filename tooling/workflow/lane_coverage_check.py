@@ -51,7 +51,7 @@ _STOPWORDS = {"100", "200", "404", "500", "1000", "2026", "2025", "0.0", "1.0"}
 # and `probe` fields are full of paths, dates and ids that incidentally appear in any program,
 # so one accidental match certified a lane whose actual finding had been dropped. Measured
 # 2026-08-26 — the first version of this checker PASSED its own negative control.
-HEADLINE_FIELDS = ("headline", "corrected_claim", "corrected_item", "reason", "summary", "verdict")
+HEADLINE_FIELDS = ("headline", "corrected", "corrected_claim", "corrected_item", "reason", "summary", "verdict")
 
 
 def claim_text(payload: object) -> str:

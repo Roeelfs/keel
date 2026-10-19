@@ -110,6 +110,21 @@ class LaneCoverage(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn("measure:define-phase", out)
 
+    def test_corrected_field_is_the_claim_not_the_whole_payload(self):
+        """A falsifier that returns its finding under `corrected` has no other headline field,
+        so claim_text fell back to the WHOLE payload and its incidental probe paths and dates
+        certified a lane whose corrected figure had been dropped."""
+        rows = [lane(
+            "falsify:p3",
+            corrected="the 283 of 609 figure is 141 of 609 once non-zero exits are counted",
+            probe="grep over 8536 calls, log at /scratch/run-4412.log, line 137",
+        )]
+        rc, out = run(rows, "Probe: 8536 calls, run-4412.log, line 137.")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("falsify:p3", out)
+        rc, out = run(rows, "Corrected: 141 of 609, not 283 of 609.")
+        self.assertEqual(rc, 0, out)
+
     def test_two_claim_tokens_required(self):
         """One matching number from the claim is not enough."""
         rows = [lane("m", headline="gap median 36.55h p90 155.95h across N=10")]

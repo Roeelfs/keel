@@ -149,5 +149,37 @@ class ConsultJevTests(unittest.TestCase):
         self.assertEqual(decision['jev']['admit'], False)
 
 
+
+class CodexWaitCapTests(unittest.TestCase):
+    def cap(self, wait, runtime):
+        with mock.patch.object(heavy_runner, 'caller_runtime', return_value=runtime):
+            return heavy_runner.cap_wait_for_codex(Policy(wait_seconds=wait)).wait_seconds
+
+    def test_codex_wait_is_capped_at_45_seconds(self):
+        self.assertEqual(self.cap(540, 'codex'), 45)
+
+    def test_a_shorter_wait_is_never_raised(self):
+        self.assertEqual(self.cap(30, 'codex'), 30)
+
+    def test_claude_and_unknown_callers_keep_the_configured_wait(self):
+        self.assertEqual(self.cap(540, 'claude'), 540)
+        self.assertEqual(self.cap(540, None), 540)
+
+    def test_the_runtime_is_not_probed_when_the_wait_is_already_short(self):
+        with mock.patch.object(heavy_runner, 'caller_runtime') as probe:
+            heavy_runner.cap_wait_for_codex(Policy(wait_seconds=10))
+        probe.assert_not_called()
+
+    def test_the_cap_applies_after_the_env_override(self):
+        # KEEL_HEAVY_WAIT_MAX is read by load_policy, which runs before the cap.
+        with mock.patch.dict(os.environ, {'KEEL_HEAVY_WAIT_MAX': '900'}):
+            from heavy_resources import load_policy
+            with mock.patch('heavy_resources.account_home', return_value=Path(tempfile.mkdtemp())):
+                loaded = load_policy()
+        self.assertEqual(loaded.wait_seconds, 900)
+        with mock.patch.object(heavy_runner, 'caller_runtime', return_value='codex'):
+            self.assertEqual(heavy_runner.cap_wait_for_codex(loaded).wait_seconds, 45)
+
+
 if __name__ == '__main__':
     unittest.main()

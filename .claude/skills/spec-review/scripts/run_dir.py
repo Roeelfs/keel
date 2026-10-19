@@ -22,6 +22,7 @@ Every subcommand prints ONE JSON object on stdout; exit 1 means the stage must
 fail (the JSON carries `errors`).
 """
 import argparse
+import datetime
 import json
 import os
 import re
@@ -742,6 +743,37 @@ def cmd_summary(a):
                  "refuted": refuted, "missingVerdicts": missing, "hardStop": bool(reasons), "hardStopReasons": reasons})
 
 
+LEDGER_ENV = "SPEC_REVIEW_LEDGER"
+
+
+def cmd_ledger(a):
+    """Append one per-run falsifier row (B10) to a persistent jsonl, so verdict counts outlive /tmp.
+
+    The path is always the caller's: `--path`, else $SPEC_REVIEW_LEDGER. This script never names
+    a machine location itself, because it ships in a public repo. Re-running a finished run
+    appends nothing (an identical row is skipped), so a retried Synthesize stage cannot double-count.
+    """
+    path = a.path or os.environ.get(LEDGER_ENV, "")
+    if not path:
+        return emit({"ok": False, "errors": [f"no ledger path: pass --path or set ${LEDGER_ENV}"]}, False)
+    run = Path(a.run)
+    labels = expand_labels(run, csv(a.lanes))
+    verdicts, _, _ = falsifier_counts(run, [f["id"] for f in all_critical_major(run, labels)])
+    tally = lambda word: sum(1 for v in verdicts.values() if v == word)
+    row = {"date": datetime.date.today().isoformat(), "spec": a.spec or run.name,
+           "dispatched": sum(1 for v in verdicts.values() if v != "MISSING"),
+           "refuted": tally("REFUTED"), "survives": tally("SURVIVES"),
+           "fix_rejected": tally("SURVIVES-BUT-FIX-REJECTED"), "needs_live": tally("NEEDS-LIVE-EVIDENCE")}
+    line = json.dumps(row, separators=(",", ":"), sort_keys=True)
+    target = Path(path).expanduser()
+    existing = target.read_text(encoding="utf-8").splitlines() if target.is_file() else []
+    if line not in existing:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    return emit({"ok": True, "row": row, "path": str(target), "appended": line not in existing})
+
+
 def cmd_check_report(a):
     run = Path(a.run)
     sys.path.insert(0, str(SKILL_DIR / "scripts"))
@@ -809,6 +841,7 @@ def main(argv=None):
     p = add("falsify-plan", cmd_falsify_plan, "lanes", "spec", "max-batches")
     p.add_argument("--dry", action="store_true", help="print the plan without writing prompts")
     add("summary", cmd_summary, "lanes", "planned")
+    add("ledger", cmd_ledger, "lanes", "spec", "path")
     add("check-report", cmd_check_report, "lanes", "manifest", "skipped", "publish")
     a = ap.parse_args(argv)
     a.skill_dir = getattr(a, "skill_dir", "") or str(SKILL_DIR)

@@ -32,6 +32,28 @@ CODEX_LINES = [
 ]
 
 
+def codex_output(inner):
+    """The real Codex shape: a list of input_text blocks wrapping a JSON result."""
+    return {"payload": {"type": "function_call_output", "output": [
+        {"type": "input_text", "text": "Script completed\nWall time 0.4 seconds\nOutput:\n"},
+        {"type": "input_text", "text": inner}]}}
+
+
+def run_digest(lines, root_name=".codex"):
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp) / root_name / "sessions"
+        d.mkdir(parents=True)
+        path = d / "rollout-x.jsonl"
+        path.write_text("\n".join(json.dumps(l) for l in lines) + "\n")
+        buckets = Path(tmp) / "b.json"
+        buckets.write_text(json.dumps([[str(path)]]))
+        out = Path(tmp) / "out"
+        r = subprocess.run([sys.executable, str(SCRIPT), "--window", "w", str(buckets), str(out)],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        return (out / "bucket-0.md").read_text()
+
+
 class DigestTest(unittest.TestCase):
     def test_digest_contains_human_turn_tool_error_and_repeated_calls(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -66,6 +88,38 @@ class DigestTest(unittest.TestCase):
             self.assertIn("permission denied", content, "tool error body missing")
             self.assertIn("REPEATED CALLS", content, "friction-loop section missing")
             self.assertIn("3x", content, "the identical 3x call should be counted as a repeated call")
+
+
+class CodexErrorCountingTest(unittest.TestCase):
+    """The old rule flagged any output that merely CONTAINED "error"/"denied"/"rejected"
+    (7741 of 13132 outputs over 10-13..19); an error is a non-zero inner exit code."""
+
+    def test_a_successful_command_that_prints_error_words_is_not_an_error(self):
+        out = run_digest([
+            {"payload": {"type": "message", "role": "user", "content": "grep for the error handler"}},
+            codex_output('{"i":0,"result":{"value":{"exit_code":0,"output":"throw new Error; denied; rejected"}}}'),
+        ])
+        self.assertNotIn("TOOL ERRORS (", out)
+        self.assertNotIn("HOOK DENIALS (", out)
+
+    def test_a_non_zero_inner_exit_code_is_an_error(self):
+        out = run_digest([codex_output('{"i":0,"result":{"value":{"exit_code":2,"output":"npm ERR"}}}')])
+        self.assertIn("TOOL ERRORS (1)", out)
+
+    def test_an_escaped_exit_code_in_a_string_output_is_parsed(self):
+        out = run_digest([{"payload": {"type": "function_call_output",
+                                       "output": 'wrapped {\\"exit_code\\":1,\\"output\\":\\"x\\"}'}}])
+        self.assertIn("TOOL ERRORS (1)", out)
+
+    def test_script_failed_is_an_error(self):
+        out = run_digest([{"payload": {"type": "function_call_output", "output": "Script failed\nboom"}}])
+        self.assertIn("TOOL ERRORS (1)", out)
+
+    def test_a_pretooluse_hook_block_is_a_denial_not_an_error(self):
+        out = run_digest([{"payload": {"type": "function_call_output",
+                                       "output": "Command blocked by PreToolUse hook: heavy command"}}])
+        self.assertIn("HOOK DENIALS (1)", out)
+        self.assertNotIn("TOOL ERRORS (", out)
 
 
 if __name__ == "__main__":

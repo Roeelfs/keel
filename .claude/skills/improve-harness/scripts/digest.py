@@ -67,6 +67,25 @@ def claude_session(path):
     return human, errs, selfs, denials, loops
 
 
+# A Codex tool output is a list of input_text blocks wrapping a JSON result, so the exit code
+# shows up as `"exit_code":N` after flattening, or as `\"exit_code\":N` when the output was
+# still a JSON-escaped string. The old rule also counted any "error"/"denied"/"rejected" word,
+# which fired on source code and prose a successful command merely printed.
+EXIT_CODE = re.compile(r'\\*"exit_code\\*"\s*:\s*(-?\d+)|Exit code: (-?\d+)')
+
+
+def codex_output_kind(out):
+    """Classify one Codex tool output: "denial" (a hook blocked the call), "error" (a non-zero
+    inner exit code, or the script failed), or None (success, whatever words it printed)."""
+    s = out if isinstance(out, str) else (text_of(out) if isinstance(out, list) else json.dumps(out))
+    s = s or ""
+    if "blocked by PreToolUse hook" in s:
+        return "denial", s
+    if "Script failed" in s or any(int(a or b) != 0 for a, b in EXIT_CODE.findall(s)):
+        return "error", s
+    return None, s
+
+
 def codex_session(path):
     human, errs, selfs, denials = [], [], [], []
     calls = collections.Counter(); names = {}
@@ -91,9 +110,10 @@ def codex_session(path):
             k = hashlib.md5(((p.get("name") or pt) + str(args)).encode()).hexdigest()
             calls[k] += 1; names[k] = f"{p.get('name') or pt} {clip(str(args), 160)}"
         elif pt in ("function_call_output", "custom_tool_call_output"):
-            out = p.get("output")
-            s = out if isinstance(out, str) else json.dumps(out)
-            if re.search(r'"exit_code":\s*[1-9]|Exit code: [1-9]|\berror\b|denied|rejected', s or "", re.I):
+            kind, s = codex_output_kind(p.get("output"))
+            if kind == "denial":
+                denials.append(clip(s, 220))
+            elif kind == "error":
                 errs.append(clip(s, 220))
     loops = [(n, names[k]) for k, n in calls.items() if n >= 3]
     return human, errs, selfs, denials, loops
