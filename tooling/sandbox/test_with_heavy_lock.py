@@ -49,7 +49,7 @@ def isolated_runner(home, **updates):
     keel = os.path.join(home, ".keel")
     os.mkdir(keel)
     with open(os.path.join(keel, "resource-policy.json"), "w", encoding="utf-8") as handle:
-        json.dump({"min_free_percent": 0}, handle)
+        json.dump({"min_free_percent": 0, "max_load_per_core": 0}, handle)
     env = dict(os.environ, HOME=home, KEEL_HEAVY_POLL_SECONDS="0.05")
     env.update(updates)
     return isolated_wrapper(home), env

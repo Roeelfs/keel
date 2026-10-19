@@ -41,6 +41,14 @@ class Policy:
     admit_p_lo: float = 0.40
     saturation_deny: float = 3.5
     broker_shells: tuple = ('bash', 'zsh', 'sh', 'dash')
+    # CPU admission (2026-10-19: a game lagged at load 34.8 on 12 cores while the memory-only gate
+    # admitted two ~300% CPU suites). 0 disables the load gate.
+    max_load_per_core: float = 0.85
+    # Process-name substrings (matched against the executable path) of interactive apps whose
+    # presence reserves CPU and caps concurrent heavy jobs. Config-only: the global layer names none.
+    protected_apps: tuple = ()
+    protected_reserve_cores: float = 2
+    protected_max_jobs: float = 1
     # idle_kill_hours/reclaim_min_interval_s/reclaim_daily_max/reclaim_max_runtime_s (r2) are gone:
     # they rate-limited the tick/lane reclaim engine, which the 2026-09-29 founder rescope dropped
     # in favor of machine-steward (docs/machine-steward.md). Nothing in this repo reads them.
@@ -60,7 +68,7 @@ def load_policy():
         raise ValueError('unknown resource policy fields: ' + ', '.join(sorted(unknown)))
     defaults = asdict(Policy())
     string_fields = {'governor_mode', 'jev_admission'}
-    list_fields = {'broker_shells'}
+    list_fields = {'broker_shells', 'protected_apps'}
     for key, value in values.items():
         if key == 'command_max_seconds':
             continue
@@ -215,6 +223,50 @@ def free_percent():
                                   Path('/proc/meminfo').read_text(), re.M))
         return 100 * int(entries['MemAvailable']) / int(entries['MemTotal'])
     raise ValueError('resource admission requires a supported host memory observer')
+
+
+def protected_running(policy):
+    """(names of configured protected apps now running, their summed recent CPU in cores)."""
+    if not policy.protected_apps:
+        return [], 0.0
+    result = subprocess.run(['ps', '-axo', 'pcpu=,comm='], text=True, capture_output=True,
+                            check=True, timeout=5, env={**os.environ, 'LC_ALL': 'C'})
+    found, cores = set(), 0.0
+    for line in result.stdout.splitlines():
+        fields = line.strip().split(None, 1)
+        if len(fields) != 2:
+            continue
+        for name in policy.protected_apps:
+            if name and name in fields[1]:
+                found.add(name)
+                cores += float(fields[0]) / 100
+    return sorted(found), cores
+
+
+def cpu_state(policy, running_jobs):
+    """The CPU admission decision for one more heavy job beside `running_jobs` held slots.
+
+    Capacity is `max_load_per_core x ncpu`; a running protected app reserves
+    max(protected_reserve_cores, its observed CPU) of it and caps heavy jobs at
+    `protected_max_jobs`. The 1-minute load average already contains the app's own load, so the
+    reserve is headroom kept free for it, not a double count of what it uses. Read errors fail open.
+    """
+    try:
+        load1 = os.getloadavg()[0]
+        ncpu = os.cpu_count() or 1
+        apps, app_cores = protected_running(policy)
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        return {'reason': None, 'error': f'{type(error).__name__}: {error}'}
+    reserve = max(policy.protected_reserve_cores, app_cores) if apps else 0.0
+    capacity = policy.max_load_per_core * ncpu - reserve
+    reason = None
+    if apps and running_jobs >= policy.protected_max_jobs:
+        reason = 'protected_app'
+    elif policy.max_load_per_core and load1 > capacity:
+        reason = 'cpu_pressure'
+    return {'reason': reason, 'load1': round(load1, 2), 'ncpu': ncpu, 'capacity': round(capacity, 2),
+            'reserve_cores': round(reserve, 2), 'protected_apps': apps,
+            'protected_cpu_cores': round(app_cores, 2), 'running_jobs': running_jobs}
 
 
 def total_memory_mb():

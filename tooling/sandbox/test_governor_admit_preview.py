@@ -49,7 +49,7 @@ class AdmitPreviewFunctionTests(unittest.TestCase):
         self.addCleanup(self.env_patch.stop)
 
     def test_no_leases_admits_via_the_fast_path_and_never_writes_a_ticket_or_lease(self):
-        result = heavy_runner.admit_preview(self.heavy_dir, Policy(), 'other-heavy')
+        result = heavy_runner.admit_preview(self.heavy_dir, Policy(max_load_per_core=0), 'other-heavy')
         assert_contract(self, result)
         self.assertEqual(result['decision'], 'admit')
         self.assertEqual(result['source'], 'fast_path')

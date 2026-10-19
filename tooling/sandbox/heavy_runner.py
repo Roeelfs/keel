@@ -11,7 +11,7 @@ import sys
 import time
 import uuid
 
-from heavy_resources import (MAX_SLOTS, account_home, ancestors, command_seconds, event, free_percent,
+from heavy_resources import (MAX_SLOTS, account_home, ancestors, command_seconds, cpu_state, event, free_percent,
                              job_members, load_policy, processes, read_record, total_memory_mb, write_record)
 
 QUEUE_PROGRESS_SECONDS = 30
@@ -203,13 +203,14 @@ def claim_slot(directory, policy, position, budget_mb=None, jev_admit=False, res
                 orphaned += 1
         if position > len(free):
             return None, 'previous_job_alive' if position <= len(free) + orphaned else 'resource_busy'
-        others_held = len(free) < policy.slots  # Read while every free slot is still locked here.
+        held = policy.slots - len(free)  # Read while every free slot is still locked here.
+        others_held = held > 0
         stream, slot = free.pop(0)
         for other, _ in free:
             other.close()
         free = []
         reason = pressure_reason(policy, others_held, budget_mb=budget_mb, jev_admit=jev_admit,
-                                 reserve_mb=reserve_mb)
+                                 reserve_mb=reserve_mb) or cpu_state(policy, held)['reason']
         if reason:
             stream.close()
             return None, reason
@@ -760,7 +761,8 @@ def admit_preview(directory, policy, job_class):
     run_p90 = class_row.get('run_p90_s')
 
     floors = admission.floors_fired(snapshot, policy)
-    fast_reason = None if admission.any_unknown(snapshot) else pressure_reason(policy, running >= 1)
+    fast_reason = None if admission.any_unknown(snapshot) else (
+        pressure_reason(policy, running >= 1) or cpu_state(policy, running)['reason'])
 
     cached_jev = None
     if not floors and running < policy.slots and fast_reason is None:
@@ -838,6 +840,13 @@ def main():
                               'lease': next((entry['lease'] for entry in leases if entry['lease']), None),
                               'leases': leases, 'state_dir': str(directory)}))
             return 0
+        if command == ['--cpu-check']:  # dry: the CPU admission decision for one more job, nothing claimed
+            held = sum(1 for slot in range(1, policy.slots + 1)
+                       if not lock_available(directory, slot) or lease_group_alive(read_record(lease_path(directory, slot))))
+            print(json.dumps({**cpu_state(policy, held), 'max_load_per_core': policy.max_load_per_core,
+                              'protected_reserve_cores': policy.protected_reserve_cores,
+                              'protected_max_jobs': policy.protected_max_jobs}, sort_keys=True))
+            return 0
         if command == ['--check-lease']:
             return 0 if valid_lease(directory) else 75
         if command[:1] == ['--admit-preview']:
@@ -857,7 +866,7 @@ def main():
         if command[:1] == ['--']:
             command = command[1:]
         if not command:
-            print('usage: with-heavy-lock [--status|--check-lease] | COMMAND [ARGS...]', file=sys.stderr)
+            print('usage: with-heavy-lock [--status|--check-lease|--cpu-check] | COMMAND [ARGS...]', file=sys.stderr)
             return 64
         if valid_lease(directory):
             os.execvpe(command[0], command, child_environment(policy, os.environ['KEEL_HEAVY_JOB_ID']))
