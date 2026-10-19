@@ -13,12 +13,8 @@ inspect or audit sessions selects **mine-only**: collect context and analyze goa
 steering, latest summary/instruction, results and unfinished obligations. Do not
 create chips or resume work merely because the legacy workflow below ends in them.
 
-For mine-only audits and overlap/consolidation analysis, read the shared
-[contextual audit workflow](../claude-sessions/references/session-audit.md) and
-[supported interfaces](../claude-sessions/references/supported-interfaces.md).
-That workflow adds read-only parallel dossiers, overlap mapping and acceptance
-before parking; its instructions live in one place, rather than a second mining
-implementation. Invoke `$sessions-to-chips` with “mine-only; audit these sessions”.
+A mine-only audit stays read-only: parallel dossiers, overlap mapping and acceptance before
+parking. Invoke `$sessions-to-chips` with “mine-only; audit these sessions”.
 
 For explicitly requested resume chips, preserve the deep-mining and chip rules
 below, but first verify callable interfaces and authorized scope. The legacy
