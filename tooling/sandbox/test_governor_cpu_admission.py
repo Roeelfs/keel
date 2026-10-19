@@ -11,18 +11,22 @@ import heavy_resources
 import heavy_runner
 from heavy_resources import Policy
 
-GAME = '/Applications/Some Game.app/Contents/MacOS/Some Game'
+FRONT = 100  # synthetic pids: the frontmost app, a busy bystander, a heavy-job member, an idle one
+BUSY, JOB, IDLE = 200, 300, 400
+JOB_SESSION = 300
 
 
 def ps_output(rows):
-    return subprocess.CompletedProcess([], 0, stdout=''.join(f'{cpu:5.1f} {comm}\n' for cpu, comm in rows))
+    return subprocess.CompletedProcess([], 0, stdout=''.join(f'{pid} {cpu:5.1f}\n' for pid, cpu in rows))
 
 
-def state(policy, running, load1, rows=(), ncpu=12):
+def state(policy, running, load1, rows=(), ncpu=12, front=FRONT):
     with mock.patch.object(heavy_resources.os, 'getloadavg', return_value=(load1, 0, 0)), \
             mock.patch.object(heavy_resources.os, 'cpu_count', return_value=ncpu), \
+            mock.patch.object(heavy_resources, 'frontmost_pid', return_value=front), \
+            mock.patch.object(heavy_resources, 'session_of', side_effect=lambda pid: pid), \
             mock.patch.object(heavy_resources.subprocess, 'run', return_value=ps_output(rows)):
-        return heavy_resources.cpu_state(policy, running)
+        return heavy_resources.cpu_state(policy, running, {JOB_SESSION})
 
 
 class LoadGateTests(unittest.TestCase):
@@ -39,52 +43,57 @@ class LoadGateTests(unittest.TestCase):
         with mock.patch.object(heavy_resources.os, 'getloadavg', side_effect=OSError('no load')):
             result = heavy_resources.cpu_state(Policy(), 0)
         self.assertIsNone(result['reason'])
-        self.assertIn('no load', result['error'])
+        self.assertEqual(result['error'], 'OSError')  # type only: a message could name a process
 
     def test_ps_failure_fails_open(self):
-        policy = Policy(protected_apps=('Some Game',))
-        with mock.patch.object(heavy_resources.subprocess, 'run',
-                               side_effect=subprocess.CalledProcessError(1, 'ps')):
-            self.assertIsNone(heavy_resources.cpu_state(policy, 3)['reason'])
+        with mock.patch.object(heavy_resources, 'frontmost_pid', return_value=FRONT), \
+                mock.patch.object(heavy_resources.subprocess, 'run',
+                                  side_effect=subprocess.CalledProcessError(1, 'ps')):
+            self.assertIsNone(heavy_resources.cpu_state(Policy(), 3)['reason'])
 
 
-class ProtectedAppTests(unittest.TestCase):
-    policy = Policy(protected_apps=('Some Game',), protected_reserve_cores=2, protected_max_jobs=1)
+class InteractiveForegroundTests(unittest.TestCase):
+    def test_idle_frontmost_app_reserves_nothing(self):
+        result = state(Policy(), 2, 9.0, rows=[(FRONT, 10.0), (BUSY, 80.0)])
+        self.assertEqual((result['reason'], result['reserve_cores'], result['foreground_busy']), (None, 0.0, False))
 
-    def test_absent_app_reserves_nothing(self):
-        result = state(self.policy, 2, 9.0, rows=[(50.0, '/usr/bin/other')])
-        self.assertEqual((result['reason'], result['reserve_cores'], result['protected_apps']), (None, 0.0, []))
+    def test_busy_frontmost_app_reserves_the_minimum(self):
+        result = state(Policy(), 0, 9.0, rows=[(FRONT, 90.0), (IDLE, 1.0)])
+        self.assertEqual((result['capacity'], result['reason']), (8.2, 'cpu_pressure'))  # 10.2 - 2
 
-    def test_present_app_reserves_fixed_cores(self):
-        result = state(self.policy, 0, 9.0, rows=[(30.0, GAME)])
-        self.assertEqual(result['capacity'], 8.2)  # 10.2 - 2 reserved
-        self.assertEqual(result['reason'], 'cpu_pressure')
-
-    def test_reserve_grows_to_the_apps_observed_cpu(self):
-        result = state(self.policy, 0, 6.0, rows=[(150.0, GAME), (200.0, GAME + ' Helper')])
-        self.assertEqual(result['reserve_cores'], 3.5)
+    def test_reserve_counts_busy_bystanders_but_not_heavy_jobs(self):
+        result = state(Policy(), 0, 6.0, rows=[(FRONT, 150.0), (BUSY, 200.0), (JOB, 300.0), (IDLE, 10.0)])
+        self.assertEqual(result['interactive_cores'], 3.5)
         self.assertIsNone(result['reason'])  # 6 <= 10.2 - 3.5
 
-    def test_present_app_caps_concurrent_heavy_jobs(self):
-        self.assertIsNone(state(self.policy, 0, 1.0, rows=[(90.0, GAME)])['reason'])
-        self.assertEqual(state(self.policy, 1, 1.0, rows=[(90.0, GAME)])['reason'], 'protected_app')
+    def test_busy_frontmost_app_caps_concurrent_heavy_jobs(self):
+        self.assertIsNone(state(Policy(), 0, 1.0, rows=[(FRONT, 90.0)])['reason'])
+        self.assertEqual(state(Policy(), 1, 1.0, rows=[(FRONT, 90.0)])['reason'], 'interactive_foreground')
+
+    def test_no_window_server_is_load_only(self):
+        result = state(Policy(), 3, 1.0, rows=[(BUSY, 90.0)], front=None)
+        self.assertEqual((result['reason'], result['foreground_busy']), (None, False))
+
+    def test_output_is_anonymous(self):
+        result = state(Policy(), 0, 1.0, rows=[(FRONT, 90.0)])
+        self.assertNotIn(str(FRONT), json.dumps({k: v for k, v in result.items() if k != 'load1'}))
 
 
 class PolicyLoadTests(unittest.TestCase):
-    def test_protected_apps_load_from_the_policy_file(self):
+    def test_interactive_fields_load_from_the_policy_file(self):
         with tempfile.TemporaryDirectory() as home, mock.patch.object(
                 heavy_resources, 'account_home', return_value=Path(home)):
             (Path(home) / '.keel').mkdir()
             (Path(home) / '.keel' / 'resource-policy.json').write_text(json.dumps(
-                {'protected_apps': ['Some Game'], 'max_load_per_core': 0.7}))
+                {'interactive_max_jobs': 2, 'max_load_per_core': 0.7}))
             policy = heavy_resources.load_policy()
-        self.assertEqual((list(policy.protected_apps), policy.max_load_per_core), (['Some Game'], 0.7))
+        self.assertEqual((policy.interactive_max_jobs, policy.max_load_per_core), (2, 0.7))
 
-    def test_protected_apps_must_be_strings(self):
+    def test_a_named_app_list_is_not_a_policy_field(self):
         with tempfile.TemporaryDirectory() as home, mock.patch.object(
                 heavy_resources, 'account_home', return_value=Path(home)):
             (Path(home) / '.keel').mkdir()
-            (Path(home) / '.keel' / 'resource-policy.json').write_text(json.dumps({'protected_apps': [1]}))
+            (Path(home) / '.keel' / 'resource-policy.json').write_text(json.dumps({'protected_apps': ['x']}))
             with self.assertRaises(ValueError):
                 heavy_resources.load_policy()
 
@@ -102,7 +111,7 @@ class ClaimSlotWiringTests(unittest.TestCase):
                     raise BlockingIOError
                 return available(stream, flags)
 
-            def cpu(_policy, held):
+            def cpu(_policy, held, _sessions):
                 seen['held'] = held
                 return {'reason': cpu_reason}
             with mock.patch.object(heavy_runner.fcntl, 'flock', side_effect=flock), \
@@ -116,7 +125,7 @@ class ClaimSlotWiringTests(unittest.TestCase):
         self.assertEqual(self.claim('cpu_pressure'), ('cpu_pressure', 0))
 
     def test_held_slots_are_counted_for_the_protected_cap(self):
-        self.assertEqual(self.claim('protected_app', held_slots=(1,)), ('protected_app', 1))
+        self.assertEqual(self.claim('interactive_foreground', held_slots=(1,)), ('interactive_foreground', 1))
 
     def test_no_cpu_reason_claims_a_slot(self):
         self.assertEqual(self.claim(None), (1, 0))

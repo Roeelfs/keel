@@ -181,6 +181,19 @@ def working_directory():
         return None
 
 
+def job_sessions(directory):
+    """The session ids of every recorded heavy job: their CPU is never interactive load."""
+    sessions = set()
+    for slot in range(1, MAX_SLOTS + 1):
+        try:
+            lease = read_record(lease_path(directory, slot))
+        except (OSError, ValueError):
+            continue
+        if lease and isinstance(lease.get('pgid'), int):
+            sessions.add(lease['pgid'])
+    return sessions
+
+
 def claim_slot(directory, policy, position, budget_mb=None, jev_admit=False, reserve_mb=0.0):
     """Lock the first free slot when no more waiters are ahead than there are free slots.
 
@@ -204,13 +217,14 @@ def claim_slot(directory, policy, position, budget_mb=None, jev_admit=False, res
         if position > len(free):
             return None, 'previous_job_alive' if position <= len(free) + orphaned else 'resource_busy'
         held = policy.slots - len(free)  # Read while every free slot is still locked here.
+        sessions = job_sessions(directory)
         others_held = held > 0
         stream, slot = free.pop(0)
         for other, _ in free:
             other.close()
         free = []
         reason = pressure_reason(policy, others_held, budget_mb=budget_mb, jev_admit=jev_admit,
-                                 reserve_mb=reserve_mb) or cpu_state(policy, held)['reason']
+                                 reserve_mb=reserve_mb) or cpu_state(policy, held, sessions)['reason']
         if reason:
             stream.close()
             return None, reason
@@ -762,7 +776,7 @@ def admit_preview(directory, policy, job_class):
 
     floors = admission.floors_fired(snapshot, policy)
     fast_reason = None if admission.any_unknown(snapshot) else (
-        pressure_reason(policy, running >= 1) or cpu_state(policy, running)['reason'])
+        pressure_reason(policy, running >= 1) or cpu_state(policy, running, job_sessions(directory))['reason'])
 
     cached_jev = None
     if not floors and running < policy.slots and fast_reason is None:
@@ -843,9 +857,9 @@ def main():
         if command == ['--cpu-check']:  # dry: the CPU admission decision for one more job, nothing claimed
             held = sum(1 for slot in range(1, policy.slots + 1)
                        if not lock_available(directory, slot) or lease_group_alive(read_record(lease_path(directory, slot))))
-            print(json.dumps({**cpu_state(policy, held), 'max_load_per_core': policy.max_load_per_core,
-                              'protected_reserve_cores': policy.protected_reserve_cores,
-                              'protected_max_jobs': policy.protected_max_jobs}, sort_keys=True))
+            print(json.dumps({**cpu_state(policy, held, job_sessions(directory)),
+                              'max_load_per_core': policy.max_load_per_core,
+                              'interactive_max_jobs': policy.interactive_max_jobs}, sort_keys=True))
             return 0
         if command == ['--check-lease']:
             return 0 if valid_lease(directory) else 75

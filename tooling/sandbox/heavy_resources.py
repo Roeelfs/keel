@@ -44,11 +44,14 @@ class Policy:
     # CPU admission (2026-10-19: a game lagged at load 34.8 on 12 cores while the memory-only gate
     # admitted two ~300% CPU suites). 0 disables the load gate.
     max_load_per_core: float = 0.85
-    # Process-name substrings (matched against the executable path) of interactive apps whose
-    # presence reserves CPU and caps concurrent heavy jobs. Config-only: the global layer names none.
-    protected_apps: tuple = ()
-    protected_reserve_cores: float = 2
-    protected_max_jobs: float = 1
+    # Interactive foreground load, learned at runtime and never named: the frontmost GUI app, plus
+    # any process outside a heavy job whose decaying %CPU is at least interactive_busy_cores. When
+    # the frontmost app uses interactive_min_cores or more, its load is reserved (at least
+    # interactive_reserve_cores) and concurrent heavy jobs are capped at interactive_max_jobs.
+    interactive_min_cores: float = 0.5
+    interactive_busy_cores: float = 0.5
+    interactive_reserve_cores: float = 2
+    interactive_max_jobs: float = 1
     # idle_kill_hours/reclaim_min_interval_s/reclaim_daily_max/reclaim_max_runtime_s (r2) are gone:
     # they rate-limited the tick/lane reclaim engine, which the 2026-09-29 founder rescope dropped
     # in favor of machine-steward (docs/machine-steward.md). Nothing in this repo reads them.
@@ -68,7 +71,7 @@ def load_policy():
         raise ValueError('unknown resource policy fields: ' + ', '.join(sorted(unknown)))
     defaults = asdict(Policy())
     string_fields = {'governor_mode', 'jev_admission'}
-    list_fields = {'broker_shells', 'protected_apps'}
+    list_fields = {'broker_shells'}
     for key, value in values.items():
         if key == 'command_max_seconds':
             continue
@@ -225,48 +228,67 @@ def free_percent():
     raise ValueError('resource admission requires a supported host memory observer')
 
 
-def protected_running(policy):
-    """(names of configured protected apps now running, their summed recent CPU in cores)."""
-    if not policy.protected_apps:
-        return [], 0.0
-    result = subprocess.run(['ps', '-axo', 'pcpu=,comm='], text=True, capture_output=True,
+def frontmost_pid():
+    """The frontmost GUI app's pid, or None where there is no window server to ask."""
+    if sys.platform != 'darwin':
+        return None
+    front = subprocess.run(['/usr/bin/lsappinfo', 'front'], text=True, capture_output=True,
+                           check=True, timeout=5).stdout.strip()
+    info = subprocess.run(['/usr/bin/lsappinfo', 'info', '-only', 'pid', front], text=True,
+                          capture_output=True, check=True, timeout=5).stdout
+    match = re.search(r'"pid"\s*=\s*(\d+)', info)
+    return int(match[1]) if match else None
+
+
+def interactive_load(policy, job_sessions):
+    """(frontmost app's cores, all interactive cores) -- anonymous figures, no names or pids.
+
+    Interactive = the frontmost app plus every busy process that is not a member of a heavy job
+    (its session is a lease's session). ps %CPU is a decaying average, so a busy process is a
+    sustained one, not a single spike.
+    """
+    front = frontmost_pid()
+    result = subprocess.run(['ps', '-axo', 'pid=,pcpu='], text=True, capture_output=True,
                             check=True, timeout=5, env={**os.environ, 'LC_ALL': 'C'})
-    found, cores = set(), 0.0
+    front_cores = total = 0.0
     for line in result.stdout.splitlines():
-        fields = line.strip().split(None, 1)
+        fields = line.split()
         if len(fields) != 2:
             continue
-        for name in policy.protected_apps:
-            if name and name in fields[1]:
-                found.add(name)
-                cores += float(fields[0]) / 100
-    return sorted(found), cores
+        pid, cores = int(fields[0]), float(fields[1]) / 100
+        if pid == front:
+            front_cores = cores
+            total += cores
+        elif cores >= policy.interactive_busy_cores and session_of(pid) not in job_sessions:
+            total += cores
+    return front_cores, total
 
 
-def cpu_state(policy, running_jobs):
+def cpu_state(policy, running_jobs, job_sessions=frozenset()):
     """The CPU admission decision for one more heavy job beside `running_jobs` held slots.
 
-    Capacity is `max_load_per_core x ncpu`; a running protected app reserves
-    max(protected_reserve_cores, its observed CPU) of it and caps heavy jobs at
-    `protected_max_jobs`. The 1-minute load average already contains the app's own load, so the
-    reserve is headroom kept free for it, not a double count of what it uses. Read errors fail open.
+    Capacity is `max_load_per_core x ncpu`. While the frontmost app is busy, the interactive load
+    (at least interactive_reserve_cores) is reserved from it and heavy jobs are capped at
+    interactive_max_jobs. The load average already contains that load, so the reserve is headroom
+    kept for it, not a double count. Read errors fail open.
     """
     try:
         load1 = os.getloadavg()[0]
         ncpu = os.cpu_count() or 1
-        apps, app_cores = protected_running(policy)
+        front_cores, interactive_cores = interactive_load(policy, set(job_sessions))
     except (OSError, ValueError, subprocess.SubprocessError) as error:
-        return {'reason': None, 'error': f'{type(error).__name__}: {error}'}
-    reserve = max(policy.protected_reserve_cores, app_cores) if apps else 0.0
+        return {'reason': None, 'error': type(error).__name__}
+    foreground_busy = front_cores >= policy.interactive_min_cores
+    reserve = max(policy.interactive_reserve_cores, interactive_cores) if foreground_busy else 0.0
     capacity = policy.max_load_per_core * ncpu - reserve
     reason = None
-    if apps and running_jobs >= policy.protected_max_jobs:
-        reason = 'protected_app'
+    if foreground_busy and running_jobs >= policy.interactive_max_jobs:
+        reason = 'interactive_foreground'
     elif policy.max_load_per_core and load1 > capacity:
         reason = 'cpu_pressure'
     return {'reason': reason, 'load1': round(load1, 2), 'ncpu': ncpu, 'capacity': round(capacity, 2),
-            'reserve_cores': round(reserve, 2), 'protected_apps': apps,
-            'protected_cpu_cores': round(app_cores, 2), 'running_jobs': running_jobs}
+            'reserve_cores': round(reserve, 2), 'foreground_busy': foreground_busy,
+            'interactive_cores': round(interactive_cores, 2), 'running_jobs': running_jobs}
 
 
 def total_memory_mb():
