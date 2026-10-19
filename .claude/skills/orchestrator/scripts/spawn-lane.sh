@@ -206,20 +206,20 @@ the orchestrator pushes after grading. If you find yourself wanting to push, you
   # wearing a success code. Research lanes legitimately commit nothing, so they keep exec.
   if [ "$CLASS" != implementation ]; then
     if [ "$MISSION_SRC" = "-" ]; then
-      exec env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
+      exec env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE CYNAP_HEADLESS_LANE=1 \
         codex exec "${CARGS[@]}" "$MISSION"
     else
-      exec env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
+      exec env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE CYNAP_HEADLESS_LANE=1 \
         codex exec "${CARGS[@]}" "$MISSION" < /dev/null
     fi
   fi
   HEAD_BEFORE="$(git rev-parse HEAD 2>/dev/null || echo none)"
   CODEX_RC=0
   if [ "$MISSION_SRC" = "-" ]; then
-    env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
+    env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE CYNAP_HEADLESS_LANE=1 \
       codex exec "${CARGS[@]}" "$MISSION" || CODEX_RC=$?
   else
-    env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
+    env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE CYNAP_HEADLESS_LANE=1 \
       codex exec "${CARGS[@]}" "$MISSION" < /dev/null || CODEX_RC=$?
   fi
   [ "$CODEX_RC" -ne 0 ] && exit "$CODEX_RC"
@@ -244,10 +244,47 @@ ARGS+=( -p --output-format json --permission-prompts none )
 # silently no-op the run (observed: exit 0, 0 bytes, zero work, locked empty worktree).
 # Unless the mission itself came from stdin, hard-detach stdin from /dev/null.
 # Identity scrub: the child must not masquerade as the parent session.
+#
+# Two env settings every headless claude lane carries:
+#   CLAUDE_CODE_FORK_SUBAGENT=0  since 2.1.302 `-p` forks subagents by default, and a fork
+#       bypasses the Model-why gate in the dispatch normalizer. Pin it off for lanes.
+#   CYNAP_HEADLESS_LANE=1        the marker serialize-heavy-ops.py reads: an interactive
+#       session gets its heavy command rewritten to run under the lock, a headless lane has
+#       no one to wait for a rewrite and keeps the deny.
+#
+# The JSON envelope is captured, not exec'd, so an auth death can be told apart from a run.
+# A headless lane that is not logged in answers with envelope subtype:"success",
+# is_error:true and rc=1: indistinguishable from a work failure unless the result text is read.
+LANE_OUT="$(mktemp "${TMPDIR:-/tmp}/spawn-lane-out.XXXXXX")"
+trap 'rm -f "$LANE_OUT"' EXIT
+# Run claude as a child we can signal: with `exec` a kill of this pid killed claude, and
+# capturing the envelope must not turn a lane cancel into an orphaned, still-working lane.
 if [ "$MISSION_SRC" = "-" ]; then
-  exec env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
-    claude "${ARGS[@]}" "$MISSION"
+  env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
+    CLAUDE_CODE_FORK_SUBAGENT=0 CYNAP_HEADLESS_LANE=1 \
+    claude "${ARGS[@]}" "$MISSION" > "$LANE_OUT" &
 else
-  exec env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
-    claude "${ARGS[@]}" "$MISSION" < /dev/null
+  env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
+    CLAUDE_CODE_FORK_SUBAGENT=0 CYNAP_HEADLESS_LANE=1 \
+    claude "${ARGS[@]}" "$MISSION" < /dev/null > "$LANE_OUT" &
 fi
+CLAUDE_PID=$!
+trap 'kill -TERM "$CLAUDE_PID" 2>/dev/null' TERM INT
+CLAUDE_RC=0
+wait "$CLAUDE_PID" || CLAUDE_RC=$?
+# A trapped signal interrupts the first wait; reap the child for its real exit status.
+if kill -0 "$CLAUDE_PID" 2>/dev/null; then wait "$CLAUDE_PID" || CLAUDE_RC=$?; fi
+AUTH_DEAD=0
+python3 -c 'import json,sys
+try:
+    e=json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+r=e.get("result") if isinstance(e,dict) else None
+sys.exit(0 if isinstance(e,dict) and e.get("is_error") is True and isinstance(r,str) and r.startswith(("Failed to authenticate","Not logged in")) else 1)' "$LANE_OUT" && AUTH_DEAD=1
+if [ "$AUTH_DEAD" = 1 ]; then
+  echo "spawn-lane.sh: AUTH DEAD: this lane's claude is not logged in. One human step: run \`claude /login\`, then re-spawn the lane." >&2
+  exit 3
+fi
+cat "$LANE_OUT"
+exit "$CLAUDE_RC"

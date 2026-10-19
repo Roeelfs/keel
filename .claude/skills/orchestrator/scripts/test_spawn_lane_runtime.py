@@ -13,6 +13,14 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "spawn-lane.sh"
 STUB = '#!/bin/bash\nprintf "%s\\n" "$@" > "$STUB_OUT"\n'
+# The claude stub also records the two env settings a headless lane must carry, and can
+# answer with a canned JSON envelope + exit code (an auth death is is_error:true, rc=1).
+CLAUDE_STUB = STUB + (
+    'printf "FORK=%s\\nHEADLESS=%s\\n" "${CLAUDE_CODE_FORK_SUBAGENT-unset}" '
+    '"${CYNAP_HEADLESS_LANE-unset}" > "$STUB_ENV"\n'
+    '[ -n "${STUB_ENVELOPE:-}" ] && printf "%s" "$STUB_ENVELOPE"\n'
+    'exit "${STUB_RC:-0}"\n'
+)
 
 
 def git(*args, cwd=None):
@@ -27,7 +35,7 @@ class RuntimeTests(unittest.TestCase):
         self.bin = self.root / "bin"; self.bin.mkdir()
         for name in ("codex", "claude"):
             p = self.bin / name
-            p.write_text(STUB); p.chmod(0o755)
+            p.write_text(CLAUDE_STUB if name == "claude" else STUB); p.chmod(0o755)
         self.home = self.root / "home"
         gate = self.home / ".claude/scripts/codex-headroom.sh"
         gate.parent.mkdir(parents=True)
@@ -35,6 +43,7 @@ class RuntimeTests(unittest.TestCase):
         gate.chmod(0o755)
         self.gate = gate
         self.gate_env = {}
+        self.run_env = {}
         self.out = self.root / "argv.txt"
         self.base = self.root / "base"; self.base.mkdir()
         git("init", "-q", ".", cwd=self.base)
@@ -49,7 +58,8 @@ class RuntimeTests(unittest.TestCase):
     def spawn(self, cwd, *extra):
         env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", STUB_OUT=str(self.out),
                    HOME=str(self.home), CODEX_HEADROOM_LOG="/dev/null",
-                   STUB_GATE_ARGS=str(self.root / "gate-args.txt"), **self.gate_env)
+                   STUB_GATE_ARGS=str(self.root / "gate-args.txt"),
+                   STUB_ENV=str(self.root / "env.txt"), **self.gate_env, **self.run_env)
         r = subprocess.run([str(SCRIPT), "--mission", str(self.mission), "--cwd", str(cwd), *extra],
                            capture_output=True, text=True, env=env)
         argv = self.out.read_text().splitlines() if self.out.exists() else []
@@ -68,6 +78,36 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("--output-format", argv)
         # A headless lane has no one to answer a prompt; without this a restrictive --mode hangs.
         self.assertEqual(argv[argv.index("--permission-prompts") + 1], "none")
+
+    def test_claude_lane_pins_fork_off_and_carries_the_headless_marker(self):
+        # Since 2.1.302 `-p` forks subagents by default and a fork bypasses the Model-why
+        # gate; the marker is what makes serialize-heavy-ops.py keep its deny for lanes.
+        self.spawn(self.base)
+        seen = dict(l.split("=", 1) for l in (self.root / "env.txt").read_text().splitlines())
+        self.assertEqual(seen["FORK"], "0")
+        self.assertEqual(seen["HEADLESS"], "1")
+
+    def test_auth_death_exits_3_with_the_one_human_step(self):
+        # Probed: an empty CLAUDE_CONFIG_DIR run answers envelope subtype:success,
+        # is_error:true, rc=1, which a caller cannot tell from a work failure.
+        for text in ("Failed to authenticate. API Error: 401", "Not logged in - Please run /login"):
+            with self.subTest(text=text):
+                self.run_env = {"STUB_RC": "1", "STUB_ENVELOPE": json.dumps(
+                    {"type": "result", "subtype": "success", "is_error": True, "result": text})}
+                r, _ = self.spawn(self.base)
+                self.assertEqual(r.returncode, 3, r.stderr)
+                self.assertIn("claude /login", r.stderr)
+                self.assertNotIn(text, r.stdout)
+
+    def test_a_non_auth_envelope_is_re_emitted_with_its_exit_code(self):
+        env = json.dumps({"type": "result", "subtype": "success", "is_error": True,
+                          "result": "Failed to push the branch"})
+        for rc in ("0", "1"):
+            with self.subTest(rc=rc):
+                self.run_env = {"STUB_RC": rc, "STUB_ENVELOPE": env}
+                r, _ = self.spawn(self.base)
+                self.assertEqual(r.returncode, int(rc), r.stderr)
+                self.assertEqual(r.stdout, env)
 
     def test_codex_runtime_grants_the_git_dir(self):
         _, argv = self.spawn(self.base, "--runtime", "codex")
