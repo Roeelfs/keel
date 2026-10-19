@@ -20,14 +20,19 @@ WRAPPER = os.path.join(REPO, "tooling", "sandbox", "with-heavy-lock")
 HOOK = os.path.join(REPO, ".claude", "hooks", "serialize-heavy-ops.py")
 
 
-def run_hook(command, with_wrapper_on_path=True, hook=None, arguments=(), cwd=None, **tool_input):
+def run_hook(command, with_wrapper_on_path=True, hook=None, arguments=(), cwd=None, headless=False, **tool_input):
     """Feed a command to the hook; exit 2 means the shell call is denied.
 
     `cwd` (when given) is sent at the top level of the payload, matching the real
-    PreToolUse request shape from both Claude and Codex.
+    PreToolUse request shape from both Claude and Codex. `headless` sets the marker
+    spawn-lane.sh puts on every lane; it is otherwise scrubbed so a test run from inside
+    a lane stays hermetic.
     """
     with tempfile.TemporaryDirectory() as bindir:
         env = dict(os.environ)
+        env.pop("CYNAP_HEADLESS_LANE", None)
+        if headless:
+            env["CYNAP_HEADLESS_LANE"] = "1"
         if with_wrapper_on_path:
             os.symlink(WRAPPER, os.path.join(bindir, "with-heavy-lock"))
             env["PATH"] = bindir + os.pathsep + env.get("PATH", "")
@@ -195,8 +200,10 @@ class BackgroundRequired(unittest.TestCase):
         with open(os.path.join(self.tmp.name, ".keel", "resource-commands.json"), "w") as handle:
             handle.write(rules if isinstance(rules, str) else json.dumps(rules))
 
-    def check(self, command, *arguments, cwd=None, **tool_input):
-        return run_hook(command, hook=self.hook, arguments=arguments, cwd=cwd, **tool_input)
+    def check(self, command, *arguments, cwd=None, headless=True, **tool_input):
+        # Default to a headless lane: that is the deny contract the tests below pin. The
+        # interactive rewrite has its own class (InteractiveRewrite) and passes headless=False.
+        return run_hook(command, hook=self.hook, arguments=arguments, cwd=cwd, headless=headless, **tool_input)
 
     def test_claude_runtime_denies_a_foreground_background_required_command(self):
         commands = ("with-heavy-lock project-verify verify",
@@ -340,6 +347,75 @@ class BackgroundRequired(unittest.TestCase):
         self.assertEqual(self.check("other-tool 'x", "--runtime", "claude").returncode, 0)
 
 
+class InteractiveRewrite(unittest.TestCase):
+    """An interactive Claude session gets its heavy command rewritten, not denied; a headless
+    lane (CYNAP_HEADLESS_LANE=1, set by spawn-lane.sh) and the Codex runtime keep the deny."""
+
+    RULES = {**TODAY_RULES, "background_required": {"with-heavy-lock": ["*", "!--status", "!--check-lease"]}}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        os.mkdir(os.path.join(self.tmp.name, ".keel"))
+        with open(os.path.join(self.tmp.name, ".keel", "resource-commands.json"), "w") as handle:
+            json.dump(self.RULES, handle)
+        self.hook = isolated_hook(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def check(self, command, runtime="claude", headless=False, **tool_input):
+        return run_hook(command, hook=self.hook, arguments=("--runtime", runtime),
+                        headless=headless, **tool_input)
+
+    def rewrite(self, result):
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)["hookSpecificOutput"]
+        self.assertEqual(output["permissionDecision"], "allow")
+        return output["updatedInput"], output["additionalContext"]
+
+    def test_a_single_heavy_command_is_wrapped_and_backgrounded(self):
+        updated, note = self.rewrite(self.check("pnpm exec vitest run src/a.test.ts",
+                                                description="run the unit", timeout=120000))
+        self.assertRegex(updated["command"], r"^\S*with-heavy-lock pnpm exec vitest run src/a\.test\.ts$")
+        self.assertIs(updated["run_in_background"], True)
+        self.assertEqual((updated["description"], updated["timeout"]), ("run the unit", 120000),
+                         "updatedInput replaces the whole tool_input, so every original key must survive")
+        self.assertIn("rewritten", note)
+
+    def test_only_the_heavy_segment_of_a_chain_is_wrapped(self):
+        command = "cd repo && CI=true pnpm test > log 2>&1; echo rc=$? >> log; tail -5 log"
+        updated, _ = self.rewrite(self.check(command))
+        self.assertRegex(updated["command"], r"^cd repo && CI=true \S*with-heavy-lock pnpm test > log 2>&1;"
+                                             r" echo rc=\$\? >> log; tail -5 log$")
+
+    def test_a_slow_background_required_command_is_backgrounded_not_denied(self):
+        updated, note = self.rewrite(self.check("with-heavy-lock pnpm exec vitest run a.test.ts"))
+        self.assertEqual(updated["command"], "with-heavy-lock pnpm exec vitest run a.test.ts")
+        self.assertIs(updated["run_in_background"], True)
+        self.assertIn("background", note)
+
+    def test_an_unsafe_shape_stays_denied(self):
+        for command in ("pnpm test | tail -5", "pnpm test & echo hi", "(pnpm test)",
+                        "pnpm test; pnpm build", "cat <<EOF\nx\nEOF\npnpm test"):
+            with self.subTest(command=command):
+                result = self.check(command)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertIn("requires the shared resource runner", result.stderr)
+
+    def test_the_headless_lane_marker_keeps_the_deny(self):
+        # A lane exits at turn end, so a queued rewrite would be lost; it must be refused.
+        for command in ("pnpm exec vitest run src/a.test.ts", "with-heavy-lock pnpm exec vitest run a.test.ts"):
+            with self.subTest(command=command):
+                result = self.check(command, headless=True)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertNotIn("updatedInput", result.stdout)
+
+    def test_the_codex_runtime_never_rewrites(self):
+        result = self.check("pnpm exec vitest run src/a.test.ts", runtime="codex")
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertNotIn("updatedInput", result.stdout)
+
+
 class SelfLockingMarker(unittest.TestCase):
     """A project-command script that owns its own heavy-slot lock can opt out of the runner."""
 
@@ -374,8 +450,10 @@ class SelfLockingMarker(unittest.TestCase):
         os.chmod(path, 0o700)
         return path
 
-    def check(self, command, *arguments, cwd=None, **tool_input):
-        return run_hook(command, hook=self.hook, arguments=arguments, cwd=cwd, **tool_input)
+    def check(self, command, *arguments, cwd=None, headless=True, **tool_input):
+        # Default to a headless lane: that is the deny contract the tests below pin. The
+        # interactive rewrite has its own class (InteractiveRewrite) and passes headless=False.
+        return run_hook(command, hook=self.hook, arguments=arguments, cwd=cwd, headless=headless, **tool_input)
 
     def test_marker_present_relative_path_and_payload_cwd_is_allowed(self):
         self.write_script("tooling/sandbox/project-verify")
