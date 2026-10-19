@@ -18,7 +18,15 @@ includes archive-only rollouts and labels them `archived`; a duplicate live roll
 ```bash
 python3 ~/.claude/skills/codex-sessions/scripts/sessions.py list --filter <project> --limit 20
 python3 ~/.claude/skills/codex-sessions/scripts/sessions.py list --days 1 --limit 20
+# Workaround while session_index is stale: a plain --days listing can print nothing for
+# sessions that exist (seen 2026-10-19: `list --days 1` printed nothing, `--deep` printed 5
+# rows; intermittent, it follows how far the index lags the rollout files).
+python3 ~/.claude/skills/codex-sessions/scripts/sessions.py list --days 1 --deep --limit 20
 ```
+
+**OPEN:** `--deep` is a workaround, not a fix. `list` should fall back to scanning the
+rollout files when the index is behind them; that fallback is not written, so a plain
+`list` can under-report until it is.
 
 ### `survey`
 Summarize session transcripts for quick inspection.

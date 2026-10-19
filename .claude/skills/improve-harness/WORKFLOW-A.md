@@ -68,7 +68,7 @@ const surveys = await parallel([
   ()=>ctxAgent(`Audit the PREVIOUS /improve-harness run — only the previous one, four mechanical checks, no re-mining:
 (1) Read the newest file in the harness repo's analytics/harness-improvement/. Diff its 'sequenced_execution' and 'OPEN' sections against what actually landed: 'git -C ~/.claude log --format="%h %ad %s" --date=short -40' and the same in the skills repo. Which planned items produced no commit?
 (2) Re-derive every 'OPEN' item by its own recorded command. Report each as still-open / done / command-no-longer-works.
-(3) Did that run fire Workflow F? Count Skill and Workflow tool_use frames in its transcript (find it under ~/.claude/projects/*/; parse with python, never grep — grep collapses JSONL records). A run with no 'harness-plan-falsifier' run id skipped step 3.
+(3) Did that run fire Workflow F? Count, in its transcript (find it under ~/.claude/projects/*/; parse with python, never grep — grep collapses JSONL records), the `/improve-harness` command frame plus a Workflow tool_use frame and its `wf_` run id. A run with the command frame but no Workflow frame and `wf_` id skipped step 3; do not key on the falsifier workflow's literal name, which a rename silently breaks.
 (4) Does an overlay heading dated that run exist in ~/.claude/skills-overlay/improve-harness/LEARNINGS.md? A run that mutated the harness and wrote nothing about itself is an incomplete run, and its lessons are gone.
 Return report_markdown + findings[] — each finding is either a dropped plan item to re-sequence this run, a stale OPEN item to close, or a step the last run skipped that this run must not.`,
     {label:'survey:self-audit', phase:'Survey', schema:SURVEY_SCHEMA, model:'sonnet', agentType:'general-purpose'}),
