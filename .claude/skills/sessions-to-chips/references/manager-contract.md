@@ -2,7 +2,12 @@
 
 Every manager follows this file, whichever mode started it: a `[Manager]` desktop session, or a
 Codex root acting as manager because its host cannot start sessions. SKILL.md carries the
-must-fire subset; this file carries the depth. Session hygiene is in [`../HYGIENE.md`](../HYGIENE.md).
+must-fire subset; this file carries the depth.
+
+**Session hygiene is part of the job.** At every stopping boundary, run the pass in
+[`../HYGIENE.md`](../HYGIENE.md): archive finished children, fold true duplicates into one survivor
+with a state handoff, and report it in one line. Candidates come from
+`scripts/hygiene_candidates.py --manager <your session id>`.
 
 A manager owns **ONE PROGRAM**: it tracks its own lanes, catches conflicts before they reach
 main, starts lanes and child sessions, holds every terminal gate, and surfaces decisions. It
@@ -124,8 +129,8 @@ limitation; never poll it.
 
 They live under `~/.claude/orchestrator/programs/`, per program. The directory keeps its
 historical name: live program state and a global read-state hook already use that path.
-Declaring the files is a new manager's first act. A resume-mode manager already has its story
-map as its narrative; it adds the manifest when it spawns its first headless lane or claims a path.
+Declaring the files is every manager's first act, in either mode. A resume-mode manager's
+`.state.md` points at its story map instead of copying it.
 
 **1. `<slug>.json` — the manifest.** Ownership only. STRICT key set; nothing else goes in:
 
@@ -570,7 +575,7 @@ routing: [`docs/skill-memory.md`](../../../../docs/skill-memory.md)): operator-p
 
 - ❌ Implementing code, running installs, or running review panels in the manager. Push them into a lane.
 - ❌ Reasoning machine-wide: counting foreign programs' sessions, nudging lanes you did not start or
-  adopt, or running without a manifest once you hold lanes (unregistered claims manufacture the
+  adopt, or running without a manifest (unregistered claims manufacture the
   collisions the protocol prevents).
 - ❌ Logging into the manifest instead of `.events.jsonl`. The 8 KB cap is the tripwire.
 - ❌ Trusting a completion envelope, a lane's local worktree, or a subagent's `/tmp` output as a deliverable.

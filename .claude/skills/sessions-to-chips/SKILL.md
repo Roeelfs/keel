@@ -225,7 +225,7 @@ Depth and evidence for each rule are in [`references/manager-contract.md`](refer
 - **Never implement.** Code, installs, review panels and long gates go into a lane or child.
 - **One program, your lanes only.** Filter every machine-wide list to your manifest's membership.
   First claim wins; transfer, don't grab; a live-vs-live contest goes to the human.
-- **Program state is three bounded files** under `~/.claude/orchestrator/programs/`: a manifest
+- **Program state is three bounded files, declared first in either mode,** under `~/.claude/orchestrator/programs/`: a manifest
   (strict keys, ≤~8 KB, `updated_at` to the second), an append-only `.events.jsonl`, and a
   `.state.md` with a completion checkpoint and `## AT-WAKE`.
 - **Pick the lane runtime by deliverable:** headless lane (`~/.claude/scripts/spawn-lane.sh`) for a
