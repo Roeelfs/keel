@@ -35,14 +35,27 @@ def norm_ts(v):
             return s
     return s[:19]
 
-def load_all():
+def _pr_number(d):
+    """The desktop store keeps PRs in `prs[]`; the newest one names the session's PR."""
+    prs = d.get("prs") or []
+    return prs[-1].get("prNumber") if prs else None
+
+def _pr_state(d):
+    """OPEN while any PR of the session is open, else the newest PR's state."""
+    states = [(p.get("state") or "").upper() for p in (d.get("prs") or [])]
+    if not states:
+        return None
+    return "OPEN" if "OPEN" in states else states[-1]
+
+def load_all(base=None):
+    base = base or BASE
     rows = []
-    for f in glob.glob(os.path.join(BASE, "*", "*", "local_*.json")):
+    for f in glob.glob(os.path.join(base, "*", "*", "local_*.json")):
         try:
             d = json.load(open(f))
         except Exception:
             continue
-        acct = f[len(BASE) + 1:].split(os.sep)[0]
+        acct = f[len(base) + 1:].split(os.sep)[0]
         rows.append({
             "account": acct,
             "title": d.get("title") or "",
@@ -52,8 +65,8 @@ def load_all():
             "branch": d.get("branch") or "",
             "worktree": d.get("cwd") or d.get("worktreePath") or "",
             "worktreeName": d.get("worktreeName") or "",
-            "pr": d.get("prNumber"),
-            "prState": d.get("prState"),
+            "pr": d.get("prNumber") or _pr_number(d),
+            "prState": d.get("prState") or _pr_state(d),
             "archived": bool(d.get("isArchived")),
             "lastActivityAt": norm_ts(d.get("lastActivityAt")),
         })

@@ -98,6 +98,13 @@ The session running this skill is only the **dispatcher**. Each `[Manager]` must
 - A background Workflow returns the story JSON under `result` in its task output file (`json.load(...)["result"]`), not at the top level.
 - Never name a scratch script after a stdlib module (`select.py`, `json.py`): Python imports it ahead of the standard library and the script fails with a circular import.
 
+## Session hygiene (every manager, every stopping boundary)
+
+A manager leaves the fewest sessions that still hold all the context: it archives finished
+children and folds true duplicates into one survivor. Procedure and checks:
+[HYGIENE.md](HYGIENE.md); candidates: `scripts/hygiene_candidates.py --manager <id>`. In a
+`[Manager]` session the `manager-hygiene` Stop hook announces each new candidate set itself.
+
 ## Wrap-up mode (checkpoint before an account switch or a usage cap)
 
 Run this **instead of mining** when the goal is fewer, converged sessions and a state that survives the switch: session history is not readable from the other account, so everything must live in git, Linear and a note. It is a checkpoint, **not a full stop**: running builds and lanes finish, nothing new starts.
