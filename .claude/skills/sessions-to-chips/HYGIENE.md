@@ -17,7 +17,7 @@ manager's family (a nested `[Manager]` owns its own), never another account, nev
 ## 1. List candidates
 
 ```bash
-python3 -I ~/.claude/skills/sessions-to-chips/scripts/hygiene_candidates.py --manager <your local_ session id>
+python3 -I ~/.claude/skills/sessions-to-chips/scripts/hygiene_candidates.py
 ```
 
 It proposes `archive` (PR merged or closed, idle ≥1h, no live child), `review` (no PR, idle

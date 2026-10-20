@@ -87,6 +87,11 @@ class Classify(unittest.TestCase):
         out = classify(rows, "M", NOW)
         self.assertEqual(ids(out["archive"]), ["b"])
 
+    def test_manager_resolves_by_cli_id(self):
+        from hygiene_candidates import resolve_manager
+        m = dict(MANAGER, cli="cli-M", account="a")
+        self.assertEqual(resolve_manager([m], "cli-M")["sessionId"], "M")
+
 
 class TicketKeys(unittest.TestCase):
     def test_ignores_hashes_and_ship_labels(self):

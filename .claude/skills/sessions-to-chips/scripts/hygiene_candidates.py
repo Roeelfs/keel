@@ -165,7 +165,8 @@ def classify(rows, manager_id, now, idle_h=1.0, stale_h=24.0, prefix="[Manager]"
 
 def resolve_manager(rows, ref):
     live = [r for r in rows if not r["archived"]]
-    exact = [r for r in live if r["sessionId"] == ref]
+    # A session knows its own CLI id ($CLAUDE_SESSION_ID), not its desktop local_ id.
+    exact = [r for r in live if ref in (r["sessionId"], r["cli"])]
     if exact:
         return exact[0]
     hits = sorted((r for r in live if ref.lower() in r["title"].lower()),
@@ -176,8 +177,8 @@ def resolve_manager(rows, ref):
 def main():
     from list_sessions import load_all
     ap = argparse.ArgumentParser()
-    g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--manager")
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--manager", help="local_ id, CLI id or title; default: this session ($CLAUDE_SESSION_ID)")
     g.add_argument("--all-managers", action="store_true")
     ap.add_argument("--prefix", default="[Manager]")
     ap.add_argument("--idle-hours", type=float, default=1.0)
@@ -191,10 +192,11 @@ def main():
     # Sessions of another signed-in account are not reachable from this app session.
     account = a.account or max(rows, key=lambda r: r["lastActivityAt"])["account"] if rows else ""
     rows = [r for r in rows if r["account"].startswith(account)]
-    if a.manager:
-        m = resolve_manager(rows, a.manager)
+    if not a.all_managers:
+        ref = a.manager or os.environ.get("CLAUDE_SESSION_ID", "")
+        m = resolve_manager(rows, ref) if ref else None
         if not m:
-            print(json.dumps({"error": f"no live session matches {a.manager!r}"}))
+            print(json.dumps({"error": f"no live session matches {ref!r}"}))
             return 2
         out = classify(rows, m["sessionId"], now, a.idle_hours, a.stale_hours, a.prefix)
         out["managerTitle"] = m["title"]
