@@ -14,7 +14,7 @@ coding CLI (primarily Claude Code) behaves. Four layers, each doing one thing:
 │               → multi-step procedures the agent invokes on demand  │
 ├──────────────────────────────────────────────────────────────────┤
 │  AGENTS       adr-auditor · architect · code-reviewer · critic     │
-│               executor · refactorer · scientist · scope-auditor    │
+│               executor · refactorer · scope-auditor                │
 │               security-reviewer · sql-specialist · tracer · verifier│
 │               → focused sub-agents the skills dispatch in parallel │
 ├──────────────────────────────────────────────────────────────────┤

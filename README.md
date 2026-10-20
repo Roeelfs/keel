@@ -212,7 +212,7 @@ keel/
 │   ├── skills/                  # 36 skills — the full lifecycle above
 │   ├── agents/                  # focused sub-agents the skills dispatch:
 │   │   #   architect · code-reviewer · critic · debugger · executor
-│   │   #   explore · refactorer · scientist · security-reviewer
+│   │   #   explore · refactorer · security-reviewer
 │   │   #   sql-specialist · tracer
 │   ├── hooks/                   # session lifecycle, id capture, worktree warn,
 │   │   #                          crashed-session reaper
