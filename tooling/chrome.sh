@@ -87,6 +87,29 @@ _c_yel()   { printf '\033[33m%s\033[0m\n' "$*"; }
 
 chrome_running() { pgrep -f "/${CHROME_APP}.app/Contents/MacOS/${CHROME_APP}" >/dev/null 2>&1; }
 
+# A second Google Chrome launched by automation (Playwright's `channel: 'chrome'`, which
+# runs with --remote-debugging-pipe and a playwright_* profile) has the same bundle id, so
+# AppleScript may address IT instead of the human's browser. Its throwaway profile has
+# GATE 2 off, which used to make `check` tell the human to flip a toggle that was already
+# on (2026-10-20). Prints one pid per line; empty when none.
+automation_chrome_pids() {
+  ps -axo pid=,command= | awk -v bin="/${CHROME_APP}.app/Contents/MacOS/${CHROME_APP} " \
+    'index($0, bin) && /--remote-debugging-(pipe|port)|playwright_/ { print $1 }'
+}
+
+# GATE 2 as the human's own profiles record it. Read-only, needs no window, cannot be
+# fooled by an automation instance. Prints "<profile>\t<true|false|unset>" per profile.
+_gate2_prefs() {
+  local root="${HOME}/Library/Application Support/Google/Chrome" p v
+  for p in "$root/Default" "$root"/Profile\ *; do
+    [ -f "$p/Preferences" ] || continue
+    v="$(/usr/bin/python3 -c 'import json,sys
+v = json.load(open(sys.argv[1])).get("browser", {}).get("allow_javascript_apple_events")
+print("unset" if v is None else str(v).lower())' "$p/Preferences" 2>/dev/null || echo unreadable)"
+    printf '%s\t%s\n' "${p##*/}" "$v"
+  done
+}
+
 # ---------------------------------------------------------------- gate probes
 
 # GATE 1 probe: read the active tab title. Read-only; does NOT change focus.
@@ -94,13 +117,17 @@ _gate1() {
   osascript -e "tell application \"${CHROME_APP}\" to get title of active tab of front window" 2>&1
 }
 
-# GATE 2 probe: run JS in the active tab. Probe only — real work uses _tab_js.
+# GATE 2 probe: run JS in the active tab of the first NORMAL window. Incognito and
+# Playwright contexts report mode "incognito" and never run AppleScript JS, so probing
+# one of them is a false OFF. Probe only — real work uses _tab_js.
 _probe_js() {
   osascript - "$1" <<'APPLESCRIPT' 2>&1
 on run argv
   set js to item 1 of argv
   tell application "Google Chrome"
-    return (execute active tab of front window javascript js)
+    set ws to (every window whose mode is "normal")
+    if (count of ws) is 0 then return "__NO_NORMAL_WINDOW__"
+    return (execute active tab of (item 1 of ws) javascript js)
   end tell
 end run
 APPLESCRIPT
@@ -294,13 +321,16 @@ _tab_create_raw() { # $1=url
 on run argv
   set theURL to item 1 of argv
   tell application "Google Chrome"
-    if (count of windows) is 0 then
+    -- Only a NORMAL window: an incognito or automation (Playwright) window cannot run
+    -- AppleScript JS, so a tab opened there is dead on arrival.
+    set ws to (every window whose mode is "normal")
+    if (count of ws) is 0 then
       set w to (make new window)
       set t to active tab of w
       set URL of t to theURL
       return (id of t) as text
     end if
-    set w to front window
+    set w to item 1 of ws
     -- Remember the human's tab by ID, not index: if they close a tab while we work,
     -- indices shift underneath us and an index-restore lands on the wrong page.
     set beforeId to ((id of active tab of w) as text)
@@ -422,14 +452,37 @@ cmd_check() {
   fi
   _c_green "✓ GATE 1 (AppleEvents automation)"
 
+  local auto; auto="$(automation_chrome_pids | tr '\n' ' ')"
   local g2; g2="$(_probe_js "1+1")"
   if [ "$g2" = "2" ]; then
     _c_green "✓ GATE 2 (Allow JavaScript from Apple Events) — page JS works"
     echo
+    if [ -n "$auto" ]; then
+      _c_yel "~ An automation-launched Google Chrome is also running (pid ${auto% }). AppleScript"
+      _c_yel "  may address it instead of the human's browser until it closes."
+    fi
     _c_green "ALL GREEN. Canonical surface: chrome.sh js '<code>'  (own tab, no pairing, no focus theft)."
     return 0
   fi
+
+  # The probe failed. Before blaming the toggle, ask the human's own profiles: the
+  # toggle is the ONE thing this script would send the human to fix, so it must be true.
+  local prefs; prefs="$(_gate2_prefs)"
+  if [ -n "$prefs" ] && ! printf '%s\n' "$prefs" | grep -qv $'\ttrue$'; then
+    _c_yel "~ GATE 2 is ON in every Chrome profile ($(printf '%s' "$prefs" | cut -f1 | paste -sd, -)), but the JS probe failed:"
+    echo "    $g2"
+    if [ -n "$auto" ]; then
+      echo "  Cause: an automation-launched Google Chrome (pid ${auto% }, e.g. an identity-browser"
+      echo "  window) shares the app id, so AppleScript is addressing it. Wait for it to close, then re-run."
+    elif [ "$g2" = "__NO_NORMAL_WINDOW__" ]; then
+      echo "  Cause: no normal (non-incognito) Chrome window is open."
+    fi
+    _c_yel "  The toggle is already on — do NOT ask the human to flip it."
+    return 4
+  fi
+
   _c_red "✗ GATE 2 (Allow JavaScript from Apple Events) is OFF:"
+  printf '%s\n' "$prefs" | sed 's/^/    profile: /'
   echo "    $g2"
   echo
   _c_yel "  ONE-TIME FIX (persists forever): in Chrome's menu bar →"
