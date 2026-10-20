@@ -1,11 +1,10 @@
-# sessions-to-chips — reference
+# sessions-to-chips — Mode 2 reference (resume from sessions)
 
-> Scope: this reference applies only to the explicitly requested legacy
-> resume-chip branch. Mine-only audits use the shared contextual audit workflow
-> linked from SKILL.md and do not create chips. All filesystem discovery below
-> requires permitted access; use supported direct reads, permitted exports or
-> authorized UI when source stores are unavailable or denied. Do not bypass access
-> limits or treat incomplete work as permission to create an execution task.
+> Scope: Mode 2 (resume from sessions) depth. Mine-only audits stop before any
+> session is started. All filesystem discovery below requires permitted access; use
+> supported direct reads, permitted exports or authorized UI when source stores are
+> unavailable or denied. Do not bypass access limits or treat incomplete work as
+> permission to start a session.
 
 ## Where session data lives
 
@@ -18,7 +17,7 @@
 
 The MCP `mcp__ccd_session_mgmt__list_sessions` only returns the *current* account's recent sessions and excludes the running one — insufficient for "another account" / older pinned sessions. Use the filesystem store.
 
-## Deep-mining sources inside a transcript (what makes a chip non-surface-level)
+## Deep-mining sources inside a transcript (what makes a unit prompt non-surface-level)
 
 `mine_session.py` reads the WHOLE arc, not just the last messages. The signals it extracts and why each matters:
 
@@ -30,13 +29,13 @@ The MCP `mcp__ccd_session_mgmt__list_sessions` only returns the *current* accoun
 | **Exact last instruction** | last `type:"last-prompt"` entry's `lastPrompt` | The literal final thing the user typed — the most reliable anchor for "where we stopped". |
 | **Tail** | last assistant text, latest `TodoWrite`, last ~20 tool uses | Where/why it stopped (weekly limit mid-task, half-finished verify, open review). |
 
-The whole point: synthesize **goal** (arc + summary) and name the **exact continuation point** (last-prompt + summary's Next-Step + tail), so the chip says "resume THIS mission from HERE", not "do the last thing".
+The whole point: synthesize **goal** (arc + summary) and name the **exact continuation point** (last-prompt + summary's Next-Step + tail), so the unit prompt says "resume THIS mission from HERE", not "do the last thing".
 
-### Pivot & terminal-state discipline (where surface-level chips fail)
+### Pivot & terminal-state discipline (where surface-level unit prompts fail)
 
 Adversarial validation on real sessions surfaced one dominant failure class — sessions that **pivoted** or **stopped short**. Apply these rigorously when authoring `sessionGoal` / `continuationPhrase`:
 
-- **Pivots are the norm, not the exception.** Sessions drift ("fix ABC-40" → a broader ABC-314 epic → a narrow ABC-328 sub-fix; "merge the test plan" → "audit every page"). Don't flatten original+evolved into one bland activity list. **Lead with the CURRENT crystallized mission** (the summary flags it as "MOST RECENT / CRYSTALLIZING REQUEST"), name the pivot in a clause. The chipTitle stays the **original** name, so the chipPrompt's GOAL line must **bridge title ↔ current goal** (e.g. "titled for the ABC-40 build; the session evolved into the ABC-328 wake-latency fix").
+- **Pivots are the norm, not the exception.** Sessions drift ("fix ABC-40" → a broader ABC-314 epic → a narrow ABC-328 sub-fix; "merge the test plan" → "audit every page"). Don't flatten original+evolved into one bland activity list. **Lead with the CURRENT crystallized mission** (the summary flags it as "MOST RECENT / CRYSTALLIZING REQUEST"), name the pivot in a clause. The `chipTitle` stays the **original** name, so the `chipPrompt`'s GOAL line must **bridge title ↔ current goal** (e.g. "titled for the ABC-40 build; the session evolved into the ABC-328 wake-latency fix").
 - **State the goal as an OUTCOME / victory-condition, not activities.** "Find the data-basis contradictions and fix them" beats "touched the test plan, audited pages, wrote a doc".
 - **Never overclaim completion.** If the victory-condition wasn't reached (validation not run, bake not done, PR not opened, a dispatched executor hadn't reported), say exactly that. Don't write "culminating in production baking" when the transcript never reaches it.
 - **Never invent a ruled-out step.** Scan LAST ASSISTANT TEXT for explicit "nothing pushed / no write access / deliberately local / can't / already done" facts and honor them. A `continuationPhrase` proposing "push to origin/main" when the session established there's no write access is a hard defect — it breaks on the first action.
@@ -44,9 +43,9 @@ Adversarial validation on real sessions surfaced one dominant failure class — 
 - **Continue from the FRONTIER, not the literal last keystroke.** The continuation is the first *not-yet-done* substantive step. Two traps: (a) don't point at a sub-task that already **finished** earlier in the arc ("resume the sweep" when the sweep is done and its output saved); (b) don't treat a **wrap-up/handoff** tail ("commit locally", "bake a resume doc so a future session can continue") as the mission — the next action is the mission's Next-Step / top pending item from the summary + persisted state, not redoing the bookkeeping.
 - **A self-authored handoff wins — carry it, don't reinvent it.** If the session wrote its own resume artifact (`session-resume-YYYY-MM-DD.md`, a "Resume path:" block, an explicit "Next Step / Optional Next Step"), anchor the `continuationPhrase` on it: name the artifact to load and lead with its stated first action/priority. The session already decided what comes next; re-deriving a different plan loses that signal (e.g. a session that named its top-priority item plus a sweep's results in its own resume doc — carry that ordering, don't re-derive a different one).
 
-## Category story / orchestrator structure
+## Category story / manager structure
 
-One category = one **story** (a markdown file) + one **orchestrator** chip. Units are rows in the story, not separate pre-authored artifacts; there is no second decision tier.
+One category = one **story** (a markdown file) + one **manager** session. Units are rows in the story, not separate pre-authored artifacts; there is no second decision tier.
 
 | Thing | Rule |
 |---|---|
@@ -55,15 +54,15 @@ One category = one **story** (a markdown file) + one **orchestrator** chip. Unit
 | Origin | The topmost session in the category. Its own state is the story's "Where the origin session stopped"; it gets a unit only if it has implementation work of its own left. |
 | Narrator | One sonnet agent per category, the **only** decision layer. Reads every member's mined state + intelligence and decides merges, retirements, conflicts and gates with evidence. |
 | Story | `~/.claude/sessions-to-chips/maps/<date>-<slug>.md`. Sections: Mission, origin state, How we got here (causal beats), Established (do not re-derive), Conflicts, Open front, Dead ends, Units table, Gates, Retired, Unit prompts. One file, one source of truth. |
-| Orchestrator | One chip per category, titled `[Manager] <origin title>` (a bare origin title would be a twin of the parked origin row). Owns the narrative and dispatches units; never does a unit's work. Its prompt is script-templated (goal, story path, five-point contract, gates), never LLM-drifted. |
-| Unit | One fresh session's mission, with the mined 5-part prompt unchanged (merged units: one prompt, REMAINING STEPS = union). Each prompt ends with a pointer to the story and the orchestrator's title. |
-| Merge | Only same ticket/artifact, strict subset/direct follow-up, or same files. Evidence recorded in the unit row. A merge never loses a `remainingWork` item; if unsure, keep separate (a wrong split costs one chip, a wrong merge hides an obligation). |
+| Manager | One session per category, titled `[Manager] <origin title>` (a bare origin title would be a twin of the parked origin row). Owns the narrative and dispatches units; never does a unit's work. Its prompt is script-templated (goal, story path, a pointer to the Manager contract, story-specific duties, gates), never LLM-drifted. |
+| Unit | One fresh session's mission, with the mined 5-part prompt unchanged (merged units: one prompt, REMAINING STEPS = union). Each prompt ends with a pointer to the story and the manager's title. |
+| Merge | Only same ticket/artifact, strict subset/direct follow-up, or same files. Evidence recorded in the unit row. A merge never loses a `remainingWork` item; if unsure, keep separate (a wrong split costs one session, a wrong merge hides an obligation). |
 | Guard | After narration the script re-adds any incomplete member with owed work that is in no unit and in no `retired` entry, and reports it in `warnings`. |
 | Fan-out | First wave at most 5 concurrent units; later waves follow `dependsOn`. |
-| Sidebar nesting | Set by `spawnedFrom.sessionId` = the session that called `spawn_task`. Verified 2026-10-13 against the store: each `[Manager]` chip is a child of the runner session and its units are children of the manager (deeper levels appear when a unit spawns its own). So the orchestrator must call `spawn_task` itself. |
-| Decision tiers | Exactly one orchestrator level. A member that itself has children is its own category (re-run `group_sessions.py --root` on it). |
+| Sidebar nesting | Set by `spawnedFrom.sessionId` = the session that started it. Verified 2026-10-13 against the store: each `[Manager]` is a child of the dispatcher session and its units are children of the manager (deeper levels appear when a unit starts its own). So the manager must start its units itself. |
+| Decision tiers | Exactly one manager level. A member that itself has children is its own category (re-run `group_sessions.py --root` on it). |
 | Overlap | Two units on one artifact: the narrator merges them, or names the owner and the other prompt says "do not edit X". |
-| Flat / done | One unit left: spawn it directly with the category context inline. Zero units: report done. |
+| Flat / done | One unit left: start it directly with the category context inline. Zero units: report done. |
 
 ### Intelligence fields (what the story is built from)
 
@@ -75,11 +74,11 @@ One category = one **story** (a markdown file) + one **orchestrator** chip. Unit
 | `produces` / `needs` | Handoffs: artifacts others depend on / inputs awaited from outside. | One session's `needs` = another's `produces` is a story beat and a `dependsOn`. |
 | `openQuestions` | Raised and not closed. | Feeds the story's Open front. |
 
-Gotchas: a `--grep` target set that includes a child but not its parent makes the child its own root; pass `--root` to pull the full subtree. `--root` prefers an exact title and ignores leftover `[Manager]`-prefixed chips from earlier runs. A chip cannot be pinned to a model (it runs on the desktop's model).
+Gotchas: a `--grep` target set that includes a child but not its parent makes the child its own root; pass `--root` to pull the full subtree. `--root` prefers an exact title and ignores leftover `[Manager]`-prefixed sessions from earlier runs.
 
 ## Completion criteria (isComplete)
 
-`isComplete = true` ONLY when the PR is **MERGED** AND the post-merge tail the session itself named is also done (staging/prod bake verified, tracking issue closed, no open follow-up). A merged PR that ends with "now bake on staging / verify in prod / follow-up <ticket>" is **NOT** complete — it still gets a chip for the tail. Complete sessions get no chip; just report them as done.
+`isComplete = true` ONLY when the PR is **MERGED** AND the post-merge tail the session itself named is also done (staging/prod bake verified, tracking issue closed, no open follow-up). A merged PR that ends with "now bake on staging / verify in prod / follow-up <ticket>" is **NOT** complete — it still gets a unit for the tail. Complete sessions get no unit; just report them as done.
 
 Map of remaining-work shapes:
 - **OPEN PR** → review + merge (+ any bake). Watch for unpushed local commits that the PR doesn't include yet.
@@ -87,11 +86,11 @@ Map of remaining-work shapes:
 - **Interrupted mid-task** (e.g. "hit your weekly limit", half-finished verify) → resume from the exact interruption point.
 - **MERGED + tail done** → complete, skip.
 
-## Chip-prompt rules
+## Unit-prompt rules
 
-`spawn_task` creates a session with **zero memory** of the mining conversation **and a fresh worktree**. So every chipPrompt must be:
+`start_session` (with `context: "fresh"`) creates a session with **zero memory** of the mining conversation **and a fresh worktree**. So every unit prompt (`chipPrompt` in the mined schema) must be:
 
-0. **Goal-led, 5-part structure** — the fix for "surface-level" chips. Order the prompt:
+0. **Goal-led, 5-part structure** — the fix for "surface-level" unit prompts. Order the prompt:
    1. **OVERALL GOAL** — the mined `sessionGoal`, so the fresh session inherits the *mission*, not a stray task.
    2. **WHAT IS DONE** — concrete progress + worktree path + branch + PR #/state.
    3. **WHERE IT STOPPED** — the exact interruption point.
@@ -104,11 +103,11 @@ Map of remaining-work shapes:
 3. **Disciplined**: end with your project's dispatch discipline — iterate locally (your project's quick/affected verify plus a typecheck — the commands your project documents), run the full verify gate once when green, push once, open/update the PR, and **do NOT poll CI**. Include any commit-trailer convention your project uses (e.g. a session-id trailer that links each commit back to its originating session).
 4. **Risk-flagged**: if a step mutates prod (a feature-flag flip, a destructive migration, a schema drop), mark it gated — needs a calm bake + a staging rollback drill, not autonomous action.
 
-Strip ephemeral references a fresh session can't resolve (background-task watcher IDs, "the chip I just spawned"). Replace "monitor watcher bxw…" with the durable equivalent for your stack — e.g. "read the logs + run-state store over a ≥1h window".
+Strip ephemeral references a fresh session can't resolve (background-task watcher IDs, "the session I just started"). Replace "monitor watcher bxw…" with the durable equivalent for your stack — e.g. "read the logs + run-state store over a ≥1h window".
 
-## Title / tldr conventions (spawn_task)
-- `title`: **keep the original desktop session name, verbatim** (e.g. "Fix nightly AsyncRunParamsHashMismatch (ABC-397)"). The user navigates by these names, so a chip must be recognizable as *that* session — do NOT rewrite it into a fresh imperative. Most session titles are already verb-led; only trim trailing detail if it runs much past ~70 chars, never the recognizable lead. (This overrides the generic spawn_task "imperative verb, <60 chars" guidance — the user's "keep the names" requirement wins.)
-- `tldr`: 1-2 plain-English sentences, no paths/code — the mission + what resuming it does.
+## Title / tldr conventions (start_session)
+- `title`: **keep the original desktop session name, verbatim** (e.g. "Fix nightly AsyncRunParamsHashMismatch (ABC-397)"). The user navigates by these names, so a unit must be recognizable as *that* session — do NOT rewrite it into a fresh imperative. Most session titles are already verb-led; only trim trailing detail if it runs much past ~70 chars, never the recognizable lead. (This overrides the generic "imperative verb, <60 chars" title guidance — the user's "keep the names" requirement wins.)
+- `tldr` (the `background` argument for a fresh start): 1-2 plain-English sentences, no paths/code — the mission + what resuming it does.
 - `cwd`: only set if the work belongs to a *different* repo than the current project; otherwise omit (defaults to current project).
 
 ## Workflow gotchas (these cost retries)
@@ -121,4 +120,4 @@ Strip ephemeral references a fresh session can't resolve (background-task watche
 The Workflow tool persists the script and returns a `scriptPath` + `runId`. To re-mine after editing the args or template: `Workflow({scriptPath, resumeFromRunId})` — unchanged agent calls return cached results.
 
 ## Adopter-private layer (overlay)
-If `~/.claude/skills-overlay/sessions-to-chips/LEARNINGS.md` exists, read it too — it holds project-specific sharpeners that must NOT live in this public repo: real session-title examples, named past incidents, the exact verify-gate commands and commit-trailer string for your stack, and any project-specific stop-state patterns. The skill works standalone without it; the overlay just makes the mined chips more precise for your own setup.
+If `~/.claude/skills-overlay/sessions-to-chips/LEARNINGS.md` exists, read it too — it holds project-specific sharpeners that must NOT live in this public repo: real session-title examples, named past incidents, the exact verify-gate commands and commit-trailer string for your stack, and any project-specific stop-state patterns. The skill works standalone without it; the overlay just makes the mined unit prompts more precise for your own setup.

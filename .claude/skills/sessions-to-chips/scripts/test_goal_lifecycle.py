@@ -4,7 +4,10 @@ from pathlib import Path
 
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
-CORE = (SKILL_DIR / "SKILL.md").read_text()
+# The core contract is the router plus the Manager contract it points at.
+CORE = "\n".join(
+    (SKILL_DIR / rel).read_text() for rel in ("SKILL.md", "references/manager-contract.md")
+)
 RUNTIME = (SKILL_DIR / "references" / "codex-runtime.md").read_text()
 LANE = (SKILL_DIR / "prompts" / "codex-lane-template.md").read_text()
 ALL = "\n".join((CORE, RUNTIME, LANE))

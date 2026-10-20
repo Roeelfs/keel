@@ -5,7 +5,7 @@ This skill is symlinked into both `~/.claude/skills/` and `~/.codex/skills/`. De
 - **Claude Code** — `$CLAUDE_SESSION_ID` is set; the `Skill`, `Agent`, `Workflow`, `ScheduleWakeup`, `Monitor`, and `AskUserQuestion` tools and the `/loop` command exist.
 - **Codex CLI** — none of the above. Sessions live at `~/.codex/sessions/<YYYY>/<MM>/<DD>/*.jsonl`; subagents come from `spawn_agent`; there is no harness-managed loop.
 
-When hosted by Codex, the following replace the CORE's verbs. Everything else in the CORE — program files, membership, collision protocol, lane grading, pre-flight verification — applies unchanged.
+When hosted by Codex, the following replace the Manager contract's verbs (`manager-contract.md`). Everything else in the contract — program files, membership, collision protocol, lane grading, pre-flight verification — applies unchanged.
 
 ## No automation substitute for continuation
 
@@ -17,7 +17,7 @@ Treat a native goal as a **runtime continuation lease**, not as the cross-sessio
 
 ### Activate
 
-- Activate only when the user **explicitly requests autonomous goal execution** (for example, “use a goal” or “continue autonomously until this bounded outcome”). **Do not infer goal activation from an ordinary task**, an orchestrator invocation, or “finish” alone.
+- Activate only when the user **explicitly requests autonomous goal execution** (for example, “use a goal” or “continue autonomously until this bounded outcome”). **Do not infer goal activation from an ordinary task**, a manager invocation, or “finish” alone.
 - Call `get_goal` first. Continue an unfinished goal; never replace it. If none exists, call `create_goal` once with the **reachable authorized autonomy frontier**: the current accepted task group through the next known human, production, or external gate. The goal does not broaden scope, production authority, or approval.
 - When creating the goal, omit `token_budget` unless the user supplied an explicit token budget. Never invent one from “be efficient,” weekly-pool pressure, or a time limit. A goal near its budget is neither complete nor blocked.
 - Keep native goals in the root. Children receive bounded missions and leases; they do not create or update the root's goal.
@@ -75,5 +75,5 @@ This is a runtime continuation lease; the program manifest remains the cross-ses
 - **Worktree placement** — workers cannot write to sibling paths outside the sandbox root, so lane prompts MUST use the nested pattern `<repo>/<lane>-impl/`. In a past audit every sibling-path lane bounced through `/tmp`; every nested one stayed clean.
 - **Session-Id trailer** — `$CLAUDE_SESSION_ID` does not exist. Skip the trailer, or install a `prepare-commit-msg` hook that recovers the SID by matching the lane's cwd against the first record's `payload.cwd` in `~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl`. Never paste the Claude-only heredoc warning blindly.
 - **PURPOSE hints** — no `sessions.py list` derivation. The spawning prompt itself declares `NAME: <name>` and `PURPOSE: <one-liner>` on its first lines so the next miner pass recovers them.
-- **Spawning a Codex lane** — use `prompts/codex-lane-template.md` as the single-paste mission; it carries the nested-worktree, no-`/tmp`, and orchestrator-owns-the-merge constraints inline.
+- **Spawning a Codex lane** — use `prompts/codex-lane-template.md` as the single-paste mission; it carries the nested-worktree, no-`/tmp`, and manager-owns-the-merge constraints inline.
 - **Compact survivability** — no `/compact` command and no SessionStart hook. Write `<slug>.state.md` after every significant routing decision, and re-read it before the next routing claim whenever a context-summary banner appears.

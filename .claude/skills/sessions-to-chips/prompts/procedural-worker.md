@@ -46,7 +46,7 @@ Coupling rules the validator enforces: `status:pass` needs ≥1 command, every c
 The root validates the final pointer with:
 
 ```bash
-python3 ~/.claude/skills/orchestrator/scripts/validate_procedural_result.py --expected-sha <sha> <result.json>
+python3 ~/.claude/skills/sessions-to-chips/scripts/validate_procedural_result.py --expected-sha <sha> <result.json>
 ```
 
 The root grades the artifact and SHA, then makes the next decision. It never inherits or polls the worker's process session.

@@ -1,6 +1,6 @@
 # State miner — compact cross-runtime prompt
 
-Use a cheap mining tier to turn Claude and Codex session surveys into one project-scoped state update. The orchestrator reads the summary, not raw JSONL.
+Use a cheap mining tier to turn Claude and Codex session surveys into one project-scoped state update. The manager reads the summary, not raw JSONL.
 
 ## Inputs
 

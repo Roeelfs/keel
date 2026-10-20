@@ -1092,7 +1092,7 @@ def parse_args() -> argparse.Namespace:
     survey_parser.add_argument("--sid", help="Survey single session id prefix", default=None)
     survey_parser.add_argument("--json", action="store_true", help="Output JSON")
 
-    mine_parser = subparsers.add_parser("mine", help="Mine sessions and write orchestrator artifacts")
+    mine_parser = subparsers.add_parser("mine", help="Mine sessions and write manager artifacts")
     add_common(mine_parser)
     mine_parser.add_argument("--no-gh", action="store_true")
 

@@ -1,6 +1,6 @@
 # Model & effort routing
 
-Per-lane recommendations to minimize token cost. The state-miner emits `recommended_model` + `recommended_effort` per lane into the program state file (`~/.claude/orchestrator/programs/<slug>.state.md`); the orchestrator surfaces them in the survey and in lane missions.
+Per-lane recommendations to minimize token cost. The state-miner emits `recommended_model` + `recommended_effort` per lane into the program state file (`~/.claude/orchestrator/programs/<slug>.state.md`); the manager surfaces them in the survey and in lane missions.
 
 ## Models
 
@@ -51,8 +51,8 @@ The Codex column names the **class** to pass to `codex-headroom.sh --route <clas
 | Migration risk review | Sonnet | think | standard |
 | Self-managed interactive | Sonnet | think | standard |
 | Wake-driven soak watcher | Haiku | (none) | mining |
-| Orchestrator (Claude) | Opus | think | n/a |
-| Orchestrator (long-lived Codex root) | n/a | n/a | standard |
+| Manager (Claude `[Manager]` session) | Sonnet | think | n/a |
+| Manager (long-lived Codex root) | n/a | n/a | standard |
 
 ## Subagent dispatch
 
@@ -69,7 +69,7 @@ The Codex column names the **class** to pass to `codex-headroom.sh --route <clas
 
 ## Rules
 
-1. Subagents default to the cheap tier. State miner is always cheap-tier, even from a flagship orchestrator.
+1. Subagents default to the cheap tier. State miner is always cheap-tier, even from a flagship manager.
 2. Effort costs tokens; only apply where the matrix says.
 3. Respect a lane's `model_override` in the program state file — never silently reclassify it.
 4. An idle lane costs nothing; don't retire one to "save tokens."
@@ -77,7 +77,7 @@ The Codex column names the **class** to pass to `codex-headroom.sh --route <clas
 6. Deep-review bucket (security review, adversarial review, final-gate critique) is split **Fable 5.1 + Opus 5.5** — model diversity beats a single-model monoculture; never route all deep-review lanes to one model.
 7. **Ad-hoc delegation defaults to `sonnet`.** Research / investigation / mining / exploration / execution dispatches route to `sonnet` or `haiku`; **`opus` requires a one-line justification in the dispatch**; `fable` (or Codex's `adjudication`/`security` class, which the gate resolves to Astra at high effort) is reserved for the hardest verify / judge / adversarial reasoning. The Fable-pinned NAMED agents (critic, security-reviewer) stay Fable by design. A permissive default silently becomes an opus default — measured: 189 dispatches went opus 59 / sonnet ~80 / haiku 2.
 8. **Bounded Codex children do not inherit the whole parent by default.** Give them a self-contained mission and `fork_turns: "none"` or the smallest positive slice that carries the evidence. Use `"all"` only when the whole conversation is genuinely load-bearing; full-history forks also inherit the parent's model and effort.
-9. **The long-lived Codex orchestrator root is Sol-medium.** Context accumulation is the root's dominant multiplier; do not pay frontier weight on coordination, waiting, integration, or routine execution.
+9. **The long-lived Codex manager root is Sol-medium.** Context accumulation is the root's dominant multiplier; do not pay frontier weight on coordination, waiting, integration, or routine execution.
 10. **Judgment uses a fresh bounded escalation, not a phase-spanning root.** Use Astra classes `architecture`, `security`, `hard-rca`, and `adjudication` for the hardest decisions; use Sol-high `falsifier`/`adversarial` for routine falsification. Return one decision artifact to the Sol-medium root, then stop the judgment lane.
     **The bound is the SHAPE, not the frequency** — one question, fresh context, one document, stop. In that shape judgment lanes are used freely within the accepted finite review manifest; outside it, never. Cost is `turns × context_size × model_weight`; a root maximizes the first two, so frontier weight on a root multiplies the worst case, while a bounded lane pays it once. Roots are **few but individually heavy** — measured 2026-08-21, one session spawned 30 subagent threads and another produced 81 rollout files, against a median root of 1. *(An earlier version of this rule cited "59% root sessions, 37 roots in 7h"; that counted rollout FILES as sessions and is retracted — a session owns one root file plus one file per subagent thread.)* The split that gets missed is inside *research*: **research-as-retrieval is Sol-medium, research-as-judgment is Sol-high for falsification, with Astra for architecture/security/hard RCA/adjudication** — "what does the vendor document?" vs "which reading is right, and what would falsify each?". Mission contract: `prompts/sol-judgment-lane.md`.
 11. **Existing implementation is resume work, not a new lifecycle.** Honor same-SHA evidence; do not spend a new review/test wave proving unchanged code.

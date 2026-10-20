@@ -1,7 +1,7 @@
 #!/bin/bash
-# spawn-lane.sh — launch a headless lane (the orchestrator's lane verb), on either runtime.
+# spawn-lane.sh — launch a headless lane (the manager's lane verb, sessions-to-chips skill), on either runtime.
 #
-# The operator allowlists THIS path once; an orchestrator session may not invoke
+# The operator allowlists THIS path once; a manager session may not invoke
 # --permission-mode bypassPermissions or write its own allow rules directly.
 #
 # Usage:
@@ -80,7 +80,7 @@ if [ "$RUNTIME" = codex ]; then
   # ---- parity: refuse options this path cannot honor, never accept-and-drop -------------
   # Accepting a capability-bearing option and then omitting the capability is a dead-lane
   # defect: a caller asking for a restrictive --mode would get Codex's unrelated defaults,
-  # and LANE_MCP_CONFIG (the documented product of .claude/lane-env.sh, SKILL.md "Repo lane hook") would
+  # and LANE_MCP_CONFIG (the documented product of .claude/lane-env.sh, references/manager-contract.md "Repo lane hook") would
   # become dead data while the skill still promises the lane gets those MCPs.
   [ -n "$WORKTREE" ] && { echo "spawn-lane.sh: --worktree is claude-only; create it first and pass --cwd" >&2; exit 2; }
   [ -n "$MCP_CFG" ] && { echo "spawn-lane.sh: --mcp-config is claude-only; supplied MCP config is unsupported on codex. Keep this lane on claude." >&2; exit 2; }
@@ -114,7 +114,7 @@ if [ "$RUNTIME" = codex ]; then
   # Both, because in a linked worktree --absolute-git-dir is .git/worktrees/<name> (HEAD,
   # index, per-worktree refs) while objects and refs/heads live in the COMMON dir, outside
   # the workspace. Granting only the first writes the file then dies on
-  # `Operation not permitted` — the orchestrator's actual shape.
+  # `Operation not permitted` — the manager's actual shape.
   #
   # THE COMMON GRANT IS A REAL WIDENING. Do not repeat the earlier claim that it is "bounded
   # by one-lane-one-worktree" — that was false. The common dir carries every local and
@@ -152,7 +152,7 @@ print(json.dumps(roots))')" || exit 2
   # exact command a production verb needing in-session approval. Denying egress removes the
   # question instead of guarding it.
   #
-  # THE SEAM: the lane commits; the ORCHESTRATOR pushes after grading the artifact. That is
+  # THE SEAM: the lane commits; the MANAGER pushes after grading the artifact. That is
   # the same division the advance tick already uses for deploys.
   #
   # --allow-network re-opens egress for a lane that genuinely needs it (a package install,
@@ -197,7 +197,7 @@ print(json.dumps(roots))')" || exit 2
 Every commit you make MUST carry this git trailer, or it is invalid on this machine:
   --trailer \"Session-Id: $LANE_KEY\"
 Do NOT push, open a PR, or touch a remote. Commit locally and report your branch and SHAs;
-the orchestrator pushes after grading. If you find yourself wanting to push, you are done."
+the manager pushes after grading. If you find yourself wanting to push, you are done."
 
   # Same stdin discipline as the claude path, and for the same reason: `codex exec` with an
   # inherited pipe hangs on "Reading additional input from stdin" and never runs the mission.

@@ -53,7 +53,7 @@ small correct change beats a large clever one.
   old/new paths "just in case."
 - **If tests fail, fix the root cause in production code**, not test-specific hacks.
   Treat test failures as signals about your implementation.
-- **The plan is read-only.** The spec, the tracker issue, or the orchestrator plan
+- **The plan is read-only.** The spec, the tracker issue, or the manager plan
   you were handed must never be modified.
 - **Escalate after 3 failed attempts** on the same issue — hand the `architect`
   agent full context rather than looping on a broken approach.

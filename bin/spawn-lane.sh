@@ -1,1 +1,1 @@
-../.claude/skills/orchestrator/scripts/spawn-lane.sh
+../.claude/skills/sessions-to-chips/scripts/spawn-lane.sh

@@ -181,8 +181,9 @@ prevents both:
   third branch for the same ticket.
 - **Lifecycle + a reaper** so state from a crashed session gets cleaned up.
 
-The [`orchestrator`](.claude/skills/orchestrator/) skill sits on top for 3+
-parallel sessions; [`claude-sessions`](.claude/skills/claude-sessions/) and
+The [`sessions-to-chips`](.claude/skills/sessions-to-chips/) skill sits on top:
+it starts one `[Manager]` session per program, which runs 3+ parallel sessions
+under it; [`claude-sessions`](.claude/skills/claude-sessions/) and
 [`codex-sessions`](.claude/skills/codex-sessions/) survey what every session is
 doing and mine transcripts for the decisions downstream reviews need.
 
@@ -200,7 +201,7 @@ flows (`/ask-matt` is the built-in router when you forget):
 | **Test & verify** | `spec-test-plan` · `spec-test-execute` · `flows` |
 | **Diagnose** | `diagnosing-bugs` · `root-cause-analysis` |
 | **Codebase health** | `improve-codebase-architecture` |
-| **Parallel sessions** | `orchestrator` · `codex` · `claude-sessions` · `codex-sessions` · `sessions-to-chips` · `handoff` |
+| **Parallel sessions** | `sessions-to-chips` · `codex` · `claude-sessions` · `codex-sessions` · `handoff` |
 | **Harness upkeep** | `improve-harness` · `harness-onboarding` · `writing-for-agents` · `free-resources` |
 | **Utilities** | `work-report` · `design-taste-frontend` · `caveman` · `ask-matt` · `setup-matt-pocock-skills` |
 

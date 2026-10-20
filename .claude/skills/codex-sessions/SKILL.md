@@ -2,7 +2,7 @@
 license: MIT
 name: codex-sessions
 context: fork
-description: Mine local Codex sessions and summarize active and recent sessions. Reports Codex-side session state only; it does NOT own program state — the orchestrator skill owns the program manifest and slug state file.
+description: Mine local Codex sessions and summarize active and recent sessions. Reports Codex-side session state only; it does NOT own program state — the manager (sessions-to-chips skill) owns the program manifest and slug state file.
 ---
 
 # codex-sessions
@@ -37,7 +37,7 @@ python3 ~/.claude/skills/codex-sessions/scripts/sessions.py survey --sid <sessio
 ```
 
 ### `mine`
-Build the latest session-state artifact and a state-miner prompt for the orchestrator.
+Build the latest session-state artifact and a state-miner prompt for the manager.
 
 ```bash
 python3 ~/.claude/skills/codex-sessions/scripts/sessions.py mine --limit 20 --no-gh
@@ -96,5 +96,5 @@ The walker maps Codex's event schema onto the shared contract:
   `~/.codex/archived_sessions`; archival state does not imply who archived the task.
 - `list` is shallow by default and filters only session id/thread title. Use `--deep` when matching cwd/path is needed.
 - `mine` parses transcripts and defaults to the last 2 days unless `--since` or `--days` is provided.
-- For orchestrator work, run `mine`, then delegate the generated `state-miner-*.md` file to a cheap subagent for the actual synthesis.
+- For manager work, run `mine`, then delegate the generated `state-miner-*.md` file to a cheap subagent for the actual synthesis.
 - PR/status mining is optional and guarded by `--no-gh` because GitHub access is not guaranteed.

@@ -1,7 +1,7 @@
 # Codex lane contract
 
 The single owner of how this repo's skills dispatch to the second runtime. Four skills
-call `codex exec` (`spec-review`, `spec-test-plan`, `spec-test-execute`, `orchestrator`);
+call `codex exec` (`spec-review`, `spec-test-plan`, `spec-test-execute`, `sessions-to-chips`);
 they state only their sandbox tier and link here. Change the contract in one place.
 
 ## Why a lane needs grading, not just an exit code

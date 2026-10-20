@@ -4,7 +4,10 @@ from pathlib import Path
 
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
-SKILL = (SKILL_DIR / "SKILL.md").read_text()
+# The core contract is the router plus the Manager contract it points at.
+SKILL = "\n".join(
+    (SKILL_DIR / rel).read_text() for rel in ("SKILL.md", "references/manager-contract.md")
+)
 ROUTING = (SKILL_DIR / "prompts" / "model-routing.md").read_text()
 SOL_LANE = (SKILL_DIR / "prompts" / "sol-judgment-lane.md").read_text()
 
@@ -19,7 +22,7 @@ class ModelRoutingContractTests(unittest.TestCase):
         self.assertIn("Long-lived Codex root", SKILL)
         self.assertIn("codex-headroom.sh --route standard", SKILL)
         self.assertIn(
-            "| Orchestrator (long-lived Codex root) | n/a | n/a | standard |",
+            "| Manager (long-lived Codex root) | n/a | n/a | standard |",
             ROUTING,
         )
 
@@ -35,7 +38,7 @@ class ModelRoutingContractTests(unittest.TestCase):
         )
         self.assertNotIn("-m gpt-6-sol", SKILL)
         self.assertNotIn("model_reasoning_effort=medium", SKILL)
-        self.assertNotIn("| Orchestrator | Opus | standard |", ROUTING)
+        self.assertNotIn("| Manager | Opus | standard |", ROUTING)
 
     def test_bounded_children_keep_minimal_history(self):
         self.assertIn('`fork_turns: "none"`', ROUTING)

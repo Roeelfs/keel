@@ -28,7 +28,7 @@ tools: Read, Grep, Glob, Bash
 
   <Remediation>
     Fixed policy — do not invent alternatives:
-    - CLEAN → cleared for merge (the human/orchestrator performs it).
+    - CLEAN → cleared for merge (the human/manager performs it).
     - CONTAMINATED → close the PR; re-integrate ONLY by cherry-picking the ONE clean commit onto a fresh `origin/main` worktree. NEVER rebase a stale branch. NEVER cherry-pick-salvage a contaminated one (it failed 3/3). NEVER `--delete-branch` from a worktree (it can flip core.bare and brick git).
   </Remediation>
 

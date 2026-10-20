@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Conformance tests for the advance tick.
 
-SCOPE, stated honestly: SKILL.md is prose, so these pin the CONTRACT — the order of
+SCOPE, stated honestly: the Manager contract is prose, so these pin the CONTRACT — the order of
 the gates and the presence of guards whose absence has a measured cost. They cannot
 prove runtime behavior. Where a rule is testable as an ordering (an override that must
 precede any tool call), it is tested as an ordering, not as a phrase count."""
@@ -10,7 +10,7 @@ import re
 import unittest
 from pathlib import Path
 
-SKILL = (Path(__file__).resolve().parents[1] / "SKILL.md").read_text()
+SKILL = (Path(__file__).resolve().parents[1] / "references" / "manager-contract.md").read_text()
 TICK = SKILL.split("## The advance tick")[1].split("\n## Grading a lane")[0]
 
 

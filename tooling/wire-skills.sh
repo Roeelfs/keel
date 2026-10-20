@@ -46,7 +46,7 @@
 #   KEEL_SCRIPT_ROOTS=/a:/b tooling/wire-skills.sh  # override script roots (colon-separated)
 #
 # SCRIPTS (2026-09-23): `<clone>/bin/` holds one symlink per cross-project script, pointing
-# into the skill that owns it (e.g. bin/spawn-lane.sh -> the orchestrator skill's copy), and
+# into the skill that owns it (e.g. bin/spawn-lane.sh -> the sessions-to-chips skill's copy), and
 # each entry is linked into `~/.claude/scripts/`. A REAL file at a script destination FAILS
 # the run: that is exactly how a second, hand-maintained copy survived for two months
 # (spawn-lane.sh, 07-29 → 09-23). Delete the copy, then re-run.

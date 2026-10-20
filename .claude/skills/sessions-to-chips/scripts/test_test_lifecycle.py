@@ -8,6 +8,7 @@ FILES = {
     relative: (SKILL_DIR / relative).read_text()
     for relative in (
         "SKILL.md",
+        "references/manager-contract.md",
         "references/lifecycle.md",
         "references/merge-and-retire.md",
         "references/codex-runtime.md",
@@ -19,6 +20,8 @@ FILES = {
     )
 }
 ALL = "\n".join(FILES.values())
+# The core contract is the router plus the Manager contract it points at.
+CORE = FILES["SKILL.md"] + "\n" + FILES["references/manager-contract.md"]
 
 
 class TestLifecycleContractTests(unittest.TestCase):
@@ -58,11 +61,11 @@ class TestLifecycleContractTests(unittest.TestCase):
         # A verify lane dispatched at a SHA no environment carries returns
         # BLOCKED with zero information, and costs a second lane to locate the
         # environment (verify_e2_fix -> verify_current_staging_head).
-        core = FILES["SKILL.md"]
+        core = CORE
         self.assertIn("Verify the substrate BEFORE dispatch", core)
         self.assertIn("git branch --contains", core)
         # One canonical statement: merge-and-retire's resume path points at the
-        # SKILL.md bullet rather than restating the rule a third time.
+        # manager-contract.md bullet rather than restating the rule a third time.
         retire = FILES["references/merge-and-retire.md"]
         self.assertIn("Verify the substrate BEFORE dispatch", retire)
         self.assertIn("this line is its resume-path pointer", retire)
@@ -73,7 +76,7 @@ class TestLifecycleContractTests(unittest.TestCase):
         self.assertIn("deferred owner", lifecycle)
 
     def test_review_wait_and_headless_contracts_are_bounded(self):
-        core = FILES["SKILL.md"]
+        core = CORE
         for text in (
             "moderate` permits at most **two total activations**",
             "critical` permits at most **five total activations**",
@@ -96,7 +99,7 @@ class TestLifecycleContractTests(unittest.TestCase):
             self.assertIn(text.lower(), lifecycle.lower())
 
     def test_completion_mode_finishes_declared_scope_without_more_review(self):
-        core = FILES["SKILL.md"]
+        core = CORE
         for text in (
             "Completion mode override",
             "freeze accepted scope",
@@ -106,7 +109,7 @@ class TestLifecycleContractTests(unittest.TestCase):
             self.assertIn(text, core)
 
     def test_explicit_terminal_stop_ends_all_descendants(self):
-        core = FILES["SKILL.md"]
+        core = CORE
         for text in (
             "Terminal stop override",
             "interrupt every active descendant",
@@ -116,7 +119,7 @@ class TestLifecycleContractTests(unittest.TestCase):
             self.assertIn(text, core)
 
     def test_active_owned_child_cannot_become_a_user_reactivation_handoff(self):
-        core = FILES["SKILL.md"]
+        core = CORE
         runtime = FILES["references/codex-runtime.md"]
         for text in (
             "internal work, not an external wait",

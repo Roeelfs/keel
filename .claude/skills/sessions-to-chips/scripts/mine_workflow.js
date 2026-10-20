@@ -1,6 +1,6 @@
 export const meta = {
   name: 'mine-sessions-to-chips',
-  description: 'Mine N Claude sessions in parallel, then narrate each category as one story + unit ledger for a single orchestrator',
+  description: 'Mine N Claude sessions in parallel, then narrate each category as one story + unit ledger for a single manager',
   phases: [
     { title: 'Mine', detail: 'one read-only agent per session: goal, state AND the intelligence it produced' },
     { title: 'Narrate', detail: 'one sonnet narrator per category: the story, settled calls, merged/retired units' },
@@ -13,13 +13,13 @@ export const meta = {
 //                     sessions: [ { idx, title, cli, worktreeName, branch, pr, transcript }, ... ],
 //                     groups: [ { category, origin:{title,cli}|null, memberClis:[cli,...] oldest->newest } ] } })
 // `groups` comes from group_sessions.py (omit for a single flat set; then no Narrate phase runs).
-// Returns { ok, failed, stories:[{category, flat, done, orchestratorTitle, orchestratorTldr,
-//   orchestratorPrompt, storyMarkdown, units[], warnings[]}], storiesFailed }.
-//   - ONE orchestrator per category (orchestratorPrompt); flat=true -> a single unit, spawn it directly.
+// Returns { ok, failed, stories:[{category, flat, done, managerTitle, managerTldr,
+//   managerPrompt, storyMarkdown, units[], warnings[]}], storiesFailed }.
+//   - ONE manager per category (managerPrompt); flat=true -> a single unit, start it directly.
 //   - storyMarkdown is the one artifact: narrative + established calls + unit ledger + unit prompts.
 //   - warnings[] lists any obligation the narrator tried to drop; the script re-adds it as a unit.
 // Pass `transcript` (abs path from find_transcript.py) so agents don't re-glob.
-// Pass `title` VERBATIM - it is the desktop session name and becomes the chip title unchanged.
+// Pass `title` VERBATIM - it is the desktop session name and becomes the unit title unchanged.
 // GOTCHAS baked in: `args` can arrive as a STRING (JSON.parse it); `process` is undefined;
 // Date.now()/Math.random() throw. Agents are READ-ONLY (no verify / heavy ops / push).
 
@@ -64,7 +64,7 @@ const SCHEMA = {
 
 const results = await parallel(sessions.map((s) => () =>
   agent(
-`Deep-mine ONE finished/paused Claude Code session so a "resume chip" can be authored that carries its OVERALL GOAL and the EXACT phrase to continue from where it stopped — not a vague "do the last thing". READ-ONLY: do not edit files, build, test, verify, run any heavy op, or push. Only read, git status/log, and gh.
+`Deep-mine ONE finished/paused Claude Code session so a resume prompt can be authored that carries its OVERALL GOAL and the EXACT phrase to continue from where it stopped — not a vague "do the last thing". READ-ONLY: do not edit files, build, test, verify, run any heavy op, or push. Only read, git status/log, and gh.
 
 SESSION (title is the user-facing name — preserve it):
 - idx: ${s.idx}
@@ -81,7 +81,7 @@ STEPS
    - lastState = what got done against that goal + the precise terminal state (read LAST ASSISTANT TEXT + LATEST TODOS + RECENT TOOL USES + the summary's "Pending Tasks"/"Next Step").
    - continuationPhrase = the user's-voice imperative that resumes from that exact point (lean on EXACT LAST USER INSTRUCTION + the summary's Next-Step for the literal next action; never output "continue the last mission").
 
-   PIVOT & TERMINAL-STATE DISCIPLINE (this is where surface-level chips fail — apply rigorously):
+   PIVOT & TERMINAL-STATE DISCIPLINE (this is where surface-level resume prompts fail — apply rigorously):
    - PIVOT: many sessions drift (e.g. "fix ABC-40" → a broader ABC-314 epic → a narrow ABC-328 sub-fix; or "merge the test plan" → "audit every page"). Do NOT flatten original+evolved into one bland list. LEAD sessionGoal with the CURRENT mission, name the pivot, and remember the chipTitle stays the ORIGINAL name — so the chipPrompt's GOAL line must bridge title↔current-goal.
    - DON'T OVERCLAIM: if the session STOPPED SHORT of its victory-condition (validation not run, bake not done, PR not opened, an executor sub-agent dispatched but not yet reported back), say exactly that. Never describe an end-state ("culminating in production baking") that the transcript does not show reaching.
    - DON'T INVENT RULED-OUT STEPS: scan LAST ASSISTANT TEXT for explicit "nothing pushed / no write access / deliberately local / can't / already done / already presented" facts and honor them. A continuationPhrase that proposes a step the session explicitly ruled out (the classic: "push to origin/main" when there is no write access) is a hard FAIL — it would break on the first action.
@@ -117,7 +117,7 @@ log(`mined ${ok.length}/${sessions.length} sessions; ${failed.length} failed`)
 // ---- Phase 2: one NARRATOR per category -> ONE story + a unit ledger ----------------------------
 // The narrator reads the mined intelligence of every member, tells the category's story, and
 // decides merges/retirements itself (single decision layer).
-// The script (not an LLM) renders the story file and the orchestrator prompt, so unit prompts and
+// The script (not an LLM) renders the story file and the manager prompt, so unit prompts and
 // titles reach the user verbatim from the mined results.
 const groups = input.groups || []
 const date = input.date || ''
@@ -193,7 +193,7 @@ DO, IN ORDER
    - Retire a member (no unit) only when isComplete, or with named evidence that another member supersedes or duplicates it. Never retire for age.
    - The origin session is a normal member: it gets a unit only if it has implementation work of its own left.
    - dependsOn is a real input->output dependency only; independent units get [].
-   - If unsure whether to merge, keep separate and say why in the storyline: a wrong merge hides an obligation, a wrong split costs one extra chip.
+   - If unsure whether to merge, keep separate and say why in the storyline: a wrong merge hides an obligation, a wrong split costs one extra session.
 6. GATES: human-only steps (prod mutation, founder decision), each naming the unit it blocks.
 
 Do not overclaim: use each member's isComplete / prState / lastState as given; a merged-but-unbaked PR is not done. A step a member explicitly ruled out stays ruled out.
@@ -239,7 +239,7 @@ function assemble(g, members, n) {
     units.push({ cli: m._cli, mergedFrom: [m._cli], mergeEvidence: '', title: m.chipTitle, tldr: m.chipTldr, prompt: m.chipPrompt, dependsOn: [], state: m.prState, stoppedAt: m.lastState })
   })
 
-  const orchestratorTitle = '[Manager] ' + (g.origin ? g.origin.title : g.category)
+  const managerTitle = '[Manager] ' + (g.origin ? g.origin.title : g.category)
   const gates = n.gates || []
   const flat = units.length === 1
   const done = units.length === 0
@@ -250,7 +250,7 @@ function assemble(g, members, n) {
     ...u,
     prompt: flat
       ? `${u.prompt}\n\nCATEGORY CONTEXT: ${n.thesis}\nAlready established, do not re-litigate:\n${ctxLines || '- (nothing recorded)'}`
-      : `${u.prompt}\n\nSTORY: read {{STORY_PATH}} first; its Established section lists calls already settled, so do not re-litigate them. The orchestrator for this category is the session titled "${orchestratorTitle}"; report your PR/outcome there.`,
+      : `${u.prompt}\n\nSTORY: read {{STORY_PATH}} first; its Established section lists calls already settled, so do not re-litigate them. The manager for this category is the session titled "${managerTitle}"; report your PR/outcome there.`,
   }))
 
   const deadEnds = members.flatMap(m => (m.deadEnds || []).map(d => `- ${d} (${m.title})`))
@@ -268,29 +268,29 @@ function assemble(g, members, n) {
       `| ${i + 1} | ${u.title}${u.mergedFrom.length > 1 ? ' (merged ' + u.mergedFrom.length + ': ' + u.mergeEvidence + ')' : ''} | ${u.state} | ${u.dependsOn.map(d => idxOf[d] ? '#' + idxOf[d] : d).join(', ') || '-'} | ${String(u.stoppedAt).replace(/\|/g, '/').replace(/\n/g, ' ').slice(0, 160)} |`).join('\n'),
     gates.length ? `## Gates (human)\n${gates.map(x => `- ${x}`).join('\n')}` : '',
     (n.retired || []).length ? `## Retired (no unit)\n${n.retired.map(r => `- ${(byCli[r.cli] || {}).title || r.cli}: ${r.reason}`).join('\n')}` : '',
-    `## Unit prompts (spawn as written, in dependsOn order)\n` + finalUnits.map((u, i) => `### ${i + 1}. ${u.title}\n~~~~\n${u.prompt}\n~~~~`).join('\n\n'),
+    `## Unit prompts (start as written, in dependsOn order)\n` + finalUnits.map((u, i) => `### ${i + 1}. ${u.title}\n~~~~\n${u.prompt}\n~~~~`).join('\n\n'),
   ].filter(Boolean).join('\n\n')
 
-  const orchestratorPrompt = flat || done ? null :
-`You are the single orchestrator for "${g.category}". You own its narrative AND dispatch its remaining work.
+  const managerPrompt = flat || done ? null :
+`You are the manager for "${g.category}". You own its narrative AND dispatch its remaining work.
 
 GOAL: ${n.thesis}
 
+CONTRACT: ~/.claude/skills/sessions-to-chips/references/manager-contract.md binds you: verify before acting, grade by artifact, hold the gates, keep your family small, close out once. Read it first. Start each child with the arguments in ~/.claude/skills/sessions-to-chips/SKILL.md, section "Starting a manager".
+
 READ FIRST: {{STORY_PATH}}. It holds how the work got here, what is already established (do not re-litigate), open conflicts, and one unit per piece of remaining work, each with a ready prompt.
 
-CONTRACT
-1. Verify the facts you act on (gh pr view, git worktree list --porcelain); a story row is a claim, not proof.
+THIS STORY
+1. A story row is a claim, not proof: verify the facts you act on (gh pr view, git worktree list --porcelain).
 2. Settle every open conflict yourself and record the call plus its reason in the story. Escalate only for a prod mutation, a founder/product decision, or an unrecoverable conflict, one question at a time.
-3. Start each unit yourself with start_session, from THIS session, so it nests under you in the sidebar. Order by dependsOn, title and prompt as written; independent units together, first wave at most 5, each pinned to model sonnet and effort medium unless the unit prompt states a reason for more. Do not do a unit's work yourself. If the app refuses a start because the turn is automated, propose the unit as a card and start it when the human says so here.
-4. Keep the Units table current as units report; merged is not baked. Do not poll CI.
-5. Keep your family small: at each stopping boundary run the session-hygiene pass in ~/.claude/skills/sessions-to-chips/HYGIENE.md (archive finished children, fold true duplicates, one-line report). The manager-hygiene Stop hook hands you the candidates.
-6. Close out with ONE summary to the human: shipped (PR + mergedAt), parked and why, still unproven. Append any generalizable call to ~/.claude/skills-overlay/sessions-to-chips/LEARNINGS.md.
+3. Start each unit yourself, from THIS session, so it nests under you. Title and prompt exactly as written, in dependsOn order; independent units together, first wave at most 5. Do not do a unit's work.
+4. Keep the Units table current as units report. Merged is not baked.
 GATES: ${gates.length ? gates.join('; ') : 'none'}`
 
   return {
-    category: g.category, flat, done, orchestratorTitle,
-    orchestratorTldr: `Single orchestrator for "${g.category}": holds the story and dispatches ${units.length} unit(s); does not do their work.`,
-    orchestratorPrompt, storyMarkdown, units: finalUnits, warnings,
+    category: g.category, flat, done, managerTitle,
+    managerTldr: `Manager for "${g.category}": holds the story and dispatches ${units.length} unit(s); does not do their work.`,
+    managerPrompt, storyMarkdown, units: finalUnits, warnings,
   }
 }
 
