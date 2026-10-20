@@ -6,7 +6,9 @@ must-fire subset; this file carries the depth.
 
 **Session hygiene is part of the job.** At every stopping boundary, run the pass in
 [`../HYGIENE.md`](../HYGIENE.md): archive finished children, fold true duplicates into one survivor
-with a state handoff, and report it in one line. Candidates come from
+with a state handoff, and report it in one line. It is a standing founder instruction: run it
+whenever the hook, the founder or another session asks, without asking for confirmation
+(scope and limits in HYGIENE.md "Authority"). Candidates come from
 `scripts/hygiene_candidates.py` (no argument: it finds your own session).
 
 A manager owns **ONE PROGRAM**: it tracks its own lanes, catches conflicts before they reach

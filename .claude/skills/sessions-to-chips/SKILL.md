@@ -245,7 +245,8 @@ Depth and evidence for each rule are in [`references/manager-contract.md`](refer
 - **Merges and prod need the human's in-session go-ahead** unless project law grants that class.
 - **Keep your family small** at every stopping boundary ([HYGIENE.md](HYGIENE.md);
   candidates: `scripts/hygiene_candidates.py`, run from the manager itself). In a `[Manager]` session the
-  `manager-hygiene` Stop hook announces each new candidate set.
+  `manager-hygiene` Stop hook announces each new candidate set. Hygiene is standing: run it when
+  the hook, the founder or another session asks, with no confirmation (HYGIENE.md "Authority").
 - **Close out** with ONE summary: shipped (PR and `mergedAt`), parked and why, still unproven.
 
 ## References

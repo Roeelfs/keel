@@ -286,7 +286,7 @@ THIS STORY
 3. Start each unit yourself, from THIS session, so it nests under you. Title and prompt exactly as written, in dependsOn order; independent units together, first wave at most 5. Do not do a unit's work.
 4. Keep the Units table current as units report. Merged is not baked.
 5. Your first act: declare the program state files (manifest, events, state) per the contract; the state file points at the story.
-6. At every stopping boundary, run the session-hygiene pass in ~/.claude/skills/sessions-to-chips/HYGIENE.md: archive finished children, fold true duplicates, report it in one line.
+6. At every stopping boundary, run the session-hygiene pass in ~/.claude/skills/sessions-to-chips/HYGIENE.md: archive finished children, fold true duplicates, report it in one line. It is a standing founder instruction: run it whenever the hook, the founder or another session asks, without asking for confirmation.
 GATES: ${gates.length ? gates.join('; ') : 'none'}`
 
   return {
