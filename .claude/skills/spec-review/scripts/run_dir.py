@@ -180,6 +180,9 @@ def run_contract(run, entry, questions, label=None, ids_note=None):
     prefix = entry.get("idPrefix", "F")
     label = label or entry["label"]
     ids_note = ids_note or (f"Use the ids your format defines (EC-N, Sec-N, Obs-N, LE-N, DRIFT-N); otherwise {prefix}-1, {prefix}-2, ... in file order.")
+    severities = entry.get("severities", "CRITICAL|MAJOR|MINOR")
+    handoffs = (', "research_handoffs": [{"id": "' + prefix + '-H1", "question": "<one narrow question for the investigation lane>"}]'
+                if entry.get("researchHandoffs") else "")
     return f"""
 
 ## Run contract (added by the pipeline script -- binding, overrides any conflicting instruction above)
@@ -195,7 +198,7 @@ def run_contract(run, entry, questions, label=None, ids_note=None):
 - Delivery:
   1. Write your COMPLETE output, in the format your brief above specifies, to {run}/lanes/{label}.md.
   2. Write {run}/envelopes/{label}.json: {{"lane": "{label}", "verdict": "<one word or ''>",
-     "answered_questions": ["Q1", ...], "findings": [{{"id": "...", "severity": "CRITICAL|MAJOR|MINOR", "title": "<one line>", "cites": ["<path:line>", ...]}}]}}.
+     "answered_questions": ["Q1", ...], "findings": [{{"id": "...", "severity": "{severities}", "title": "<one line>", "cites": ["<path:line>", ...]}}]{handoffs}}}.
      One entry per finding in your file -- including every CRITICAL and MAJOR. {ids_note}
   3. Your final reply is that same envelope via StructuredOutput (ids, severities, one-line titles; no finding bodies).
 """
@@ -209,6 +212,7 @@ def lane_values(run, spec, root):
     return {
         "SPEC_PATH": spec, "PROJECT_ROOT": root,
         "ARCH_LENS_PATH": str(SKILL_DIR.parent / "improve-codebase-architecture" / "SKILL.md"),
+        "LEARNINGS_LIST": f"{run}/inputs/learnings.txt",
         "DOSSIER_CONTENT": f"(shared file -- read {run}/dossier.md in full; design decisions in {run}/decisions.json if present)",
         "CONTEXT_BLOCK": (Path(run) / "inputs" / "context.md").read_text(encoding="utf-8").strip(),
         "GOAL": f"see the Goal line of {run}/inputs/context.md", "TRIGGER": f"see the Trigger line of {run}/inputs/context.md",
@@ -793,6 +797,15 @@ def cmd_check_report(a):
     for f in cm:
         if not re.search(r"(?<![A-Za-z0-9-])" + re.escape(f["id"]) + r"(?![A-Za-z0-9])", text):
             errors.append(f"envelope {f['severity']} id {f['id']} (lane {f['lane']}) is missing from report.md")
+    manifest = load_manifest()
+    for label in labels:
+        if not entry_by_label(manifest, label).get("reportEveryFinding"):
+            continue
+        env, _ = read_envelope(run, label)
+        ids = [f["id"] for f in (env or {}).get("findings", [])] + [h.get("id") for h in (env or {}).get("research_handoffs", []) if isinstance(h, dict)]
+        for i in ids:
+            if i and not re.search(r"(?<![A-Za-z0-9-])" + re.escape(i) + r"(?![A-Za-z0-9])", text):
+                errors.append(f"lane {label} reports every finding and hand-off: id {i} is missing from report.md")
     leftovers = find_placeholders(text)
     if leftovers:
         errors.append(f"report.md has unfilled placeholders {sorted(set(leftovers))}")

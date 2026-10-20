@@ -29,10 +29,12 @@ MANIFEST = run_dir.load_manifest()
 # Recorded 2026-10-04: 67488B (pre-rewrite) -> launcher size below.
 # 2026-10-13: 8925 -> 9254. Added the legalSurface gate to Step 1 and the hardStopReasons sentence to Step 5
 # (the legal-auditor lane); both are launcher decisions the main loop makes, so they cannot live elsewhere.
-MAX_SKILL_BYTES = 9254
+# 2026-10-20: 9254 -> 9647. Added the decisionSurface gate to Step 1, its investigation theme to Step 3 and the
+# S1 research hand-off step to Step 5 (the system1-elevation lane); all three are main-loop decisions.
+MAX_SKILL_BYTES = 9647
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
-SUPPLEMENTS = {"adr-auditor", "legal-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "critic-hotfix", "critic-adversarial", "critic-frontier"}
+SUPPLEMENTS = {"adr-auditor", "legal-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "system1-elevation", "critic-hotfix", "critic-adversarial", "critic-frontier"}
 
 
 def declared(text, key):
@@ -133,6 +135,19 @@ class ManifestTests(unittest.TestCase):
         text = (SKILL_DIR / "prompts" / e["prompt"]).read_text(encoding="utf-8")
         self.assertIn("Read-only:** strictly", text)
         self.assertIn("{{ARCH_LENS_PATH}}", text)
+
+    def test_system1_elevation_owns_the_decision_surface_gate_and_reports_everything(self):
+        e = next(x for x in MANIFEST["lanes"] if x["label"] == "system1-elevation")
+        self.assertEqual((e["kind"], e["gate"], e["profiles"], e["model"], e["idPrefix"]), ("claude", "decisionSurface", [], "opus", "S1"))
+        self.assertTrue(e["reportEveryFinding"] and e["researchHandoffs"])
+        self.assertIn("ELEVATE", e["severities"].split("|"))
+        self.assertIn("system1", e["tags"])
+        self.assertIn("research_handoffs:", WORKFLOW_JS.read_text(), "the ENVELOPE schema must carry research_handoffs")
+        text = (SKILL_DIR / "prompts" / e["prompt"]).read_text(encoding="utf-8")
+        for needle in ("Read-only:** strictly", "{{ARCH_LENS_PATH}}", "{{LEARNINGS_LIST}}", "KEEP-RULE", "Fallback:", "Evaluation:", "research_handoffs"):
+            self.assertIn(needle, text)
+        self.assertIn("system1", (SKILL_DIR / "prompts" / "context-dossier-miner.md").read_text(), "the dossier miner must be able to route questions to it")
+        self.assertIn("### System 1 Intelligence", (SKILL_DIR / "report-template.md").read_text())
 
     def test_lanes_without_prompt_file_have_a_brief(self):
         for e in MANIFEST["lanes"]:

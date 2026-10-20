@@ -17,7 +17,7 @@ import run_dir  # noqa: E402
 PROMPTS = HERE.parent / "prompts"
 MANIFEST = run_dir.load_manifest()
 ALL_VALUES = {k: "X" for k in (
-    "SPEC_PATH", "PROJECT_ROOT", "ARCH_LENS_PATH", "DOSSIER_CONTENT", "CONTEXT_BLOCK", "GOAL", "TRIGGER", "TARGET_OUTCOME",
+    "SPEC_PATH", "PROJECT_ROOT", "ARCH_LENS_PATH", "LEARNINGS_LIST", "DOSSIER_CONTENT", "CONTEXT_BLOCK", "GOAL", "TRIGGER", "TARGET_OUTCOME",
     "OUT_OF_SCOPE", "DECISIONS_JSON_PATH", "RUNTIME", "LANE", "SEVERITY", "FINDING_TEXT", "CITED_EVIDENCE",
     "PROPOSED_FIX", "DRIFT_ID", "SCOUT_FINDING", "TARGETED_PATHS", "NARROW_QUESTION", "SPEC_PATH_REL",
     "DOSSIER_PATH", "FOCUS_TEXT")}
@@ -355,6 +355,35 @@ class BatchingTests(unittest.TestCase):
             rc, out = call("check-report", *flags)
             self.assertEqual(rc, 1)
             self.assertTrue(any("AST-1" in e for e in out["errors"]))
+
+    def test_check_report_requires_every_system1_id_and_handoff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = make_run(tmp)
+            envelope(run, "codex-frontier", [], [])
+            env = {"lane": "system1-elevation", "verdict": "", "answered_questions": [],
+                   "findings": [{"id": "S1-1", "severity": "ELEVATE", "title": "t"}],
+                   "research_handoffs": [{"id": "S1-H1", "question": "q"}]}
+            (run / "envelopes" / "system1-elevation.json").write_text(json.dumps(env))
+            body = ("## Spec Review - Final Report\n\n### Falsifier wave: 0 dispatched over 0 CRITICAL/MAJOR — 0 REFUTED, 0 SURVIVES.\n\n"
+                    "### Lane manifest\n| system1-elevation | run | x |\n| codex-frontier | run | x |\n\n"
+                    "### System 1 Intelligence\n- [S1-1] [ELEVATE] x\n- [S1-H1] q\n" + "x" * 400)
+            flags = ["--run", str(run), "--lanes", "system1-elevation,codex-frontier", "--manifest", "system1-elevation,codex-frontier", "--skipped", ""]
+            (run / "report.md").write_text(body)
+            rc, out = call("check-report", *flags)
+            self.assertEqual(rc, 0, out)
+            (run / "report.md").write_text(body.replace("[S1-H1]", "[hand-off]"))
+            rc, out = call("check-report", *flags)
+            self.assertEqual(rc, 1)
+            self.assertTrue(any("S1-H1" in e for e in out["errors"]), out)
+
+    def test_run_contract_carries_lane_severities_and_handoffs(self):
+        e = run_dir.entry_by_label(MANIFEST, "system1-elevation")
+        text = run_dir.run_contract("/r", e, [])
+        self.assertIn('"severity": "CRITICAL|MAJOR|MINOR|ELEVATE"', text)
+        self.assertIn('"research_handoffs": [{"id": "S1-H1"', text)
+        plain = run_dir.run_contract("/r", run_dir.entry_by_label(MANIFEST, "edge-case-miner"), [])
+        self.assertIn('"severity": "CRITICAL|MAJOR|MINOR"', plain)
+        self.assertNotIn("research_handoffs", plain)
 
     def test_check_report_rejects_unlisted_lane_and_placeholder(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -110,7 +110,9 @@ prompt: |
   ### Generated review questions (8-15, spec-specific, ranked)
   Each question names the lane that should own it
   (completeness / codebase / architecture / provider-fit / edge-case / security /
-  observability / drift / codex-adversarial / live-evidence):
+  observability / drift / codex-adversarial / live-evidence / system1 — system1
+  only for a hard-coded decision a fast model could make, or a model on a path
+  that must stay deterministic):
   1. [<lane>] <question grounded in a mined fact — not generic>
   ...
   ```

@@ -172,6 +172,19 @@ severity row:
 - MIGRATE ledger — what moves into each owner before its copies are deleted
 - Probes that print the count after the change — and the spec's acceptance criterion that runs them post-implementation (an INSTRUMENT lands in the mandatory gate in the same change)
 
+### System 1 Intelligence (from the System 1 Elevation lane — when dispatched)
+Its CRITICAL/MAJOR rows (a model on an authorization / money / irreversible-write path with no
+deterministic confirmation; a hard-coded decision the spec's own goals show will fail; a model
+placement with no fallback, evaluation or spend bound) are classified with the other defects
+above and go through the falsifier wave like any finding. List EVERY S1- id here (the report
+check fails on a missing one); its ELEVATE items are a decision surface, never auto-applied:
+
+- Decision inventory: <N decision points — X ELEVATE / Y KEEP-RULE / Z GUARD / W DYNAMIC>
+- [S1-N] [ELEVATE | GUARD | DYNAMIC] <where (spec §)> — replaces "<quoted rule>" · envelope <p95, cost/call> · fallback <rule> · eval <labelled set + promotion bar> · <needs grounding: S1-Hn | grounded>
+- Recommended decision architecture: <the decision seam(s), model tier, registry, rollout order shadow → guarded → default>
+- Research hand-offs (for the main loop to send to the investigation skill; never auto-applied):
+  - [S1-Hn] <one narrow question> — grounds S1-N · <answered by investigation brief <path> | open>
+
 ### Industry Insights (elevation, not defects) — Codex Research Auditor + Investigation Workflow
 Kept in its own section on purpose — elevation suggestions are NOT severity-ranked against defects. Present as a separate decision surface. **Two independent lanes feed it:** the Codex Industry Research Auditor (Agent 9 — external-only, single-model) and the Investigation Workflow (Agent 11 — code-grounded, adversarially verified in code). Merge them per theme:
 - Where **both lanes agree** on an ELEVATE/CAUTION → mark `lane: both` = high confidence.

@@ -14,7 +14,7 @@ export const meta = {
 // MANIFEST:BEGIN
 const MANIFEST = {
   "profiles": ["full", "focused", "hotfix"],
-  "gates": ["liveSurface", "security", "cutover", "runtimeWiring", "operatorSurface", "legalSurface"],
+  "gates": ["liveSurface", "security", "cutover", "runtimeWiring", "operatorSurface", "legalSurface", "decisionSurface"],
   "lanes": [
     {"label": "completeness-reviewer", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "completeness-reviewer.md", "profiles": ["full"], "gate": null, "idPrefix": "COMP", "tags": ["completeness"]},
     {"label": "codebase-verifier", "kind": "codex", "agentType": "codex-dispatch", "model": "gpt-6-sol", "prompt": "codebase-verifier.md", "profiles": ["full", "focused", "hotfix"], "gate": null, "idPrefix": "CB", "tags": ["codebase"], "codexClass": "verify", "codexContract": true},
@@ -34,6 +34,7 @@ const MANIFEST = {
     {"label": "live-evidence-auditor", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "live-evidence-auditor.md", "profiles": [], "gate": "liveSurface", "idPrefix": "LE", "tags": ["live-evidence"]},
     {"label": "performance-architect", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "performance-architect.md", "profiles": [], "gate": "liveSurface", "idPrefix": "PERF", "tags": ["performance"]},
     {"label": "operator-plane-architect", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "operator-plane-architect.md", "profiles": [], "gate": "operatorSurface", "idPrefix": "OP", "tags": []},
+    {"label": "system1-elevation", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "system1-elevation.md", "profiles": [], "gate": "decisionSurface", "idPrefix": "S1", "tags": ["system1"], "severities": "CRITICAL|MAJOR|MINOR|ELEVATE", "researchHandoffs": true, "reportEveryFinding": true},
     {"label": "spec-drift-scout", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "spec-drift-scout.md", "profiles": ["full"], "gate": null, "idPrefix": "DRIFT", "tags": ["drift"]},
     {"label": "critic-hotfix", "kind": "critic", "agentType": "critic", "model": "fable", "prompt": null, "profiles": ["hotfix"], "gate": null, "idPrefix": "CRIT", "tags": ["completeness", "codebase", "architecture", "provider-fit", "edge-case", "security", "observability", "drift", "live-evidence", "codex-adversarial"],
       "brief": "# Hotfix critic\n\nProd-down review of the spec at {{SPEC_PATH}} (project root {{PROJECT_ROOT}}). Minutes matter: stress-test the fix for what would make it fail or make things worse (rollback safety, blast radius, data loss, the wrong root cause). Answer every assigned question; report only material findings."},
@@ -93,6 +94,7 @@ const ENVELOPE = {
     sources_read: { type: 'array', items: { type: 'string' } },
     class_counts: { type: 'object' },
     legal_commitment_breach: { type: 'boolean' },
+    research_handoffs: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, question: { type: 'string' } }, required: ['id', 'question'] } },
     drift_investigations: { type: 'array', items: { type: 'object', properties: { drift_id: { type: 'string' }, narrow_question: { type: 'string' } }, required: ['drift_id', 'narrow_question'] } },
   },
   required: ['lane', 'answered_questions', 'findings'],
@@ -392,6 +394,7 @@ async function synthesize() {
     `- The Lane manifest section reproduces this table verbatim (a lane with status FAILED or DEAD keeps that status; verdict lines say "timed-out/<status> -- backfilled by <substitute>" where a substitute ran):`,
     '| Lane | Status | Agent / model |', '|---|---|---|', ...rows,
     ...(sum.hardStop ? [`- HARD STOP: open the report with a bold HARD STOP banner: ${hardText(sum)}; no fixes until the founder decides.`] : []),
+    ...(PLAN.run.some((e) => e.reportEveryFinding) ? [`- EVERY finding id of ANY severity and EVERY research_handoffs id in the envelopes of ${labelsOf(PLAN.run.filter((e) => e.reportEveryFinding)).join(', ')} appears in report.md, in that lane's own template section. Its ELEVATE items are a decision surface, never auto-applied; its hand-offs are listed for the main loop to send to the investigation skill.`] : []),
     '- No placeholder text may remain: no {{...}}, no <FOCUS...>, no <ALL_CAPS> tokens.',
     'Reply via StructuredOutput with the path only.',
   ].join('\n')
