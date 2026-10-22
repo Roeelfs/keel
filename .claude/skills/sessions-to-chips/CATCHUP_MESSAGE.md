@@ -13,7 +13,7 @@ CATCH-UP ({{DATE}}): your program ran on another Claude account from {{FROM}} to
 4. Run hygiene on your own family (HYGIENE.md, standing authority): your pre-switch children are mostly merged/done.
 5. Merges, prod writes and founder decisions still need the human's in-session go-ahead.
 6. {{EXTRA}}
-Reply with ONE line: archived N, live children X, the single most blocking founder decision.
+Reply with ONE line: archived N, live children X, and how many founder decisions you hold. Ask the founder those decisions here in your own session and record the answers in your state file; the dispatcher does not collect them.
 ```
 
 A manager the dispatcher started fresh in this mode gets the Mode 1 prompt instead, with the

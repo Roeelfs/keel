@@ -221,13 +221,18 @@ python3 -I $SCR/wrapup_status.py --date <YYYY-MM-DD>   # one-shot: which session
    manager to checkpoint its children itself, so the dispatcher never messages grandchildren.
 3. **What each session does:** finish in-flight work to a checkpoint, push its own branch once or
    record worktree/branch/PR, post one tracker comment and set state per ticket it touched, archive
-   only DONE-and-merged children, and write `~/.claude/sessions-to-chips/wrapup/<date>-<slug>.md`
-   with the surviving set, the gate blocking each item, "Linear owed", "Owed to the founder", and a
+   only DONE-and-merged children, refresh `~/.claude/orchestrator/programs/<slug>.state.md` (Mode 4
+   reads it instead of mining the transcript), and write `~/.claude/sessions-to-chips/wrapup/<date>-<slug>.md`
+   with the surviving set, the gate blocking each item, "Linear owed", "Owed to the founder" (asked in the manager's own session, never relayed), and a
    paste-ready continuation phrase. Merges, deploys and prod writes still need the human's
    in-session go-ahead; a blocked item with its gate named is a finished checkpoint.
+   **Before sending, sweep the children on THIS account** with `child_ledger.py --account <this
+   account>` (Mode 4 step 3) and name each manager's `-children.md` in its message, so findings
+   that live only in a child's chat get written down while that chat is still readable.
 4. **Converge.** Do not poll. When a session's note arrives, run `wrapup_status.py` once. The
-   dispatcher's closing message lists notes written, notes missing, the founder decisions collected
-   from the notes (most blocking first), and the before/after session counts.
+   dispatcher's closing message lists notes written, notes missing, which managers hold open founder
+   decisions (a count and a session link each, never the decisions themselves), and the
+   before/after session counts. See "Founder decisions stay with their manager" below.
 5. After the switch, run Mode 4 from a session on the NEW account. The notes on disk are shared
    by both accounts, but the sessions are not.
 
@@ -249,7 +254,10 @@ message to one is queued to nowhere. Never relay to them.
    names your account directory. `list_sessions.py --grep Manager` lists both accounts' managers
    with their `cli` ids and last activity. The account whose managers are newest is the one
    you are taking over from.
-2. **Mine the other account's managers.** `find_transcript.py <cli…>`, then
+2. **Mine the other account's managers.** First check each program's state file
+   (`~/.claude/orchestrator/programs/<slug>.state.md`): if its `updated_at` is after the checkpoint,
+   it is the handoff, so skip mining that program. Managers that skipped their state files (all of
+   them, 2026-10-14 to 10-22) force this transcript path. Otherwise `find_transcript.py <cli…>`, then
    `mine_session.py <transcript> > digest-<cli>.txt` per manager. Write one handoff per program to
    `~/.claude/sessions-to-chips/handoff/<date>-<slug>.md` with one **haiku** agent per program
    ([prompts/handoff-miner.md](prompts/handoff-miner.md)), all in one message.
@@ -291,8 +299,22 @@ message to one is queued to nowhere. Never relay to them.
    account's stopped children ARE the program's work: one manager left them untouched because they
    were "not in my family".
 6. **Converge.** Do not poll. Append each one-line reply to
-   `~/.claude/sessions-to-chips/relay/<date>-replies.md`; when all have answered, give the human one
-   founder-decision list, most blocking first.
+   `~/.claude/sessions-to-chips/relay/<date>-replies.md`. Close with which managers hold open
+   founder decisions and a link to each; the decisions themselves stay in those sessions.
+7. **Hygiene asked of the dispatcher is relayed.** The dispatcher has no family
+   (`hygiene_candidates.py` returns 0 for it), so "run hygiene" means one line in each manager's
+   catch-up, never archiving another program's children from here. Exception: duplicate managers
+   of one program on this account, which only the dispatcher can see side by side.
+
+### Founder decisions stay with their manager
+
+A founder decision is asked, answered and recorded in the session of the manager whose program it
+belongs to, because that is where the context, the default and the follow-through live, and the
+human's go-ahead must be typed there ("a manager never relays approvals"; it holds equally for a
+dispatcher). The dispatcher never compiles a cross-program decision list, never asks the human for
+another program's ruling, and never records an answer it heard secondhand. When a sweep finds a
+founder ask, it goes into that manager's handoff or message; when a reply mentions one, the
+dispatcher leaves it there. The only thing the dispatcher may say about them is where they are.
 
 ## Manager contract — the rules that must fire
 
