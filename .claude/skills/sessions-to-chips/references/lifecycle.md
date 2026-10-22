@@ -31,6 +31,8 @@ Outputs on the branch:
 
 The root author creates the ledger; no mandatory child or second adversarial review is attached to normal planning. A material planner finding may patch the spec. Zero material findings need no stub or no-op commit.
 
+**Module shape (first-touch architecture).** The spec names, for each rule, constant, enum, contract or decision it touches, its single owner module (`owner = X`), the seam callers cross, and the path the change deletes. A second owner of anything is a design defect to fix here, not a follow-up; spec-review's architecture lane blocks it as MAJOR. When an owner is unclear, run `/improve-codebase-architecture` scoped to that module before writing the spec.
+
 Termination: acceptance criteria, scope, owning seams, mode, and proof obligations are explicit; build can proceed without rediscovery.
 
 ## Phase 2 — build
@@ -44,7 +46,9 @@ Outputs:
 1. product code and focused tests;
 2. cheap boundary invariants at unmockable seams;
 3. targeted verification while iterating;
-4. one architecture/correctness closure appropriate to risk.
+4. one architecture/correctness closure appropriate to risk, including "did the build keep the spec's Module shape?" (no new owner, the deleted path is gone).
+
+**Build-start owner check.** Before the first code on a change that crosses packages, or SQL and TS, list the existing owner of each rule it touches, one line each (`owner = file:line`). A missing or duplicated owner means a scoped `/improve-codebase-architecture` pass first. **Fix clustering:** the 3rd fix on one ticket within 7 days stops surface patching; run a deepening pass (deletion test, find the chokepoint) before the 4th.
 
 Do not run the project-wide gate repeatedly. A verification defect returns here once with its normalized failure signature and affected obligations.
 

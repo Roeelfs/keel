@@ -187,11 +187,21 @@ prompt: |
      This is independent of the deletion test above (which asks whether a *module* earns its
      place) — this asks whether the *spec* leaves exactly one path for one capability.
 
-  6. **Deepening opportunity (elevation).** Independent of any defect: is there a change
+  6. **Module shape: one owner per rule.** The spec must say, for every rule, constant,
+     enum, contract or decision it adds or changes, which single module owns it
+     (`owner = X`), the seam callers cross, and the path the change deletes. Then search
+     the code for existing copies: does the spec add a **second** writer, reader, copy,
+     generation or decision site of something that already has an owner (a second install
+     generation beside the first, an enum hand-copied into another package, a second code
+     path computing the same availability)? A second owner without naming the single owner
+     and deleting the other = MAJOR. A spec with no module-shape statement for a change that
+     crosses packages, or SQL and TS = MAJOR. Cite the existing owner `file:line`.
+
+  7. **Deepening opportunity (elevation).** Independent of any defect: is there a change
      that would turn a cluster of shallow modules the spec touches into one deep module —
      improving locality and the test surface? Propose it as `Worth exploring`.
 
-  Severity: shallow module that bypasses an existing deep one = MAJOR; a pass-through layer
+  Severity: a second owner of one rule (check 6) = MAJOR; shallow module that bypasses an existing deep one = MAJOR; a pass-through layer
   or missing test seam = MINOR unless it blocks correctness; pure deepening elevation is not
   a defect — mark it `Worth exploring` and never auto-apply it.
 

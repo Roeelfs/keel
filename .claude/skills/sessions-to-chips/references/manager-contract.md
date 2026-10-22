@@ -558,6 +558,12 @@ Backlog lives on the repo's tracker, named in its `AGENTS.md` `## Agent skills` 
 or foggy multi-session effort run `/wayfinder` FIRST; to break a settled plan into tickets,
 `/to-tickets`.
 
+**First-touch architecture.** A map or program that adds a capability resolves a **module
+shape** decision before any build ticket: the single owner module of each rule, constant,
+enum or contract it touches, the seam, and what gets deleted. Run `/improve-codebase-architecture`
+scoped to the touched area (an `Agent` lane) to answer it. Every build lane's mission carries the
+build-start owner check and the 3rd-fix trigger from `lifecycle.md` Phase 2.
+
 Per-lane model and effort: `../prompts/model-routing.md`. Every dispatch names its model and
 effort on purpose. Ad-hoc Claude delegation defaults to **sonnet**; `opus` needs a one-line
 justification; the deep verify/judge/adversarial bucket is `fable` (Claude) or Codex's bounded
