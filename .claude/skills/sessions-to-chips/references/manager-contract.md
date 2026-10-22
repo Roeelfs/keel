@@ -231,6 +231,12 @@ A lane goes interactive **only when it needs the human**. Everything else runs p
 **Codex is the default runtime for every lane that qualifies** (founder, 2026-10-22): Claude
 time is the scarce pool. Pick the runtime by walking these questions in order; the first "yes" wins.
 
+**Security work is pinned to the top tier, whatever runtime the tree picks** (founder, 2026-10-22:
+"all security work needs to be performed by Astra / Fable - no less"). CVE/advisory triage, a
+security patch lane, its reachability or exposure check, security review and secret-rotation
+analysis run on Codex `astra` (`--model frontier`) or Claude `fable`. Never sonnet, opus, luna or
+sol for these, and never a cheaper fallback when the top tier is slow.
+
 1. **Does the work need the human?** Grilling, a decision the founder must make, a login, password,
    consent screen or identity-browser capture, or a unit the founder wants to watch and steer over
    many turns → **child session** (`start_session`, a chip). From an automated turn it lands as a
@@ -250,8 +256,8 @@ time is the scarce pool. Pick the runtime by walking these questions in order; t
    cannot run vitest here: give it typecheck plus a baseline/apply check and run the suite in CI
    order yourself), then push once.
 5. **Shippable, but Codex does not fit?** It needs a static-credential MCP, network or push,
-   the live test loop inside the lane, repo hooks that write `$HOME`, or the headroom gate refused
-   → **headless Claude lane**: `spawn-lane.sh --model sonnet` (opus only with a one-line reason).
+   the live test loop inside the lane, repo hooks that write `$HOME`, or a lane came back
+   BLOCKED-ON-QUOTA → **headless Claude lane**: `spawn-lane.sh --model sonnet` (opus only with a one-line reason).
 6. **A handful of reads or one probe** to verify a fact before routing → do it **inline**. That is
    verification, not implementation; anything that edits code or runs a heavy gate is a lane.
 

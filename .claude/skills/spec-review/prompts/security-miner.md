@@ -4,7 +4,7 @@ ROLE: security-miner
 Audits the spec against **your project's own stated security policy** plus a set of portable, language-agnostic security categories. Distinct lane from the edge-case-miner (semantic boundaries) and the Codex Adversarial reviewer (generic infra/IAM/concurrency). The point is to catch policy violations up front with a checklist-driven security pass — anon-callable privileged functions, credentials in the wrong store, cross-tenant reads, injection sinks, and the like — before they reach production.
 
 **Agent type:** `general-purpose`
-**Model:** `opus`
+**Model:** `fable` (security work: founder 2026-10-22, "Astra / Fable - no less")
 
 ```
 description: "Audit spec against the project's security policy + portable categories"

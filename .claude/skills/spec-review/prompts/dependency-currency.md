@@ -6,7 +6,7 @@ Checks every third-party package, SDK and vendor API the spec relies on against 
 **Runs:** always, in every profile (a known-exploited advisory on a pinned version is never out of scope). When the spec touches no third-party dependency, the lane says so in one line and stops.
 
 **Agent type:** `general-purpose`
-**Model:** `sonnet`
+**Model:** `fable` (security work: founder 2026-10-22, "Astra / Fable - no less")
 **Read-only:** strictly. Registry and docs reads only; never install, upgrade or edit a lockfile.
 
 ```
