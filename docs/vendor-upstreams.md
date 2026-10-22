@@ -59,6 +59,7 @@ are now adopted, with Linear added as a **first-class tracker option** (see delt
 | `grill-with-docs`, `implement`, `improve-codebase-architecture`, `to-spec`, `to-tickets`, `triage`, `wayfinder` | omit `disable-model-invocation: true` | preserve existing model-invoked reach used by composed engineering flows |
 | `ask-matt` | omit router entries for uninstalled `to-questionnaire`, `wait-what`, `implement-spec`, `pr` and `retro`; describe investigation as adversarially cross-verified | route only to installed flows, with the actual investigation contract |
 | `domain-modeling` and every adopted skill that names it | keep the `CONTEXT.md` / `CONTEXT-MAP.md` / `CONTEXT-FORMAT.md` convention; upstream renamed it to `GLOSSARY.md` / `GLOSSARY-MAP.md` / `GLOSSARY-FORMAT.md` on 2026-10-07 (`d80fa0f`, `e484a80`). Provisional, awaiting a ruling | consumer repos of keel use `CONTEXT.md` today |
+| `improve-codebase-architecture` | HTML-REPORT.md: two Mermaid syntax rules after the graph example (`classDef`/`class` on their own lines; quote labels with punctuation) | measured 2026-10-22: generated reports wrote `classDef …; class X y` on one line, which Mermaid 11.17.2 rejects ("Syntax error in text"); upstream main 5beb35b still lacks the rule. Drop once upstream adds it |
 | all | `license: MIT` metadata | retain existing vendored license metadata |
 | all | strip `agents/openai.yaml` | Claude-first, marker-free |
 

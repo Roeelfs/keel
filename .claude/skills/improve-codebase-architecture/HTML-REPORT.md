@@ -75,6 +75,11 @@ Use a Mermaid `flowchart` or `graph` when the point is "X calls Y calls Z, and l
 </div>
 ```
 
+Mermaid syntax that renders "Syntax error in text" instead of the diagram:
+
+- `classDef` reads to the end of its line, so `classDef leak stroke:red; class C,D leak` swallows the `class` statement. Give every `classDef` and `class` statement its own line.
+- Put a label in double quotes when it contains anything beyond letters, digits and spaces: `E["entrances.ts:101 re-hash"]`.
+
 ### Hand-built boxes-and-arrows (when Mermaid's layout fights you)
 
 Modules as `<div>`s with borders and labels. Arrows as inline SVG `<line>` or `<path>` elements positioned absolutely over a relative container. Reach for this when you want the "after" diagram to feel like one thick-bordered deep module with greyed-out internals, since Mermaid won't render that with the right weight.
