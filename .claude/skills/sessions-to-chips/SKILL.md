@@ -263,6 +263,20 @@ message to one is queued to nowhere. Never relay to them.
    It lists each worktree with unpushed commits, no upstream, untracked files or mass deletions
    (a gutted checkout), with its owning manager, plus every map or note written since the
    checkpoint that no handoff names. Fold each finding into the owning handoff.
+
+   **Then sweep every child session, per manager.** Git is half of it: the other half of lost
+   progress is a finding, a decision or a "needs the founder to …" that lives only in a child's
+   conversation, which the next account cannot read (measured 2026-10-22: 51 of 119 children were
+   AT-RISK, including an invoice at 2x its amount, a prod migration with no apply check, and 3
+   pushed commits with no PR from a child that hit its weekly limit).
+   ```bash
+   python3 -I $SCR/child_ledger.py --account <other-account-id> --since <checkpoint ISO time> --out <dir>
+   ```
+   It writes one `children-<manager>-<id>.json` per manager (plus one for sessions no manager owns)
+   from each child's stored `lastTurnReport`, `postTurnSummary`, PRs and branches. Give each file
+   to one **haiku** agent ([prompts/child-ledger-reconciler.md](prompts/child-ledger-reconciler.md)),
+   all in one message; each writes `handoff/<date>-<slug>-children.md` with the AT-RISK rows.
+   Route the no-manager file's rows to the likeliest program by hand.
 4. **Decide per program**, and say the call in one table:
    - **A manager for it exists on this account** → relay. It keeps its sidebar group, worktree and
      family; the handoff replaces its stale context. Archive older duplicate managers here.
@@ -270,7 +284,8 @@ message to one is queued to nowhere. Never relay to them.
      handoff under START HERE).
    - **Nothing happened on the other account since the checkpoint** → do not wake it.
    - Programs too small for a manager stay standalone.
-5. **Send** the catch-up ([CATCHUP_MESSAGE.md](CATCHUP_MESSAGE.md)) by session id. Put cross-program
+5. **Send** the catch-up ([CATCHUP_MESSAGE.md](CATCHUP_MESSAGE.md)) by session id, naming both the
+   handoff and its `-children.md` file. Put cross-program
    findings in `{{EXTRA}}`: two handoffs that contradict each other (name who settles it), a scope
    that moved between programs, one owner for a shared deliverable. Say explicitly that the other
    account's stopped children ARE the program's work: one manager left them untouched because they
