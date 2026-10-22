@@ -23,6 +23,10 @@ The stored PR state can be stale: run `gh pr view <n> --repo Cynap-ai/cynap-mono
 state,mergedAt` once for each PR stored as OPEN. When lastReport is truncated or empty and the
 child is not obviously SAFE, read the tail of its transcript (JSONL: parse it with python, last ~30
 assistant text blocks); never conclude from grep.
+Before you call a file lost, find the absolute path the child wrote it to (search its transcript
+for the file name) and test that path: children write outside their worktree too (operator
+workspaces, ~/.claude, side-session notes), and a missing worktree says nothing about them. Print
+the path you tested next to any "lost" claim.
 Write {{OUT}} (≤3 KB): a table of AT-RISK children only (title, sessionId, what would be lost in
 one sentence, where it should go: the handoff, a PR, a tracker comment, or a founder question),
 then one line counting SAFE / AT-RISK / NOISE. Return that count line plus the single most
