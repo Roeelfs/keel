@@ -301,7 +301,11 @@ message to one is queued to nowhere. Never relay to them.
 6. **Converge.** Do not poll. Append each one-line reply to
    `~/.claude/sessions-to-chips/relay/<date>-replies.md`. Close with which managers hold open
    founder decisions and a link to each; the decisions themselves stay in those sessions.
-7. **Hygiene asked of the dispatcher is relayed.** The dispatcher has no family
+7. **Archiving on the other account is the human's.** When an audit clears the other account's
+   sessions, write `relay/<date>-archive-on-<account>.md` listing what to archive and what to keep;
+   a kept subtree nested under an archived parent (a manager spawned by another manager) must be
+   moved to top level first, or archiving the parent takes it along.
+8. **Hygiene asked of the dispatcher is relayed.** The dispatcher has no family
    (`hygiene_candidates.py` returns 0 for it), so "run hygiene" means one line in each manager's
    catch-up, never archiving another program's children from here. Exception: duplicate managers
    of one program on this account, which only the dispatcher can see side by side.

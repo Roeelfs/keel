@@ -27,6 +27,8 @@ Before you call a file lost, find the absolute path the child wrote it to (searc
 for the file name) and test that path: children write outside their worktree too (operator
 workspaces, ~/.claude, side-session notes), and a missing worktree says nothing about them. Print
 the path you tested next to any "lost" claim.
+A `workflow_run`-triggered deploy reports the default branch as its headSha; the deployed commit
+is its TRIGGER_SHA input or the release in the logs. Never call a bake citation wrong from headSha alone.
 Write {{OUT}} (≤3 KB): a table of AT-RISK children only (title, sessionId, what would be lost in
 one sentence, where it should go: the handoff, a PR, a tracker comment, or a founder question),
 then one line counting SAFE / AT-RISK / NOISE. Return that count line plus the single most
