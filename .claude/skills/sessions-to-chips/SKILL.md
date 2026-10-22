@@ -1,7 +1,7 @@
 ---
 license: MIT
 name: sessions-to-chips
-description: Start and run managers. A manager is one standalone "[Manager] <title>" session that owns ONE program (a goal) and drives it through child sessions, headless lanes and Codex lanes, never implementing itself. Three entry modes. New manager - the human names a goal ("orchestrate", "start a manager", "drive this program", "run 3+ parallel sessions toward one target", a big autonomous project). Resume from sessions - deep-mine scoped Claude desktop sessions for goals, steering, last state, settled calls, dead ends and remaining work, narrate each category as one story with a unit ledger, and give it to one manager (also mine-only audits of parked sessions or session overlap, read-only). Wrap-up - checkpoint every manager before an account switch or usage cap. Shared by all: the Manager contract (program state, collisions, lane runtimes, spawn-lane.sh, advance tick, grading, reviews, merge-and-retire) and session hygiene. Starting sessions needs explicit authorization; read context only via permitted interfaces.
+description: Start and run managers. A manager is one standalone "[Manager] <title>" session that owns ONE program (a goal) and drives it through child sessions, headless lanes and Codex lanes, never implementing itself. Four entry modes. New manager - the human names a goal ("orchestrate", "start a manager", "drive this program", "run 3+ parallel sessions toward one target", a big autonomous project). Resume from sessions - deep-mine scoped Claude desktop sessions for goals, steering, last state, settled calls, dead ends and remaining work, narrate each category as one story with a unit ledger, and give it to one manager (also mine-only audits of parked sessions or session overlap, read-only). Wrap-up - checkpoint every manager before an account switch or usage cap. Account switch - after switching Claude accounts, mine the other account's managers into per-program handoffs, sweep their worktrees for unpushed work, then relay to the managers on this account or dispatch the missing ones. Shared by all: the Manager contract (program state, collisions, lane runtimes, spawn-lane.sh, advance tick, grading, reviews, merge-and-retire) and session hygiene. Starting sessions needs explicit authorization; read context only via permitted interfaces.
 ---
 
 # sessions-to-chips — managers
@@ -10,7 +10,7 @@ The unit of this skill is a **manager**: a standalone desktop session titled
 `[Manager] <title>` that owns ONE program (a goal). It verifies facts, starts children, grades
 their artifacts, holds the human gates, and keeps its family small. It never does a child's work.
 
-Three modes produce managers. All of them obey the same **Manager contract**
+Four modes produce or feed managers. All of them obey the same **Manager contract**
 ([`references/manager-contract.md`](references/manager-contract.md)) and **session hygiene**
 ([HYGIENE.md](HYGIENE.md)).
 
@@ -19,6 +19,10 @@ Three modes produce managers. All of them obey the same **Manager contract**
 | **1. New manager** | the human names a goal to drive | one `[Manager] <goal>` |
 | **2. Resume from sessions** | parked or finished sessions should be picked up, or audited | one `[Manager] <origin title>` per category (none in mine-only) |
 | **3. Wrap-up** | an account switch or usage cap is coming | a checkpoint note per manager; no new managers |
+| **4. Account switch** | you just switched accounts and the programs ran on the other one | a handoff per program; catch-up messages to this account's managers; a new manager only where none exists |
+
+The app's session tools see **only the account you are signed into**; see Mode 4 before you
+message or start anything after a switch.
 
 `SCR=~/.claude/skills/sessions-to-chips/scripts`
 
@@ -53,6 +57,15 @@ offers). Measured failures (2026-10-14) behind each argument:
   and archiving a parent archives its children).
 - **A duplicate title is not an error to guess through.** Take the most recently active
   non-archived row per title, and say which one you picked.
+- **A manager the dispatcher started cannot start its own children until the human speaks in it**
+  (measured 2026-10-22): the app refuses each start as automated, even with the human's go-ahead
+  quoted in the prompt, and the manager files cards instead. Tell the human in one line to click
+  the cards, or to type one message in the manager's chat, after which its starts are the human's.
+- **"Workspace requires trust approval before starting a session."** Waking an existing session
+  (a message, not only a start) reopens it in its worktree, and on an account that has not trusted
+  that workspace the send is refused. Do not retry. Ask the human to open one of those sessions and
+  accept the trust prompt, with a pre-written `Done` answer, then resend. A fresh `start_session`
+  in a new worktree was not blocked by it.
 
 ## Mode 1 — New manager
 
@@ -145,8 +158,9 @@ Workflow({ scriptPath: "<SCR>/mine_workflow.js",
                    groups: [{category, origin:{title,cli}|null, memberClis:[...oldest->newest]}] } })
 ```
 
-Include the origin's own session in `sessions` **and** its cli in `memberClis`, so the story carries
-its prior state. Omit `groups` for a flat set (no narration). Returns `{ok, failed, stories[],
+Miners run on **haiku** (filling a fixed schema from a digest is extraction); the narrator stays
+**sonnet**, because it is the only decision layer. Include the origin's own session in `sessions`
+**and** its cli in `memberClis`, so the story carries its prior state. Omit `groups` for a flat set (no narration). Returns `{ok, failed, stories[],
 storiesFailed}`. Each story: `managerTitle` / `managerTldr` / `managerPrompt`, `storyMarkdown`,
 `units[]`, `flat`, `done`, `warnings[]`. `warnings` lists any obligation the narrator tried to drop;
 the script re-adds it as its own unit. Check it, then check the merges it applied (`mergeEvidence`
@@ -214,9 +228,56 @@ python3 -I $SCR/wrapup_status.py --date <YYYY-MM-DD>   # one-shot: which session
 4. **Converge.** Do not poll. When a session's note arrives, run `wrapup_status.py` once. The
    dispatcher's closing message lists notes written, notes missing, the founder decisions collected
    from the notes (most blocking first), and the before/after session counts.
-5. After the switch, resume from the notes: run Mode 2 with
-   `group_sessions.py --root "[Manager] <category>"`; each note supplies the surviving set and its
-   continuation phrases.
+5. After the switch, run Mode 4 from a session on the NEW account. The notes on disk are shared
+   by both accounts, but the sessions are not.
+
+## Mode 4 — Account switch (take the programs over on the other account)
+
+The point of Mode 3 is this mode. Programs keep running on one account until it is capped, then
+continue on another, often switching back and forth. Each account has its own sessions, so a
+manager on this account knows only what happened up to the last time it ran here.
+
+**What carries across and what does not.** Session stores are per account:
+`~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/local_*.json`.
+Transcripts (`~/.claude/projects/…`), worktrees, git, the tracker and everything under
+`~/.claude/sessions-to-chips/` are on the machine and shared. The app's session tools are not:
+`list_sessions`, `send_message`, `SendMessage` and `archive_session` reach only the signed-in
+account. The other account's sessions show in `ListAgents` as `Remote Control · offline`, and a
+message to one is queued to nowhere. Never relay to them.
+
+1. **Find which account you are on.** `grep -l <your CLI session id> "<store>"/*/*/local_*.json`
+   names your account directory. `list_sessions.py --grep Manager` lists both accounts' managers
+   with their `cli` ids and last activity. The account whose managers are newest is the one
+   you are taking over from.
+2. **Mine the other account's managers.** `find_transcript.py <cli…>`, then
+   `mine_session.py <transcript> > digest-<cli>.txt` per manager. Write one handoff per program to
+   `~/.claude/sessions-to-chips/handoff/<date>-<slug>.md` with one **haiku** agent per program
+   ([prompts/handoff-miner.md](prompts/handoff-miner.md)), all in one message.
+3. **Sweep for what the handoffs miss, BEFORE sending.** Handoffs built from transcripts name PRs
+   and drop maps, unpushed commits and drafts (measured 2026-10-22: the Release handoff omitted its
+   story map, the open wayfinder map PR and an unpushed build-map commit; two more programs had
+   unpushed commits nobody had named).
+   ```bash
+   python3 -I $SCR/handoff_sweep.py --account <other-account-id> --since <checkpoint ISO time>
+   ```
+   It lists each worktree with unpushed commits, no upstream, untracked files or mass deletions
+   (a gutted checkout), with its owning manager, plus every map or note written since the
+   checkpoint that no handoff names. Fold each finding into the owning handoff.
+4. **Decide per program**, and say the call in one table:
+   - **A manager for it exists on this account** → relay. It keeps its sidebar group, worktree and
+     family; the handoff replaces its stale context. Archive older duplicate managers here.
+   - **No manager here** (the program was born on the other account) → start one (Mode 1 prompt,
+     handoff under START HERE).
+   - **Nothing happened on the other account since the checkpoint** → do not wake it.
+   - Programs too small for a manager stay standalone.
+5. **Send** the catch-up ([CATCHUP_MESSAGE.md](CATCHUP_MESSAGE.md)) by session id. Put cross-program
+   findings in `{{EXTRA}}`: two handoffs that contradict each other (name who settles it), a scope
+   that moved between programs, one owner for a shared deliverable. Say explicitly that the other
+   account's stopped children ARE the program's work: one manager left them untouched because they
+   were "not in my family".
+6. **Converge.** Do not poll. Append each one-line reply to
+   `~/.claude/sessions-to-chips/relay/<date>-replies.md`; when all have answered, give the human one
+   founder-decision list, most blocking first.
 
 ## Manager contract — the rules that must fire
 

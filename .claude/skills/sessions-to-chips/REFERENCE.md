@@ -52,6 +52,7 @@ One category = one **story** (a markdown file) + one **manager** session. Units 
 | Lineage source | `spawnedFrom.sessionId` in each `local_*.json` (plus `spawnedFrom.taskId`/`title`). A root has `spawnedFrom: null`. |
 | Category | The sidebar group label (e.g. "Apps") is a UI grouping, **not stored in the session JSON**. A category is the lineage root, or a name from `--categories` / the user. |
 | Origin | The topmost session in the category. Its own state is the story's "Where the origin session stopped"; it gets a unit only if it has implementation work of its own left. |
+| Miner | One haiku agent per session (`mine_workflow.js` Mine phase). It fills the extraction schema from the `mine_session.py` digest and decides nothing. |
 | Narrator | One sonnet agent per category, the **only** decision layer. Reads every member's mined state + intelligence and decides merges, retirements, conflicts and gates with evidence. |
 | Story | `~/.claude/sessions-to-chips/maps/<date>-<slug>.md`. Sections: Mission, origin state, How we got here (causal beats), Established (do not re-derive), Conflicts, Open front, Dead ends, Units table, Gates, Retired, Unit prompts. One file, one source of truth. |
 | Manager | One session per category, titled `[Manager] <origin title>` (a bare origin title would be a twin of the parked origin row). Owns the narrative and dispatches units; never does a unit's work. Its prompt is script-templated (goal, story path, a pointer to the Manager contract, story-specific duties, gates), never LLM-drifted. |

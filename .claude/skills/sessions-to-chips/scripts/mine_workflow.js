@@ -2,7 +2,7 @@ export const meta = {
   name: 'mine-sessions-to-chips',
   description: 'Mine N Claude sessions in parallel, then narrate each category as one story + unit ledger for a single manager',
   phases: [
-    { title: 'Mine', detail: 'one read-only agent per session: goal, state AND the intelligence it produced' },
+    { title: 'Mine', detail: 'one read-only haiku agent per session: goal, state AND the intelligence it produced' },
     { title: 'Narrate', detail: 'one sonnet narrator per category: the story, settled calls, merged/retired units' },
   ],
 }
@@ -106,7 +106,7 @@ JUDGEMENT
 - chipPrompt MUST be self-contained for a zero-memory agent and follow the 5-part structure (GOAL → DONE → STOPPED → CONTINUE-FROM-HERE [continuationPhrase verbatim] → REMAINING STEPS). If gitState.uncommitted/unpushed, OPEN with the ⚠️ WORKTREE NOTE (cd into the existing worktree; spawn_task makes a fresh one).
 
 Return ONLY the structured object.`,
-    { label: `mine:${s.worktreeName || s.idx}`, phase: 'Mine', schema: SCHEMA, agentType: 'Explore', model: 'sonnet' }
+    { label: `mine:${s.worktreeName || s.idx}`, phase: 'Mine', schema: SCHEMA, agentType: 'Explore', model: 'haiku' }
   ).then(r => r ? { ...r, idx: s.idx, _cli: s.cli } : { idx: s.idx, _failed: true, title: s.title })
 ))
 
