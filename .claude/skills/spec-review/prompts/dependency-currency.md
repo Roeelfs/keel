@@ -1,7 +1,7 @@
 ROLE: dependency-currency
 # Dependency Currency & Vendor Docs
 
-Checks every third-party package, SDK and vendor API the spec relies on against **its latest release and current vendor docs**, before the design is frozen. The question it answers: does a newer version or a vendor-native feature already do what the spec builds, or make one of its workarounds unnecessary? Founder case (2026-10-22): upgrading `@tursodatabase/serverless` from 1.1.2 let us drop workarounds that had taken a long time to build.
+Checks every third-party package, SDK and vendor API the spec relies on against **its latest release and current vendor docs**, before the design is frozen. The question it answers: does a newer version or a vendor-native feature already do what the spec builds, or make one of its workarounds unnecessary? Founder case (2026-10-22): cynap spent ~3 months and ~12 PRs (07-24 to 10-21) on `@tursodatabase/serverless` 1.1.2 batch workarounds that 1.4.x ships natively (atomic `batch(stmts, mode)` with args), and ADR-0074 had noted it 7 weeks earlier with no owner.
 
 **Gate:** `dependencySurface` — the spec adds, calls, configures, works around or upgrades a third-party package, SDK, vendor API or managed service. Runs in every profile when the gate is on.
 
@@ -61,6 +61,13 @@ prompt: |
   spec that uses a deprecated or removed API, and a spec designed around a limit
   that a newer version lifted.
 
+  Also search the repo's own docs (ADRs, investigations, RCAs, specs, code
+  comments) for earlier notes about these dependencies: "fixed in X", "re-verify
+  when moving off Y", pinned dist lines, private-field overrides. A recorded
+  upgrade note with no ticket or owner is a MAJOR finding: name it and the
+  ticket it needs. A workaround that patches a private field or a pinned dist
+  line must name its removal condition (the version that fixes it).
+
   ## Step 5 — report
 
   ```
@@ -86,6 +93,8 @@ prompt: |
     the design.
   If an upgrade itself is risky (breaking changes), say what breaks; the fix may
   be "upgrade first, as its own step", which the spec must then order.
+  Deleting a workaround needs the original repro re-run against the new
+  version as a proof obligation; a changelog line alone does not prove the fix.
 
   Rules:
   - Every version cites the lockfile line or registry output; every doc claim
