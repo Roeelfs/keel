@@ -292,6 +292,9 @@ message to one is queued to nowhere. Never relay to them.
      handoff under START HERE).
    - **Nothing happened on the other account since the checkpoint** → do not wake it.
    - Programs too small for a manager stay standalone.
+   - **Config age is never a reason to re-dispatch.** Every account shares one `~/.claude`; run
+     `scripts/config_freshness.py` and refresh the `STALE-*` rows by message
+     ([references/config-freshness.md](references/config-freshness.md)).
 5. **Send** the catch-up ([CATCHUP_MESSAGE.md](CATCHUP_MESSAGE.md)) by session id, naming both the
    handoff and its `-children.md` file. Put cross-program
    findings in `{{EXTRA}}`: two handoffs that contradict each other (name who settles it), a scope
@@ -349,6 +352,11 @@ Depth and evidence for each rule are in [`references/manager-contract.md`](refer
   candidates: `scripts/hygiene_candidates.py`, run from the manager itself). In a `[Manager]` session the
   `manager-hygiene` Stop hook announces each new candidate set. Hygiene is standing: run it when
   the hook, the founder or another session asks, with no confirmation (HYGIENE.md "Authority").
+- **Harness changed? Refresh, don't re-dispatch.** Hooks, permissions and agents reach a running
+  session live; CLAUDE.md, skill bodies already invoked, plugins and the CLI build do not.
+  `scripts/config_freshness.py` names each stale session and its fix (a refresh message naming the
+  files to re-read; restart-class items wait for the next app relaunch). Never kill a CLI process.
+  Detail: [`references/config-freshness.md`](references/config-freshness.md).
 - **Close out** with ONE summary: shipped (PR and `mergedAt`), parked and why, still unproven.
 
 ## References
@@ -356,6 +364,7 @@ Depth and evidence for each rule are in [`references/manager-contract.md`](refer
 - [`references/manager-contract.md`](references/manager-contract.md) — the full contract.
 - [`references/lifecycle.md`](references/lifecycle.md) — define → build → verify-release.
 - [`references/merge-and-retire.md`](references/merge-and-retire.md) — merge, post-merge proof, retire.
+- [`references/config-freshness.md`](references/config-freshness.md) — stale config in a live session: detect, refresh, restart.
 - [`references/codex-runtime.md`](references/codex-runtime.md) — when hosted by Codex CLI.
 - `prompts/` — lane missions, state miner, model routing, procedural worker.
 - [REFERENCE.md](REFERENCE.md) — Mode 2 depth: story structure, unit-prompt rules, completion criteria.
