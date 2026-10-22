@@ -228,13 +228,43 @@ turn (nothing to diff). **Cache-diff:** if the survey matches the state file, re
 ## Lane runtimes — pick by deliverable, then by human need
 
 A lane goes interactive **only when it needs the human**. Everything else runs prompt-free.
+**Codex is the default runtime for every lane that qualifies** (founder, 2026-10-22): Claude
+time is the scarce pool. Pick the runtime by walking these questions in order; the first "yes" wins.
 
-| Runtime | Deliverable | Start | Reach for it when |
+1. **Does the work need the human?** Grilling, a decision the founder must make, a login, password,
+   consent screen or identity-browser capture, or a unit the founder wants to watch and steer over
+   many turns → **child session** (`start_session`, a chip). From an automated turn it lands as a
+   card and waits for a click, so it is never the unattended runtime.
+2. **Does it need a desktop-only tool?** Interactive-OAuth MCP (Linear, Supabase, Vercel via the
+   desktop), the PR/session/sidebar tools, or this conversation's accumulated context → **`Agent`
+   subagent inside the manager** (it inherits the desktop MCP set). Keep it short and read-mostly;
+   its reply lands in YOUR context and is re-paid every turn, so cap the return size.
+3. **Is the deliverable information** (report, verdict, census, research, mining, review,
+   falsifier pass) **with a self-contained prompt?** → **Codex document lane**:
+   `codex-dispatch.sh <luna|sol> <promptfile> <outfile> [repo]`. luna for mining, census and
+   extraction; sol for review, research and falsifiers; astra only for one final-gate judgment
+   per spec review. A multi-angle fan-out with cross-verification → `Workflow` instead.
+4. **Is the deliverable a commit/branch in ONE worktree, from a written spec or mission?** →
+   **headless Codex lane**: `spawn-lane.sh --runtime codex --class <class> --cwd <worktree>`.
+   It commits, never pushes; you grade the diff, run the test gate it cannot run (a Codex lane
+   cannot run vitest here: give it typecheck plus a baseline/apply check and run the suite in CI
+   order yourself), then push once.
+5. **Shippable, but Codex does not fit?** It needs a static-credential MCP, network or push,
+   the live test loop inside the lane, repo hooks that write `$HOME`, or the headroom gate refused
+   → **headless Claude lane**: `spawn-lane.sh --model sonnet` (opus only with a one-line reason).
+6. **A handful of reads or one probe** to verify a fact before routing → do it **inline**. That is
+   verification, not implementation; anything that edits code or runs a heavy gate is a lane.
+
+| Runtime | Deliverable | Its context cost to you | Cannot |
 |---|---|---|---|
-| **Headless lane** | a branch/PR | `~/.claude/scripts/spawn-lane.sh --mission <file> --cwd <worktree> [--runtime codex] --model <alias>` via Bash `run_in_background` | anything shippable; unattended stretches; work that needs its own context window |
-| **Background `Agent` / `Workflow`** | information: report, verdict, map | `Agent` / `Workflow` tools | mining, research, scope audit, cross-lane verification, judge panels |
-| **Codex lane** | an independent review/verify/research/census pass, or a bounded implementation from a written spec | the block below, via Bash `run_in_background` | the lane has a crisp contract and should run **off the Claude 5-hour window** |
-| **Child session** | human judgment | `start_session` (SKILL.md §Starting a manager has the arguments) | grilling, decision gates, a parked unit the human will drive. From an automated turn it lands as a card and waits for a click, so it is never the unattended runtime |
+| Child session (chip) | human judgment, steered work | one card + its note | run unattended |
+| `Agent` subagent | short answer needing desktop MCP or this conversation | its whole reply, every turn | outlive your turn cheaply |
+| Codex document lane | report, verdict, census | the slice of the outfile you read | use MCP, push, see this conversation |
+| Headless Codex lane | commits in one worktree | the graded diff | push, run vitest, use MCP |
+| Headless Claude lane | branch/PR | its completion note | (the fallback; costs Claude time) |
+| `Workflow` | cross-verified multi-agent research or review | its returned paths | write files from the script itself |
+
+Grade every one by its artifact, never its completion message.
 
 ```bash
 ~/.claude/scripts/codex-dispatch.sh standard <promptfile> <outfile> <repo>
@@ -256,8 +286,8 @@ The headless row takes `--runtime codex --class <task-class>` (default `standard
 the central headroom gate even with an explicit `--model` override, and applies the class effort.
 Claude leads user interaction, task acceptance, and integration, while independent bounded Codex
 lanes run through harness-tracked background Bash. Codex is a separate billing pool and Claude time
-is the scarce one, so use it whenever the lane's work fits. It is **not** an unconditional
-default, and the seam is narrower than "it ships":
+is the scarce one, so use it whenever the lane's work fits (questions 3-5 above). The seam is
+narrower than "it ships":
 
 **A Codex lane commits; it does not push.** Egress is denied by default, so the lane has no push
 authority, and the manager pushes after grading the artifact. `--allow-network` re-opens egress

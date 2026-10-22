@@ -14,7 +14,7 @@ export const meta = {
 // MANIFEST:BEGIN
 const MANIFEST = {
   "profiles": ["full", "focused", "hotfix"],
-  "gates": ["liveSurface", "security", "cutover", "runtimeWiring", "operatorSurface", "legalSurface", "decisionSurface", "dependencySurface"],
+  "gates": ["liveSurface", "security", "cutover", "runtimeWiring", "operatorSurface", "legalSurface", "decisionSurface"],
   "lanes": [
     {"label": "completeness-reviewer", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "completeness-reviewer.md", "profiles": ["full"], "gate": null, "idPrefix": "COMP", "tags": ["completeness"]},
     {"label": "codebase-verifier", "kind": "codex", "agentType": "codex-dispatch", "model": "gpt-6-sol", "prompt": "codebase-verifier.md", "profiles": ["full", "focused", "hotfix"], "gate": null, "idPrefix": "CB", "tags": ["codebase"], "codexClass": "verify", "codexContract": true},
@@ -34,7 +34,7 @@ const MANIFEST = {
     {"label": "live-evidence-auditor", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "live-evidence-auditor.md", "profiles": [], "gate": "liveSurface", "idPrefix": "LE", "tags": ["live-evidence"]},
     {"label": "performance-architect", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "performance-architect.md", "profiles": [], "gate": "liveSurface", "idPrefix": "PERF", "tags": ["performance"]},
     {"label": "operator-plane-architect", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "operator-plane-architect.md", "profiles": [], "gate": "operatorSurface", "idPrefix": "OP", "tags": []},
-    {"label": "dependency-currency", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "dependency-currency.md", "profiles": [], "gate": "dependencySurface", "idPrefix": "DEP", "tags": ["dependency"]},
+    {"label": "dependency-currency", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "dependency-currency.md", "profiles": ["full", "focused", "hotfix"], "gate": null, "idPrefix": "DEP", "tags": ["dependency"]},
     {"label": "system1-elevation", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "system1-elevation.md", "profiles": [], "gate": "decisionSurface", "idPrefix": "S1", "tags": ["system1"], "severities": "CRITICAL|MAJOR|MINOR|ELEVATE", "researchHandoffs": true, "reportEveryFinding": true},
     {"label": "spec-drift-scout", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "spec-drift-scout.md", "profiles": ["full"], "gate": null, "idPrefix": "DRIFT", "tags": ["drift"]},
     {"label": "critic-hotfix", "kind": "critic", "agentType": "critic", "model": "fable", "prompt": null, "profiles": ["hotfix"], "gate": null, "idPrefix": "CRIT", "tags": ["completeness", "codebase", "architecture", "provider-fit", "edge-case", "security", "observability", "drift", "live-evidence", "codex-adversarial"],
