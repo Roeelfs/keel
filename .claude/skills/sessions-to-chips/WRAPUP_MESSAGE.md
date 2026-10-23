@@ -21,7 +21,7 @@ Everything must survive the switch: session history will not be readable from th
    - what you archived, with the evidence for each;
    - the surviving set. For each: one-line goal, state (DONE / RUNNING / PARKED / LIVE-WORK), worktree and branch and PR, what gate blocks it, and the exact continuation phrase to resume it from a fresh session on the other account;
    - "Linear owed": any comment or state change you could not post;
-   - "Owed to the founder": each decision or go-ahead needed, one line each, most blocking first. Ask them yourself in this session; the dispatcher does not collect or relay them.
+   - "Owed to the founder": grill them in this session BEFORE writing the note (one round, recommended answer first). Only what stays unanswered goes here, written as a ready grill round (numbered question + recommended answer), most blocking first. The dispatcher does not collect or relay them.
    Also refresh ~/.claude/orchestrator/programs/{{CATEGORY_SLUG}}.state.md with the same surviving set and a current `updated_at`: the next account reads it instead of your transcript.
    Write the note even when everything is blocked: a blocked item with its gate named is a finished checkpoint.
 8. Spend only on reads, pushes of your own branches, Linear updates, archives, and that note. Use Codex lanes for qualifying reads per the gate. Escalate to the human only for a prod mutation or an unresolvable conflict, as one question. Your final message is one line: the path of the note and the counts.

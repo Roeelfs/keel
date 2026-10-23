@@ -363,6 +363,49 @@ Missions stay self-contained regardless: MCP is for depth, not for the brief.
   where the lane reads it on its own next tick (its state file), not in its inbox. Address a
   session by id, never by name.
 
+## Open items are grilled, never parked (founder, 2026-10-23)
+
+A program reaches completion only if nothing waits on an unasked question. So a manager (and every
+child it briefs) never ends a turn, a checkpoint, a state file or a close-out with an open item,
+open question or pending decision written down as prose.
+
+1. **Sort each open item.** A fact → a lane finds it (never ask the human a fact). Reversible,
+   inside the brief, or covered by standing authority → decide it yourself, record the call and
+   its reason in the events file, and proceed. Only what is really the founder's (product
+   direction, money, legal, a prod ship, an irreversible or customer-visible change) is a
+   founder decision.
+2. **Grill the founder decisions in this session, now** (`/grilling`): the whole frontier in one
+   round, numbered, each with your recommended answer so "yes" settles it, or `AskUserQuestion`
+   with up to 4 questions and the recommended option first. A go-ahead is one click with the
+   approval pre-written. Never relay another program's decision, and never ask in another session.
+3. **Keep working while the round waits.** Everything that does not depend on the open answers
+   proceeds (§Parallel by default). When the answers land, record them and dispatch what they
+   unblock in the same turn.
+4. **Unattended turn** (no human present): take the recommended answer for anything reversible
+   and say so; for an irreversible or founder-only item, write the round, ready to paste, into
+   `.state.md` `## AT-WAKE`, and keep driving the rest. The next operator-present turn opens with it.
+5. **Children inherit this.** Every brief says: decide what is reversible or in-brief yourself;
+   grill the founder only for founder decisions, in one round with recommendations; never end on
+   an open-questions list.
+
+A close-out, wrap-up note or state file that carries an "open questions" list is incomplete.
+
+## Parallel by default
+
+The fastest path to completion is every independent piece moving at once. Serial dispatch is the
+exception and needs a reason (a true data or ordering dependency).
+
+- **Find the independent set every tick:** work whose inputs are settled and whose files no other
+  live lane writes. Dispatch all of it in one message: headless lanes, Codex lanes, `Agent`
+  subagents, and child sessions where the human must judge.
+- **Caps, not serialization:** Codex fan-out ≤5 (one spec-review wave of 6); one writer per file
+  set; a lane that would touch another live lane's files waits or stacks on its branch.
+- **A blocker blocks only its dependents.** Stack on the unmerged branch (§Autonomous stretches),
+  build the next spec while the last one reviews, run research beside implementation, and grill
+  open decisions while lanes run.
+- **Not slicing.** Parallelism runs independent pieces side by side; it never splits one change
+  into many PRs.
+
 ## Autonomous stretches — the un-gated frontier
 
 Before any unattended stretch, compute the set of work reachable **without a human approval**.
@@ -413,7 +456,8 @@ been violated by the survey.
 6. **Invoke the existing frontier** (§Autonomous stretches) to compute what is reachable
    without a human. Do not reimplement that computation here; a second slightly-different
    copy of it is the defect, not the feature.
-7. **Dispatch ONE forcing function**, within the phase and review budget. A dead lane is salvaged
+7. **Dispatch every independent forcing function on the frontier at once**,
+   within the phase and review budget, under the caps in §Parallel by default. A dead lane is salvaged
    before it is replaced — exit 143 with a 0-byte output is SIGTERM, and its
    worktree may hold real uncommitted work; `git -C <worktree> status --porcelain` first.
    The replacement is a **continuation** carrying the last verified fact, never a replay.

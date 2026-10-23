@@ -94,7 +94,7 @@ if [ "$RUNTIME" = codex ]; then
   ROUTE="$("$GATE" --route "$CLASS")" || GATE_RC=$?
   case "$GATE_RC" in
     0|1) ;;
-    *) echo "spawn-lane.sh: headroom gate refused or failed (rc=$GATE_RC); use Claude" >&2; exit 2 ;;
+    *) echo "spawn-lane.sh: headroom gate failed (rc=$GATE_RC); use Claude" >&2; exit 2 ;;
   esac
   read -r ROUTED_MODEL EFFORT EXTRA <<< "$ROUTE" || true
   case "$ROUTED_MODEL" in

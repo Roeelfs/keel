@@ -36,8 +36,8 @@ class AdvanceTickTests(unittest.TestCase):
         self.assertIn("Do not reimplement that computation here", TICK)
         self.assertIn("§Autonomous stretches", TICK)
 
-    def test_it_dispatches_one_forcing_function_under_the_caps(self):
-        self.assertIn("Dispatch ONE forcing function", TICK)
+    def test_it_dispatches_every_independent_forcing_function_under_the_caps(self):
+        self.assertIn("Dispatch every independent forcing function on the frontier at once", TICK)
         # The heavy-lane cap was retired on purpose in de407e3 (2026-08-28); pin the
         # budget that replaced it, not the word the retirement deleted.
         self.assertIn("within the phase and review budget", TICK)

@@ -25,7 +25,7 @@ Write {{OUT}}, at most ~3 KB:
 4. Every map, spec, story file or draft the program created or updated (repo docs, PRs, files
    under ~/.claude/sessions-to-chips/), with its path or PR and its state. Do not skip these: a
    handoff that names only PRs loses the maps.
-5. Owed to the founder, most blocking first: the exact question and any default.
+5. Owed to the founder, most blocking first, as a ready grill round: the exact question and the recommended answer (the default), so the receiving manager grills it first.
 6. Divergence from the checkpoint note: items already finished or superseded, so they are not
    redone.
 7. One paste-ready continuation phrase.

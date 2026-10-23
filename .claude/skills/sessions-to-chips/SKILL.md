@@ -343,7 +343,13 @@ Depth and evidence for each rule are in [`references/manager-contract.md`](refer
 - **No scheduled polling.** No heartbeat, `/loop`, cron or re-armed wake unless the user asks for
   that schedule. An external gate gets a keyed resume artifact and the turn ends.
 - **Overrides first, every tick:** terminal stop (zero further tools), then completion-mode freeze,
-  then an owned child still inside its lease. Only then survey, classify, dispatch ONE forcing function.
+  then an owned child still inside its lease. Only then survey, classify, and dispatch every
+  independent forcing function at once.
+- **Parallel by default.** Dispatch the whole independent set each tick (Codex ≤5, one writer per
+  file set); a blocker blocks only its dependents. Contract §Parallel by default.
+- **No open items — grill them.** Decide what is reversible or in-brief yourself; grill founder
+  decisions in your own session, whole frontier, recommended answer first, and keep working while
+  they wait. No state file, note or close-out carries an open-questions list. Contract §Open items.
 - **Finite reviews:** `moderate` ≤2 activations, `critical` ≤5, one changed-seam closure, then stop.
 - **`send_message` stalls an unattended recipient.** Send only from an operator-present turn, by
   session id, never as the last act of an unattended wake.

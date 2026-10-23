@@ -43,7 +43,7 @@ A candidate is acted on only when **all** of these hold. One failure and it stay
 - Nothing owed: its last report (`get_session`, or the note you received) has no unanswered
   question to the human, no merge go-ahead pending, no bake owed, and no PR still bound for a
   main-green watch. **A parked founder question is not a reason to keep the session.** Move it
-  into your own "Owed to the founder" list, with the exact question and its default, then archive.
+  into your own "Owed to the founder" grill round, with the exact question and its recommended answer, then archive.
 - Work is safe: `git -C <worktree> status --porcelain` is empty and `git -C <worktree> log @{u}..`
   prints nothing, or the worktree is shared, gone, or recorded as abandoned on purpose.
 - Its follow-ups live somewhere durable: your Units table, the tracker, or a card.

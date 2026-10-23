@@ -73,7 +73,7 @@ One category = one **story** (a markdown file) + one **manager** session. Units 
 | `established` | Settled calls, each with the PR/ticket/ADR/test that settled it. | A hunch is an `openQuestion`, never an established claim. |
 | `deadEnds` | Falsified theories / abandoned approaches, with why. | Prevents a successor re-running a disproven idea. |
 | `produces` / `needs` | Handoffs: artifacts others depend on / inputs awaited from outside. | One session's `needs` = another's `produces` is a story beat and a `dependsOn`. |
-| `openQuestions` | Raised and not closed. | Feeds the story's Open front. |
+| `openQuestions` | Raised and not closed. | Feeds the story's Open front; the manager resolves facts by lane and grills the rest as its first round. |
 
 Gotchas: a `--grep` target set that includes a child but not its parent makes the child its own root; pass `--root` to pull the full subtree. `--root` prefers an exact title and ignores leftover `[Manager]`-prefixed sessions from earlier runs.
 
