@@ -391,6 +391,18 @@ close-out a manager session (and every child it briefs) is in exactly one of:
    review, or an active child or lane it is managing. Each has an owner and an artifact it will
    produce.
 
+**When the founder is needed, hand them a ready-to-run kit (founder, 2026-10-24).** Any ask that
+needs the human to DO something (a secret, a login, a step-up, a CLI run, a console click, a
+go-ahead, a copy-paste send) arrives with everything to finish it in one pass, no research:
+the exact command in its own fenced `bash` block (one command per block, no `$` prompt, secrets
+by reference such as an env var or Keychain item name, never inline), where to run it and as which
+identity, what the output should look like when it worked, the one-line reply that resumes you
+("done" plus what to paste, or the pre-written `Approved: <exact action>. Proceed.` button), and
+what you do the moment it lands. A step you can run yourself you run; only steps blocked for you
+(their login, password, TOTP, device, a prod ship awaiting their go-ahead) go to them. Several
+asks go out as ONE numbered round, in the order that unblocks the most work first, each with its
+kit. Managers brief their children with this rule and relay nothing across programs.
+
 Nothing else is an end state. "Parked", "blocked on X", "waiting for the founder", "will resume
 later" and "no active work, N items owed" are all defects: the manager either starts the work,
 grills the decision now, or is DONE. A blocker blocks only its dependents: the rest is WORKING. A

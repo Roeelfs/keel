@@ -22,6 +22,7 @@ CATCH-UP ({{DATE}}): your program ran on another Claude account from {{FROM}} to
 8. Refresh ~/.claude/orchestrator/programs/<your-slug>.state.md with a current updated_at once 1-7 are done; the next account reads it instead of your transcript.
 9. {{EXTRA}}
 Every turn of yours ends in exactly one state (Manager contract, three end states): DONE (no work left, nothing owed), GRILLING (ALL open founder decisions asked in one round, recommended answer first), or WORKING (a test, bake, preview, build, spec or review running, or active children you manage, each with an owner and an artifact). "Parked", "blocked on X" and "waiting" are defects: start the work, grill now, or finish.
+Every ask that needs the founder to DO something (secret, login, step-up, CLI, console click, go-ahead) goes as a ready-to-run kit: the exact command in its own fenced bash block (secrets by reference, never inline), where and as whom to run it, what success looks like, the one-line reply that resumes you, and what you do next. One numbered round, most-unblocking first. Brief your children the same way.
 Reply with ONE line: your end state, archived N (before → after), live children X, each kept ≥1-day session with its reason, fixed N of M, and how many founder decisions you hold. Ask the founder those decisions here in your own session and record the answers in your state file; the dispatcher does not collect them.
 ```
 

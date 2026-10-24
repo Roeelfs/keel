@@ -408,6 +408,11 @@ Depth and evidence for each rule are in [`references/manager-contract.md`](refer
   bake, preview, build, spec, review, or active children and lanes, each with an owner and an
   artifact). "Parked", "blocked on X", "waiting" and "N items owed" are defects: start the work,
   grill the decision now, or finish. Contract §Open items.
+- **A founder ask arrives as a ready-to-run kit.** Anything the human must DO (secret, login,
+  step-up, CLI, console click, go-ahead) comes with the exact command in its own fenced `bash`
+  block (secrets by reference, never inline), where and as whom to run it, what success looks like,
+  the one-line reply that resumes you, and what you do next. Steps you can run, you run. One
+  numbered round, most-unblocking first. Contract §Open items.
 - **No open items — grill them.** Decide what is reversible or in-brief yourself; grill founder
   decisions in your own session, whole frontier, recommended answer first, and keep working while
   they wait. No state file, note or close-out carries an open-questions list. Contract §Open items.
