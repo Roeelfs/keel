@@ -21,7 +21,8 @@ CATCH-UP ({{DATE}}): your program ran on another Claude account from {{FROM}} to
 7. Gaps the sweeps found for you (fix each in your state file or the named place; reply with fixed N of M): {{SWEEPS}}
 8. Refresh ~/.claude/orchestrator/programs/<your-slug>.state.md with a current updated_at once 1-7 are done; the next account reads it instead of your transcript.
 9. {{EXTRA}}
-Reply with ONE line: archived N (before → after), live children X, each kept ≥1-day session with its reason, fixed N of M, and how many founder decisions you hold. Ask the founder those decisions here in your own session and record the answers in your state file; the dispatcher does not collect them.
+Every turn of yours ends in exactly one state (Manager contract, three end states): DONE (no work left, nothing owed), GRILLING (ALL open founder decisions asked in one round, recommended answer first), or WORKING (a test, bake, preview, build, spec or review running, or active children you manage, each with an owner and an artifact). "Parked", "blocked on X" and "waiting" are defects: start the work, grill now, or finish.
+Reply with ONE line: your end state, archived N (before → after), live children X, each kept ≥1-day session with its reason, fixed N of M, and how many founder decisions you hold. Ask the founder those decisions here in your own session and record the answers in your state file; the dispatcher does not collect them.
 ```
 
 A manager the dispatcher started fresh in this mode gets the Mode 1 prompt instead, with the

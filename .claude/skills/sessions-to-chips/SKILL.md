@@ -402,6 +402,12 @@ Depth and evidence for each rule are in [`references/manager-contract.md`](refer
   independent forcing function at once.
 - **Parallel by default.** Dispatch the whole independent set each tick (Codex ≤5, one writer per
   file set); a blocker blocks only its dependents. Contract §Parallel by default.
+- **Three end states only: DONE, GRILLING, WORKING.** A manager session ends every turn either
+  with no work left (family archived, nothing owed), or having grilled the founder on ALL open
+  decisions in one round (recommended answer first), or actively doing and managing work (test,
+  bake, preview, build, spec, review, or active children and lanes, each with an owner and an
+  artifact). "Parked", "blocked on X", "waiting" and "N items owed" are defects: start the work,
+  grill the decision now, or finish. Contract §Open items.
 - **No open items — grill them.** Decide what is reversible or in-brief yourself; grill founder
   decisions in your own session, whole frontier, recommended answer first, and keep working while
   they wait. No state file, note or close-out carries an open-questions list. Contract §Open items.

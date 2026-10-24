@@ -58,6 +58,12 @@ A candidate is acted on only when **all** of these hold. One failure and it stay
   prints nothing, or the worktree is shared, gone, or recorded as abandoned on purpose.
 - Its follow-ups live somewhere durable: your Units table, the tracker, or a card.
 
+**What a kept session is.** A session stays open only if it is WORKING (a test, bake, preview,
+build, spec or review is running, or it manages active children, each with an artifact it will
+produce) or GRILLING (a founder round is out and it waits on that alone). A session that is
+neither is finished: archive it, or give it work now. "Parked" and "waiting on the founder" are not
+reasons to keep one open (Manager contract: the three end states).
+
 ## 3. Archive
 
 `archive_session` on each verified `archive` / done `review` candidate. Archiving a parent

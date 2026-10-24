@@ -379,6 +379,25 @@ Missions stay self-contained regardless: MCP is for depth, not for the brief.
 
 ## Open items are grilled, never parked (founder, 2026-10-23)
 
+**The only three accepted end states (founder, 2026-10-24).** At every turn end, checkpoint and
+close-out a manager session (and every child it briefs) is in exactly one of:
+
+1. **DONE.** No work left: its family is archived or recorded, nothing is owed (no bake, merge
+   go-ahead, watch, or question), its state file says so with a fresh `updated_at`.
+2. **GRILLING.** It has asked the founder ALL its open decisions, the whole frontier in one round,
+   each with a recommended answer first (`AskUserQuestion`, or `/grilling`). The session is waiting
+   on that round and nothing else.
+3. **WORKING.** Something is actively in progress and named: a test, bake, preview, build, spec,
+   review, or an active child or lane it is managing. Each has an owner and an artifact it will
+   produce.
+
+Nothing else is an end state. "Parked", "blocked on X", "waiting for the founder", "will resume
+later" and "no active work, N items owed" are all defects: the manager either starts the work,
+grills the decision now, or is DONE. A blocker blocks only its dependents: the rest is WORKING. A
+gate that needs a human (login, step-up, go-ahead) is a GRILLING item with the one-click approval
+pre-written, never a parked note. The turn's last line names which state it is in and, for WORKING,
+what is running; a wrap-up that cannot name one of the three is not finished.
+
 A program reaches completion only if nothing waits on an unasked question. So a manager (and every
 child it briefs) never ends a turn, a checkpoint, a state file or a close-out with an open item,
 open question or pending decision written down as prose.
