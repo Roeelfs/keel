@@ -272,6 +272,8 @@ Never sonnet, haiku, luna or sol for these, and never a cheaper fallback when th
 5. **Shippable, but Codex does not fit?** It needs a static-credential MCP, network or push,
    the live test loop inside the lane, repo hooks that write `$HOME`, or a lane came back
    BLOCKED-ON-QUOTA → **headless Claude lane**: `spawn-lane.sh --model sonnet` (opus only with a one-line reason).
+   Run `scripts/lane_probe.sh <model>` first: rc 1 (refused/capped) → in-session `Agent` or a desktop
+   session instead; a dead lane exits 0 with 0 tokens, so the probe never replaces grading by artifact.
 6. **A handful of reads or one probe** to verify a fact before routing → do it **inline**. That is
    verification, not implementation; anything that edits code or runs a heavy gate is a lane.
 

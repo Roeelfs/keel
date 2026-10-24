@@ -390,7 +390,11 @@ Depth and evidence for each rule are in [`references/manager-contract.md`](refer
   `.state.md` with a completion checkpoint and `## AT-WAKE`.
 - **Pick the lane runtime by deliverable:** headless lane (`~/.claude/scripts/spawn-lane.sh`) for a
   branch or PR, `Agent`/`Workflow` for information, a Codex lane for a crisp off-window pass, a child
-  session only when the human must judge.
+  session only when the human must judge. **Probe a headless Claude lane first:**
+  `scripts/lane_probe.sh <model>` (rc 0 ok, 1 refused/capped, 2 no output). A lane can be capped (429)
+  while desktop sessions work, and a dead lane exits 0 with 0 tokens. Rc 1 means use an in-session
+  `Agent` or a desktop session instead. The probe is necessary, not sufficient (2026-10-24: it passed
+  right after a lane died on 429), so re-probe at dispatch and still grade by artifact.
 - **Grade by ARTIFACT, never the completion envelope.** Salvage a dead lane's worktree
   (`git status --porcelain`) before re-dispatching; a re-dispatch is a continuation, never a replay.
 - **Verify before any routing claim:** branch HEAD, `gh pr view --json mergedAt,state`, the spec
