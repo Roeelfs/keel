@@ -81,7 +81,7 @@ The Codex ladder:
 ## Continuation policy — no scheduled polling
 
 Do not create or re-arm a heartbeat, recurring automation, `/loop`, or scheduled wake to keep a
-manager alive unless the user explicitly requests that schedule. Ordinary "go", "finish",
+manager alive (the one-per-event wake in "Every dispatch has a wake" is not that) unless the user explicitly requests that schedule. Ordinary "go", "finish",
 manager, or autonomous-work authorization does not authorize a schedule. This binds every runtime.
 
 On Codex, use a bounded native goal only when explicitly requested, through the next known
@@ -93,6 +93,31 @@ event subscription with scheduled LLM checks.
 Updating a finite schedule on every run resets its limit: `COUNT=1` or `COUNT=2` plus re-arming
 is recurring polling. Quiet notifications do not reduce execution tokens. Any user-requested
 schedule needs an explicit finish condition and must not renew itself past it.
+
+## Every dispatch has a wake (founder, 2026-10-24)
+
+Several sessions dispatched a lane and then never got an event to proceed, so the program sat until
+the human typed. A dispatch is not finished until its wake is named. Pick exactly one, at dispatch
+time, and write it next to the lane in the state file (`## AT-WAKE`: lane, artifact, wake kind, key):
+
+1. **Event-driven (the default).** Launch through something the harness tracks, so its exit re-invokes
+   you: `Bash` with `run_in_background: true` (the `spawn-lane.sh` call itself, outfile named), an
+   `Agent`, a `Workflow`, or a `start_session` child (its end-of-turn note). Never detach a lane with
+   `nohup`, `disown` or `( … &)`, and never pipe the spawn: an untracked process fires nothing.
+2. **Self-armed, only where no event can exist.** CI, a deploy, a Codex lane started outside the
+   harness, or any process you could not launch tracked: arm ONE event-bound `ScheduleWakeup` sized to
+   that event's p90 (CI p50 5 / p90 12 min; deploy p50 14 / p90 27), prompt = the state-file path.
+   This is the standing carve-out to "no scheduled polling" (founder 2026-10-20, repeated 2026-10-24):
+   one wake per named external event, never a recurring heartbeat. A fired wake takes ONE snapshot and
+   grades the lane's ARTIFACT. Re-arm only after an empty snapshot, doubling the delay (start 300–600 s,
+   max 2700 s), and stop at the lane's terminal state.
+
+**Turn-end audit.** Before a manager ends a turn, list every lane it dispatched that has not reported.
+Each must have kind 1 live (a tracked task id) or kind 2 armed (a wake time in the state file). A lane
+with neither is a stalled program: arm or relaunch it now, then end the turn. At turn start, treat any
+lane in the state file with no live task and no armed wake as already stalled and grade its artifact
+first. A quiet event is not a reason to skip this: no event for longer than twice the lane's expected
+duration means grade the artifact, not wait.
 
 ## Owned child continuation invariant
 

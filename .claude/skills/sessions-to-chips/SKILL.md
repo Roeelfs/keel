@@ -399,6 +399,10 @@ Depth and evidence for each rule are in [`references/manager-contract.md`](refer
   (`git status --porcelain`) before re-dispatching; a re-dispatch is a continuation, never a replay.
 - **Verify before any routing claim:** branch HEAD, `gh pr view --json mergedAt,state`, the spec
   file. Merged is not baked. Confirm the deploy SHA is in the environment before a verify lane.
+- **Every dispatch has a wake.** A lane is launched tracked (event-driven: background Bash, `Agent`,
+  `Workflow`, child session) or, where no event can exist, with ONE event-bound `ScheduleWakeup`
+  armed and recorded in the state file; never detached. Audit every unreported lane before ending
+  a turn (manager-contract.md "Every dispatch has a wake").
 - **No scheduled polling.** No heartbeat, `/loop`, cron or re-armed wake unless the user asks for
   that schedule. An external gate gets a keyed resume artifact and the turn ends.
 - **Overrides first, every tick:** terminal stop (zero further tools), then completion-mode freeze,
