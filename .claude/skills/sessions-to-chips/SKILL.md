@@ -1,7 +1,7 @@
 ---
 license: MIT
 name: sessions-to-chips
-description: Start and run managers. A manager is one standalone "[Manager] <title>" session that owns ONE program (a goal) and drives it through child sessions, headless lanes and Codex lanes, never implementing itself. Four entry modes. New manager - the human names a goal ("orchestrate", "start a manager", "drive this program", "run 3+ parallel sessions toward one target", a big autonomous project). Resume from sessions - deep-mine scoped Claude desktop sessions for goals, steering, last state, settled calls, dead ends and remaining work, narrate each category as one story with a unit ledger, and give it to one manager (also mine-only audits of parked sessions or session overlap, read-only). Wrap-up - checkpoint every manager before an account switch or usage cap. Account switch - after switching Claude accounts, mine the other account's managers into per-program handoffs, sweep their worktrees for unpushed work, then relay to the managers on this account or dispatch the missing ones. Shared by all: the Manager contract (program state, collisions, lane runtimes, spawn-lane.sh, advance tick, grading, reviews, merge-and-retire) and session hygiene. Starting sessions needs explicit authorization; read context only via permitted interfaces.
+description: Start and run managers. A manager is one standalone "[Manager] <title>" session that owns ONE program (a goal) and drives it through child sessions, headless lanes and Codex lanes, never implementing itself. Four entry modes. New manager - the human names a goal ("orchestrate", "start a manager", "drive this program", "run 3+ parallel sessions toward one target", a big autonomous project). Resume from sessions - deep-mine scoped Claude desktop sessions for goals, steering, last state, settled calls, dead ends and remaining work, narrate each category as one story with a unit ledger, and give it to one manager (also mine-only audits of parked sessions or session overlap, read-only). Wrap-up - checkpoint every manager before an account switch or usage cap. Account switch - after switching Claude accounts, mine the other account's managers into per-program handoffs, sweep their worktrees for unpushed work, then relay to the managers on this account; a program with no manager here is put to the human, never started unasked. Shared by all: the Manager contract (program state, collisions, lane runtimes, spawn-lane.sh, advance tick, grading, reviews, merge-and-retire) and session hygiene. Starting sessions needs explicit authorization; read context only via permitted interfaces.
 ---
 
 # sessions-to-chips — managers
@@ -19,7 +19,7 @@ Four modes produce or feed managers. All of them obey the same **Manager contrac
 | **1. New manager** | the human names a goal to drive | one `[Manager] <goal>` |
 | **2. Resume from sessions** | parked or finished sessions should be picked up, or audited | one `[Manager] <origin title>` per category (none in mine-only) |
 | **3. Wrap-up** | an account switch or usage cap is coming | a checkpoint note per manager; no new managers |
-| **4. Account switch** | you just switched accounts and the programs ran on the other one | a handoff per program; catch-up messages to this account's managers; a new manager only where none exists |
+| **4. Account switch** | you just switched accounts and the programs ran on the other one | a handoff per program; ONE catch-up per manager after all sweeps (children, decisions, worktrees); fold notices for absorbed managers; a new manager only where none exists and the human says so |
 
 The app's session tools see **only the account you are signed into**; see Mode 4 before you
 message or start anything after a switch.
@@ -260,8 +260,16 @@ message to one is queued to nowhere. Never relay to them.
    them, 2026-10-14 to 10-22) force this transcript path. Otherwise `find_transcript.py <cli…>`, then
    `mine_session.py <transcript> > digest-<cli>.txt` per manager. Write one handoff per program to
    `~/.claude/sessions-to-chips/handoff/<date>-<slug>.md` with one **haiku** agent per program
-   ([prompts/handoff-miner.md](prompts/handoff-miner.md)), all in one message.
-3. **Sweep for what the handoffs miss, BEFORE sending.** Handoffs built from transcripts name PRs
+   ([prompts/handoff-miner.md](prompts/handoff-miner.md)), all in one message. A program whose
+   repo is not the monorepo (a side repo, a game project) gets its repo named in the prompt so `gh`
+   and `git` calls hit the right remote. A state file counts as the handoff only if its mtime is
+   after the checkpoint AND its events file is as new; record the mtime in the handoff, because a
+   fresh-looking state can still be stale (measured: two state files older than their events).
+3. **Sweep for what the handoffs miss, BEFORE sending anything.** All four sweeps below run first
+   so their findings ride ONE message per manager (see step 5). The decisions sweep and worktree
+   sweep are agents: [prompts/decisions-sweep.md](prompts/decisions-sweep.md) and
+   [prompts/worktree-sweep.md](prompts/worktree-sweep.md); run both in the same message as the
+   child-ledger reconcilers. Handoffs built from transcripts name PRs
    and drop maps, unpushed commits and drafts (measured 2026-10-22: the Release handoff omitted its
    story map, the open wayfinder map PR and an unpushed build-map commit; two more programs had
    unpushed commits nobody had named).
@@ -285,25 +293,54 @@ message to one is queued to nowhere. Never relay to them.
    to one **haiku** agent ([prompts/child-ledger-reconciler.md](prompts/child-ledger-reconciler.md)),
    all in one message; each writes `handoff/<date>-<slug>-children.md` with the AT-RISK rows.
    Route the no-manager file's rows to the likeliest program by hand.
+
+   **Then the decisions sweep and the worktree sweep.** A handoff names PRs, not rulings:
+   founder rulings, specs, ADRs and cross-cutting calls (a model ceiling, a tool ban) made on the
+   other account can sit in one state file of eight. The worktree sweep walks `git worktree list`
+   itself, because `handoff_sweep.py` only sees worktrees it can attribute to a manager. The
+   worktree of a RUNNING child is pushed by that child; an unowned one is salvaged by the manager
+   that owns the ticket. Fold every row into the owning manager's message; every cross-cutting
+   ruling goes into EVERY manager's message.
 4. **Decide per program**, and say the call in one table:
    - **A manager for it exists on this account** → relay. It keeps its sidebar group, worktree and
      family; the handoff replaces its stale context. Archive older duplicate managers here.
-   - **No manager here** (the program was born on the other account) → start one (Mode 1 prompt,
-     handoff under START HERE).
-   - **Nothing happened on the other account since the checkpoint** → do not wake it.
+   - **Absorbed or converged managers are still managers.** Read each manifest's `goal`/`absorbs`
+     before deciding: if program A absorbed B, the live `[Manager] B` on this account is a duplicate
+     owner (measured 2026-10-24: CRM, absorbed into Apps on 10-22, was still live and started a
+     second child on Apps' ticket). Send B a fold notice and Apps a takeover note instead of a
+     normal catch-up; B hands over its live child at the next checkpoint, then runs hygiene.
+   - **No manager here** (the program was born on the other account) → grill the human in this
+     session (start one, or leave it standalone; recommended answer first) and START NOTHING
+     unasked. If they said "relay to existing managers", never start one on your own; list the
+     program and the handoff path instead.
+   - **Nothing happened on the other account since the checkpoint** → do not wake it, but check the
+     manager's own `lastActivityAt` first: it may have been woken here by the human since (measured:
+     a "quiet" manager had started a child that morning).
    - Programs too small for a manager stay standalone.
    - **Config age is never a reason to re-dispatch.** Every account shares one `~/.claude`; run
      `scripts/config_freshness.py` and refresh the `STALE-*` rows by message
      ([references/config-freshness.md](references/config-freshness.md)).
-5. **Send** the catch-up ([CATCHUP_MESSAGE.md](CATCHUP_MESSAGE.md)) by session id, naming both the
-   handoff and its `-children.md` file. Put cross-program
-   findings in `{{EXTRA}}`: two handoffs that contradict each other (name who settles it), a scope
-   that moved between programs, one owner for a shared deliverable. Say explicitly that the other
-   account's stopped children ARE the program's work: one manager left them untouched because they
-   were "not in my family".
+5. **Send ONE message per manager** ([CATCHUP_MESSAGE.md](CATCHUP_MESSAGE.md)) by session id, only
+   after every sweep has landed. It carries the handoff and `-children.md` paths, the backlog-first
+   order, the manager's sweep rows, the standing rulings, and the one-line reply format. Put
+   cross-program findings in `{{EXTRA}}`: two handoffs that contradict each other (name who
+   settles it), a scope that moved between programs, one owner for a shared deliverable. Say
+   explicitly that the other account's stopped children ARE the program's work.
+   Send constraints measured 2026-10-24: (a) the app pauses sends after about 10 session messages
+   since the human last typed ("looks like sessions messaging each other automatically"), so one
+   message per manager is a budget, not a style: follow-ups for the same manager wait for its reply
+   and ride the next batch; (b) the first send to a manager may be refused with "Workspace requires
+   trust approval": do not retry, ask the human once for all refused sessions; (c) write every
+   message you could not deliver to `relay/<date>-pending-sends.md` the moment it is refused, so
+   the resend survives compaction; (d) queued is not read: do not re-send.
 6. **Converge.** Do not poll. Append each one-line reply to
-   `~/.claude/sessions-to-chips/relay/<date>-replies.md`. Close with which managers hold open
-   founder decisions and a link to each; the decisions themselves stay in those sessions.
+   `~/.claude/sessions-to-chips/relay/<date>-replies.md`. The program converges when, per manager:
+   catch-up reply (archived N, live children X, decisions held), backlog-first reply (before →
+   after, each kept ≥1-day session with its reason), sweep fixes confirmed (fixed N of M), the
+   worktree rows pushed by their owners or named as a live child's, and the standing rulings
+   recorded in its state file with a fresh `updated_at`. `pending-sends.md` must be empty or
+   listed to the human. Close with which managers hold open founder decisions and a link to each;
+   the decisions themselves stay in those sessions.
 7. **Archiving on the other account is the human's.** When an audit clears the other account's
    sessions, write `relay/<date>-archive-on-<account>.md` listing what to archive and what to keep;
    a kept subtree nested under an archived parent (a manager spawned by another manager) must be
@@ -311,7 +348,25 @@ message to one is queued to nowhere. Never relay to them.
 8. **Hygiene asked of the dispatcher is relayed.** The dispatcher has no family
    (`hygiene_candidates.py` returns 0 for it), so "run hygiene" means one line in each manager's
    catch-up, never archiving another program's children from here. Exception: duplicate managers
-   of one program on this account, which only the dispatcher can see side by side.
+   of one program on this account, which only the dispatcher can see side by side. To read what
+   each manager's pass will propose without acting, run `hygiene_candidates.py --all-managers
+   --account <this-account-prefix>` (the default account is the most recently active one, which
+   may not be this one). The order inside each manager is fixed: BACKLOG FIRST (every family
+   session idle ≥1 day gets a verdict before any new work), then salvage, then the program.
+
+Mechanics that cost retries in this mode:
+
+- In zsh never `read -r cli size path`: `path` is tied to `PATH` and the next command is "not
+  found". Use `tpath`.
+- The other account's children are `not found` to `get_session` and `list_sessions` here; that is
+  expected, never evidence they are dead. Cite their stored ledger row instead.
+- Never trust a subagent's count of merged PRs, owners or "live" without the `gh pr view` /
+  `git worktree list` line it ran; handoff agents were right on PR states and wrong on owners
+  (inferred from branch names) every time: owners are confirmed by the manager that receives them.
+- A catch-up that mentions a founder ask puts it in that manager's message, never in the
+  dispatcher's closing list ("Founder decisions stay with their manager").
+- Reading a session's own `list_events` is a read; messaging it is a send and counts against the
+  budget. Prefer `list_events` over a nudge when you only need to know what it is doing.
 
 ### Founder decisions stay with their manager
 
@@ -358,6 +413,8 @@ Depth and evidence for each rule are in [`references/manager-contract.md`](refer
   candidates: `scripts/hygiene_candidates.py`, run from the manager itself). In a `[Manager]` session the
   `manager-hygiene` Stop hook announces each new candidate set. Hygiene is standing: run it when
   the hook, the founder or another session asks, with no confirmation (HYGIENE.md "Authority").
+  **Backlog first:** before engaging with new work (a catch-up, handoff, new unit), clear every family
+  session idle ≥1 day (HYGIENE.md "Backlog first"); Mode 4's catch-up makes this its first step.
 - **Harness changed? Refresh, don't re-dispatch.** Hooks, permissions and agents reach a running
   session live; CLAUDE.md, skill bodies already invoked, plugins and the CLI build do not.
   `scripts/config_freshness.py` names each stale session and its fix (a refresh message naming the

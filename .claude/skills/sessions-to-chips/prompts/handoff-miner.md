@@ -26,6 +26,9 @@ Write {{OUT}}, at most ~3 KB:
    under ~/.claude/sessions-to-chips/), with its path or PR and its state. Do not skip these: a
    handoff that names only PRs loses the maps.
 5. Owed to the founder, most blocking first, as a ready grill round: the exact question and the recommended answer (the default), so the receiving manager grills it first.
+5b. Cross-cutting founder rulings made since the checkpoint (model ceiling, tool bans, standing
+   authorizations), each with its source line, and the program state file's and events file's mtimes.
+   If the manifest says this program absorbed or was absorbed by another, say so in one line.
 6. Divergence from the checkpoint note: items already finished or superseded, so they are not
    redone.
 7. One paste-ready continuation phrase.

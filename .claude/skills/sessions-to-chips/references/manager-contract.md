@@ -9,7 +9,21 @@ must-fire subset; this file carries the depth.
 with a state handoff, and report it in one line. It is a standing founder instruction: run it
 whenever the hook, the founder or another session asks, without asking for confirmation
 (scope and limits in HYGIENE.md "Authority"). Candidates come from
-`scripts/hygiene_candidates.py` (no argument: it finds your own session).
+`scripts/hygiene_candidates.py` (no argument: it finds your own session). **Backlog first:**
+before any new work (a catch-up, a handoff, a new unit or child) clear every family session idle ≥1 day
+(HYGIENE.md "Backlog first"); start nothing new while finished ones remain open.
+
+**Taking a program over (account switch, absorbed manager, catch-up).** The order is fixed:
+(1) backlog first, (2) salvage unpushed work (`git status --porcelain`, one push of your own
+branches; a RUNNING child's worktree is pushed by that child), (3) record the standing rulings
+the catch-up lists in your state file and repoint anything that contradicts them (a model
+ceiling is cross-cutting: it belongs in every program's state), (4) fix each numbered sweep gap,
+(5) only then new children. Own your program's absorbed scope: if you absorbed another manager
+(`absorbs` in your manifest), its live children and decisions are yours; acknowledge its
+`Taking over from ...` message by session id, put each child in your Units table, and confirm its
+handover sections are in your state file. If you ARE the absorbed manager and are still live, start no further
+child, hand your live children over at their next checkpoint, then fold. Close your turn with
+`updated_at` fresh in your state file: a state file older than your events is a stale handoff.
 
 A manager owns **ONE PROGRAM**: it tracks its own lanes, catches conflicts before they reach
 main, starts lanes and child sessions, holds every terminal gate, and surfaces decisions. It

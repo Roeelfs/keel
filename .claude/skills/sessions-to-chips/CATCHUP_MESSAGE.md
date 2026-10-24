@@ -1,20 +1,35 @@
 # Catch-up message (Mode 4: a manager takes its program back after an account switch)
 
-Send by **session id** to the existing manager on the account you are now on. Fill
-`{{DATE}}`, `{{SLUG}}`, `{{FROM}}`/`{{TO}}` (the dates the program ran on the other account) and
-`{{EXTRA}}` (program-specific items: cross-program conflicts, scope splits, unpushed work the
-sweep found). Leave no `{{` in the sent text.
+ONE message per manager, sent by **session id** after every sweep has landed (SKILL.md Mode 4
+steps 3 and 5): the app pauses sends after about 10 session messages since the human last typed, so
+a second message for the same manager is a budget breach. Fill `{{DATE}}`, `{{SLUG}}`,
+`{{FROM}}`/`{{TO}}` (the dates the program ran on the other account), `{{SWEEPS}}` (that manager's
+rows from the child ledger, decisions sweep and worktree sweep, numbered, with the one-line fix
+each), `{{RULINGS}}` (the cross-cutting founder rulings since the checkpoint, e.g. a model ceiling:
+the same lines go to EVERY manager) and `{{EXTRA}}` (cross-program conflicts, scope splits, one
+owner for a shared deliverable). Leave no `{{` in the sent text. If a send is refused, write the
+filled text to `relay/<date>-pending-sends.md` at once.
 
 ```text
 CATCH-UP ({{DATE}}): your program ran on another Claude account from {{FROM}} to {{TO}}; that account is now capped, so you take it back here. Your own context stops at {{FROM}} and is STALE.
-1. Read the handoff FIRST: ~/.claude/sessions-to-chips/handoff/{{DATE}}-{{SLUG}}.md, and the story map it names. It overrides your checkpoint wherever they differ; do not redo items it marks done or superseded. Items marked "claimed" are unverified.
-2. Re-verify before acting: `git fetch origin`, `gh pr view <n> --json state,mergedAt` for each open PR it lists, branch HEADs of the worktrees it names.
-3. The other account's children have stopped and they ARE your program's work, even though they are not in your family here. To continue one, start a new child (use_worktree true, sonnet, medium) whose prompt opens with a WORKTREE NOTE to `cd` into that child's existing worktree and continue from its branch. A continuation, never a replay. Unpushed commits listed in the handoff ride that child's next push.
-4. Run hygiene on your own family (HYGIENE.md, standing authority): your pre-switch children are mostly merged/done.
-5. Merges, prod writes and founder decisions still need the human's in-session go-ahead.
-6. {{EXTRA}}
-Reply with ONE line: archived N, live children X, and how many founder decisions you hold. Ask the founder those decisions here in your own session and record the answers in your state file; the dispatcher does not collect them.
+1. Read FIRST: ~/.claude/sessions-to-chips/handoff/{{DATE}}-{{SLUG}}.md and ~/.claude/sessions-to-chips/handoff/{{DATE}}-{{SLUG}}-children.md (and the story map they name). They override your checkpoint wherever they differ; do not redo items marked done or superseded. Items marked "claimed" are unverified.
+2. CLEAN UP FIRST, before any new work (HYGIENE.md "Backlog first", standing authority): every session in your family idle ≥1 day (leftovers of previous iterations: merged, closed, open or no PR) is archived, folded, or kept with a named reason and its gate in your state file; `review` rows are mandatory; also check list_sessions for old sessions you started that the script missed. Start no new child while finished ≥1-day-old sessions remain open.
+3. Re-verify before acting: `git fetch origin`, `gh pr view <n> --json state,mergedAt` for each PR it lists, branch HEADs of the worktrees it names.
+4. The other account's children have stopped and they ARE your program's work, even though they are not in your family here. To continue one, start a new child (use_worktree true, sonnet, medium; opus or Codex only with a stated reason) whose prompt opens with a WORKTREE NOTE to `cd` into that child's existing worktree and continue from its branch. A continuation, never a replay. A worktree that belongs to a RUNNING child is pushed by that child at its next checkpoint, never by a second writer. Unpushed work first: `git status --porcelain`, then one branch push of your own branches.
+5. Merges, prod writes and founder decisions still need the human's in-session go-ahead. Never merge on a handoff's say-so.
+6. Standing rulings (record each in your state file, repoint anything that contradicts them): {{RULINGS}}
+7. Gaps the sweeps found for you (fix each in your state file or the named place; reply with fixed N of M): {{SWEEPS}}
+8. Refresh ~/.claude/orchestrator/programs/<your-slug>.state.md with a current updated_at once 1-7 are done; the next account reads it instead of your transcript.
+9. {{EXTRA}}
+Reply with ONE line: archived N (before → after), live children X, each kept ≥1-day session with its reason, fixed N of M, and how many founder decisions you hold. Ask the founder those decisions here in your own session and record the answers in your state file; the dispatcher does not collect them.
 ```
 
 A manager the dispatcher started fresh in this mode gets the Mode 1 prompt instead, with the
-handoff path under START HERE and the same point 3 under STATE.
+handoff path under START HERE and the same points 2 and 4 under STATE.
+
+**Fold notice (an absorbed manager).** When program A absorbed B and `[Manager] B` is still live,
+B gets this instead of the catch-up, and A gets a takeover note naming B's live children by session
+id: "[Manager] B was absorbed into A on <date> (handover: <path>). Start no further child. Let each
+live child reach its next checkpoint (push once, record the PR), send A `Taking over from B: ...`
+(≤900 chars), then run hygiene and report before → after; archive yourself only after A
+acknowledges, because archiving a parent cascades to a working child."

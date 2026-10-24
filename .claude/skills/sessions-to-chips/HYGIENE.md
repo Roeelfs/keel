@@ -10,6 +10,16 @@ end a turn in which nothing in your family is working. Never on a schedule. A `[
 session also gets the candidate list automatically: the `manager-hygiene` Stop hook announces
 it once per new candidate set and continues your turn so you can act.
 
+**Backlog first (founder, 2026-10-24).** Before a manager engages with NEW work (a catch-up, a
+handoff, a new unit, a new child) it clears its backlog: every family session idle ≥1 day (leftovers
+of previous iterations, PR merged, closed, open or none) gets a verdict now. Run the pass, verify
+per step 2, then archive it, fold it, or keep it with a named reason and its gate in your state
+file. `review` candidates are not optional: unresolved ≥24h rows are what the next account
+inherits as noise. A session the script does not propose but that is ≥1 day idle (outside the
+family, or with a stale PR state) is found with `list_sessions`, checked the same way, and archived
+or reported. No new child starts while finished ≥1-day-old sessions remain open. Run the pass
+again before closing out the new work.
+
 **Scope.** Only your own family: the sessions you started, and theirs. Never another
 manager's family (a nested `[Manager]` owns its own), never another account, never `delete`
 (archive only; `unarchive_session` restores).

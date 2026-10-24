@@ -29,6 +29,9 @@ workspaces, ~/.claude, side-session notes), and a missing worktree says nothing 
 the path you tested next to any "lost" claim.
 A `workflow_run`-triggered deploy reports the default branch as its headSha; the deployed commit
 is its TRIGGER_SHA input or the release in the logs. Never call a bake citation wrong from headSha alone.
+A child that cannot be read from this account (`get_session` says not found) is the OTHER
+account's: judge it from its stored ledger row and transcript, never as dead. For the no-manager
+ledger add a column "likeliest program" to each AT-RISK row.
 Write {{OUT}} (≤3 KB): a table of AT-RISK children only (title, sessionId, what would be lost in
 one sentence, where it should go: the handoff, a PR, a tracker comment, or a founder question),
 then one line counting SAFE / AT-RISK / NOISE. Return that count line plus the single most
