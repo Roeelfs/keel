@@ -155,6 +155,7 @@ Declaring the files is every manager's first act, in either mode. A resume-mode 
   "goal": "<outcome-shaped; allowed to be fuzzy — lanes give it precision>",
   "manager_session": "<sid>",
   "claims": { "issues": [], "paths": [], "branches": [] },
+  "orgs": [ { "slug": "<org>", "surface": "operator|owner" } ],
   "ceded": [ { "item": "…", "to": "<program>" } ],
   "shared_touch_not_owned": [],
   "lanes": [ { "name": "", "kind": "headless|agent|codex|session", "where": "<branch or session>",
@@ -164,6 +165,10 @@ Declaring the files is every manager's first act, in either mode. A resume-mode 
   "updated_at": "YYYY-MM-DDTHH:MM:SSZ" }
 ```
 
+- `orgs` (optional, Cynap programs): every customer or test org the program touches, with the surface it
+  works. Class (test|real) is never copied here: the SessionStart hook and `tooling/sandbox/org-registry.json`
+  own it. Put the hook's `org=… class=…` line in each lane prompt; owner-surface work on a real org is
+  never a lane, it is a customer-outbox draft for the founder.
 - **Cap ~8 KB. If it is growing, you are logging.** Observed: a manifest grown to 221 KB with
   ~90 improvised keys and a hand-rolled `.bak` beside it, ~55k tokens to read once.
 - `updated_at` is RFC3339 UTC **to the second**, so staleness is machine-evaluable; a date-only
