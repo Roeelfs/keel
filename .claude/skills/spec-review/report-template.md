@@ -29,7 +29,7 @@ CRITICAL keeps its severity (downgrade guard). Never inject EC/Sec/Obs/DRIFT tab
 ### Codex Standard Verdict: <approve|needs-attention|timed-out>
 ### Codex Adversarial Verdict: <approve|needs-attention|timed-out>
 ### Codex Research Verdict: <N elevate suggestions / M cautions / timed-out>
-### Codex Frontier (Astra) Verdict: <approve|approve-with-changes|redesign|timed-out — backfilled by critic (fable)>
+### Codex Frontier (Astra) Verdict: <approve|approve-with-changes|redesign|timed-out — backfilled by critic (opus)>
 ### Investigation Verdict: <N verified elevations / M cautions / brief path / skipped (non-Claude runtime) / timed-out>
 ### Spec Drift Verdict: <clean|N candidates|N investigators|timed-out>
 

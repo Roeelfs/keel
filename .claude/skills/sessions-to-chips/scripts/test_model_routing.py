@@ -74,7 +74,7 @@ class ModelRoutingContractTests(unittest.TestCase):
             ROUTING,
         )
         self.assertIn(
-            "| Boundary / security / adversarial | Fable 5.1 + Opus 5.5 | security |",
+            "| Boundary / security / adversarial | Opus 5.5 + Codex astra | security |",
             ROUTING,
         )
 

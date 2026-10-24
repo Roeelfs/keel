@@ -18,7 +18,7 @@ prompt: |
 
 - Never ask for `ultra` effort — on astra that is *task delegation*, not a quality dial; the wrapper pins `high` for this class.
 - Same sandbox + network flags as the other Codex lanes; relative spec path. **No JSON templates, no output format examples, no markers in the prompt.**
-- Grade by ARTIFACT (`docs/codex-lane-contract.md`): an outfile ending in a usage-limit/auth error, or a gate refusal, is DEAD → the synthesize stage runs one Fable `critic` instead and the report says `timed-out/usage-limit — backfilled by critic (fable)`.
+- Grade by ARTIFACT (`docs/codex-lane-contract.md`): an outfile ending in a usage-limit/auth error, or a gate refusal, is DEAD → the synthesize stage runs one Opus `critic` instead and the report says `timed-out/usage-limit — backfilled by critic (opus)`.
 - The verdict line feeds `### Codex Frontier (Astra) Verdict:`.
 
 **Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.

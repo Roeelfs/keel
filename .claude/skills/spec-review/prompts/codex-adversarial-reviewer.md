@@ -18,6 +18,6 @@ prompt: |
 
 - Dispatched only through `codex-dispatch.sh` (class `falsifier`), by the wrapper, with `CODEX_NETWORK=1 CODEX_SERVICE_TIER=fast`. Never a raw `codex exec`.
 - Relative spec path. **No JSON templates, no output format examples, no markers in the prompt.**
-- Codex-down (outfile ends in a usage-limit/auth error, or the gate refused): the synthesize stage substitutes ONE Fable-pinned `critic` seeded with the same questions, and the report says so.
+- Codex-down (outfile ends in a usage-limit/auth error, or the gate refused): the synthesize stage substitutes ONE Opus-pinned `critic` seeded with the same questions, and the report says so.
 
 **Leaf-agent scope:** you are a leaf agent — do NOT spawn sub-agents or Workflows; do the work inline and return.

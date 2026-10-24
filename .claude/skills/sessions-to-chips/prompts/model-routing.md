@@ -4,9 +4,9 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 
 ## Models
 
-**Claude:** Fable 5.1 (alias `fable`) is the highest-capability final/security gate; Opus 5.5 (alias `opus`) starts complex agentic coding and architecture; Sonnet 5.5 (alias `sonnet`) is the routine-development tier; Haiku 5.5 (alias `haiku`) is the high-volume mining tier.
+**Claude:** Opus 5.5 (alias `opus`) is the Claude ceiling (founder, 2026-10-24: "decrease the use of fable in general. max should be opus 5.5"): architecture, hard RCA, security and final gates; Fable is retired as a dispatch tier and the dispatch hook denies it; Sonnet 5.5 (alias `sonnet`) is the routine-development tier; Haiku 5.5 (alias `haiku`) is the high-volume mining tier.
 
-> Keep Fable + Opus in the deep-review panel for model diversity even though the vendor now documents Fable as the most capable widely released model.
+> Model diversity in the deep-review panel now comes from runtimes: Opus 5.5 beside Codex astra/sol.
 
 **Codex:** model + effort per class is single-sourced in `~/.claude/scripts/codex-headroom.sh` — its case statement is **the one route table** ("THIS CASE STATEMENT IS THE ONE ROUTE TABLE: it owns model AND effort per class"). Ask it with `--route <class>` (echoes `<model> <effort>`), or dispatch directly with `codex-dispatch.sh <class> <promptfile> <outfile> [workdir]`. Never hardcode a `gpt-6-*` id or an effort level in this repo outside that script — the roster and the per-class effort can both change underneath a hardcoded copy. Native children default to Sol-medium for review/implementation and Luna-low for mining/procedure; Astra-high and Sol-high are explicit bounded escalations. The classes it accepts (any of these names routes the same way):
 
@@ -45,7 +45,7 @@ The Codex column names the **class** to pass to `codex-headroom.sh --route <clas
 | Refactor (no API change) | Sonnet | think | standard |
 | Refactor (API change) | Sonnet | think | standard |
 | Hard RCA / critical-path debugging | Opus | think harder | hard-rca |
-| Security review | Fable 5.1 + Opus 5.5 | think harder | security |
+| Security review | Opus 5.5 + Codex astra | think harder | security |
 | Irreversible architecture decision | Opus | think hard | architecture |
 | Migration writing | Sonnet | think | standard |
 | Migration risk review | Sonnet | think | standard |
@@ -60,7 +60,7 @@ The Codex column names the **class** to pass to `codex-headroom.sh --route <clas
 |---|---|---|
 | State miner | Haiku | mining |
 | Topical reviewers | Sonnet | standard |
-| Boundary / security / adversarial | Fable 5.1 + Opus 5.5 | security |
+| Boundary / security / adversarial | Opus 5.5 + Codex astra | security |
 | Coverage verifier | n/a | standard |
 | Failure diagnostician | Sonnet | standard |
 | Failure-cluster diagnostician | Sonnet | standard |
@@ -74,8 +74,8 @@ The Codex column names the **class** to pass to `codex-headroom.sh --route <clas
 3. Respect a lane's `model_override` in the program state file — never silently reclassify it.
 4. An idle lane costs nothing; don't retire one to "save tokens."
 5. Cross-runtime second-opinion (flagship Claude + flagship Codex paired) is the one rational flagship double-up — different bug classes.
-6. Deep-review bucket (security review, adversarial review, final-gate critique) is split **Fable 5.1 + Opus 5.5** — model diversity beats a single-model monoculture; never route all deep-review lanes to one model.
-7. **Ad-hoc delegation defaults to `sonnet`.** Research / investigation / mining / exploration / execution dispatches route to `sonnet` or `haiku`; **`opus` requires a one-line justification in the dispatch**; `fable` (or Codex's `adjudication`/`security` class, which the gate resolves to Astra at high effort) is reserved for the hardest verify / judge / adversarial reasoning. The Fable-pinned NAMED agents (critic, security-reviewer) stay Fable by design. A permissive default silently becomes an opus default — measured: 189 dispatches went opus 59 / sonnet ~80 / haiku 2.
+6. Deep-review bucket (security review, adversarial review, final-gate critique) is split **Opus 5.5 (Claude) + Codex astra/sol** — model diversity beats a single-model monoculture; never route all deep-review lanes to one model.
+7. **Ad-hoc delegation defaults to `sonnet`.** Research / investigation / mining / exploration / execution dispatches route to `sonnet` or `haiku`; **`opus` requires a one-line justification in the dispatch**; Codex's `adjudication`/`security` class (Astra at high effort) is reserved for the hardest verify / judge / adversarial reasoning, with `opus` as the Claude side. The NAMED deep agents (critic, security-reviewer, verifier) are pinned to opus. A permissive default silently becomes an opus default — measured: 189 dispatches went opus 59 / sonnet ~80 / haiku 2.
 8. **Bounded Codex children do not inherit the whole parent by default.** Give them a self-contained mission and `fork_turns: "none"` or the smallest positive slice that carries the evidence. Use `"all"` only when the whole conversation is genuinely load-bearing; full-history forks also inherit the parent's model and effort.
 9. **The long-lived Codex manager root is Sol-medium.** Context accumulation is the root's dominant multiplier; do not pay frontier weight on coordination, waiting, integration, or routine execution.
 10. **Judgment uses a fresh bounded escalation, not a phase-spanning root.** Use Astra classes `architecture`, `security`, `hard-rca`, and `adjudication` for the hardest decisions; use Sol-high `falsifier`/`adversarial` for routine falsification. Return one decision artifact to the Sol-medium root, then stop the judgment lane.

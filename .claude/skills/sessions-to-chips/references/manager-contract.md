@@ -231,11 +231,11 @@ A lane goes interactive **only when it needs the human**. Everything else runs p
 **Codex is the default runtime for every lane that qualifies** (founder, 2026-10-22): Claude
 time is the scarce pool. Pick the runtime by walking these questions in order; the first "yes" wins.
 
-**Security work is pinned to the top tier, whatever runtime the tree picks** (founder, 2026-10-22:
-"all security work needs to be performed by Astra / Fable - no less"). CVE/advisory triage, a
-security patch lane, its reachability or exposure check, security review and secret-rotation
-analysis run on Codex `astra` (`--model frontier`) or Claude `fable`. Never sonnet, opus, luna or
-sol for these, and never a cheaper fallback when the top tier is slow.
+**Security work is pinned to the top tier, whatever runtime the tree picks.** CVE/advisory
+triage, a security patch lane, its reachability or exposure check, security review and
+secret-rotation analysis run on Codex `astra` (`--model frontier`) or Claude `opus`, the Claude
+ceiling (founder, 2026-10-24: "max should be opus 5.5"; this replaces the 10-22 Astra/Fable pin).
+Never sonnet, haiku, luna or sol for these, and never a cheaper fallback when the top tier is slow.
 
 1. **Does the work need the human?** Grilling, a decision the founder must make, a login, password,
    consent screen or identity-browser capture, or a unit the founder wants to watch and steer over
@@ -646,7 +646,7 @@ build-start owner check and the 3rd-fix trigger from `lifecycle.md` Phase 2.
 
 Per-lane model and effort: `../prompts/model-routing.md`. Every dispatch names its model and
 effort on purpose. Ad-hoc Claude delegation defaults to **sonnet**; `opus` needs a one-line
-justification; the deep verify/judge/adversarial bucket is `fable` (Claude) or Codex's bounded
+justification; the deep verify/judge/adversarial bucket is `opus` (the Claude ceiling) or Codex's bounded
 `adjudication`/`security` class at high effort. `codex-headroom.sh --route` owns the Codex model
 id; never restate it here.
 

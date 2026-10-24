@@ -31,10 +31,12 @@ MANIFEST = run_dir.load_manifest()
 # (the legal-auditor lane); both are launcher decisions the main loop makes, so they cannot live elsewhere.
 # 2026-10-20: 9254 -> 9647. Added the decisionSurface gate to Step 1, its investigation theme to Step 3 and the
 # S1 research hand-off step to Step 5 (the system1-elevation lane); all three are main-loop decisions.
-MAX_SKILL_BYTES = 9647
+# 2026-10-22: 9647 -> 10029. The dependency-currency supplement (versions, CVE/KEV advisories, vendor docs)
+# runs in every profile; Step 1 names it and its advisory-feed failure rule, both main-loop decisions.
+MAX_SKILL_BYTES = 10029
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
-SUPPLEMENTS = {"adr-auditor", "legal-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "system1-elevation", "critic-hotfix", "critic-adversarial", "critic-frontier"}
+SUPPLEMENTS = {"adr-auditor", "legal-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "system1-elevation", "critic-hotfix", "critic-adversarial", "critic-frontier", "dependency-currency"}
 
 
 def declared(text, key):
@@ -89,9 +91,11 @@ class ManifestTests(unittest.TestCase):
         self.assertTrue(frontier.get("fallback"))
         for sub in ("critic-frontier", "critic-adversarial"):
             e = next(x for x in MANIFEST["lanes"] if x["label"] == sub)
-            self.assertEqual((e["agentType"], e["model"]), ("critic", "fable"))
+            self.assertEqual((e["agentType"], e["model"]), ("critic", "opus"))
         hotfix = {e["label"] for e in MANIFEST["lanes"] if "hotfix" in e["profiles"]}
-        self.assertEqual(hotfix, {"codebase-verifier", "critic-hotfix", "codex-frontier"})
+        # 2026-10-22 (founder): module shape and dependency/CVE currency are checked even in a hotfix.
+        self.assertEqual(hotfix, {"codebase-verifier", "critic-hotfix", "codex-frontier",
+                                  "architecture-auditor", "dependency-currency"})
 
     def test_gated_lanes_use_declared_gates(self):
         for e in MANIFEST["lanes"]:
