@@ -9,58 +9,6 @@ export const meta = {
   ],
 }
 
-// Single source of lane data. scripts/run_dir.py and the tests parse this block as JSON:
-// keep it strict JSON (double quotes, no comments, no trailing commas).
-// MANIFEST:BEGIN
-const MANIFEST = {
-  "profiles": ["full", "focused", "hotfix"],
-  "gates": ["liveSurface", "security", "cutover", "runtimeWiring", "operatorSurface", "legalSurface", "decisionSurface"],
-  "lanes": [
-    {"label": "completeness-reviewer", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "completeness-reviewer.md", "profiles": ["full"], "gate": null, "idPrefix": "COMP", "tags": ["completeness"]},
-    {"label": "codebase-verifier", "kind": "codex", "agentType": "codex-dispatch", "model": "gpt-6-sol", "prompt": "codebase-verifier.md", "profiles": ["full", "focused", "hotfix"], "gate": null, "idPrefix": "CB", "tags": ["codebase"], "codexClass": "verify", "codexContract": true},
-    {"label": "architecture-auditor", "kind": "codex", "agentType": "codex-dispatch", "model": "gpt-6-sol", "prompt": "architecture-auditor.md", "profiles": ["full", "focused", "hotfix"], "gate": null, "idPrefix": "ARCH", "tags": ["architecture"], "codexClass": "falsifier", "codexContract": true},
-    {"label": "adr-auditor", "kind": "claude", "agentType": "adr-auditor", "model": null, "prompt": null, "profiles": ["full"], "gate": null, "idPrefix": "ADR", "tags": [],
-      "brief": "# ADR-conformance gate\n\nAudit the spec at {{SPEC_PATH}} (project root {{PROJECT_ROOT}}): classify EVERY spec decision CONFORMS | STRAYS | NEEDS-APPROVAL against the Accepted ADRs and platform invariants. Any spec that changes an Accepted ADR or invariant without an explicit founder-approval marker is a HARD STOP: record it as a CRITICAL finding. In your envelope JSON (both the file and the final reply) also set founder_approval_needed (true when the spec changes an Accepted ADR/invariant) and founder_approval_marker_present (true when an explicit founder-approval marker for that change exists in the spec or dossier)."},
-    {"label": "legal-auditor", "kind": "claude", "agentType": "legal-auditor", "model": null, "prompt": null, "profiles": ["full"], "gate": "legalSurface", "idPrefix": "LEG", "tags": [],
-      "brief": "# Legal-conformance gate\n\nAudit the spec at {{SPEC_PATH}} (project root {{PROJECT_ROOT}}) with your agent method: locate the project's legal register through the instructions file's `### Legal docs` pointer, read every source it names, and classify EVERY legal-relevant spec decision BOUND | BREACHES | UNDISCLOSED | DOC-UPDATE-OWED | NEEDS-COUNSEL on the TECHNICAL axis (what is built: recipients, data categories, purposes, retention, access) and the UX axis (what the user is shown and asked: disclosure and its moment, consent and acceptance capture, refusal). Bind only to RECORDED commitments; never rule on what the law requires. A spec that breaches an in-force commitment without an explicit founder-approval marker is a HARD STOP: record it as a CRITICAL finding. With no register, emit the single no-register finding your method defines and nothing else. In your envelope JSON (both the file and the final reply) also set register_found, sources_read (every path you read), class_counts, legal_commitment_breach (true when the spec breaches an in-force commitment) and founder_approval_marker_present (true only when you read a `## Legal Conformance` approval section for that change yourself)."},
-    {"label": "cutover-architect", "kind": "claude", "agentType": "cutover-architect", "model": null, "prompt": null, "profiles": [], "gate": "cutover", "idPrefix": "CUT", "tags": [],
-      "brief": "# Cutover-structure lane (3c)\n\nThe spec at {{SPEC_PATH}} (project root {{PROJECT_ROOT}}) rewrites/replaces/migrates/cuts over an existing capability, gives one a second plane/profile/twin/runtime, or edits ONE representation of a contract that greppably has others. Run your agent method: build the Contract x Representation matrix and count hand-maintained representations per contract AFTER the change; every contract left at >=2 without a fail-closed parity instrument invoked by the mandatory local gate is CRITICAL; write the MIGRATE ledger (what the old code knew that the owner must inherit) and the post-change probes that print the count. Findings file ends with a line `Verdict: STRUCTURED | COEXISTS`."},
-    {"label": "runtime-wiring", "kind": "claude", "agentType": "general-purpose", "model": null, "prompt": null, "profiles": [], "gate": "runtimeWiring", "idPrefix": "RW", "tags": [],
-      "brief": "# Runtime-wiring lane: consumer-side reachability\n\nThe spec at {{SPEC_PATH}} (project root {{PROJECT_ROOT}}) introduces a runtime-read env var/secret/credential ARN/flag/URL, a new deployed function, or moves such a read into shared code. For each new name, enumerate every deployed entry point whose call graph can EXECUTE the read (bundle presence is not reachability), and return the consumer list the spec's infra section must wire: env key + permission grant on each function's ACTUAL execution role, plus the same-change standing gate that pins it. Walk from the consumer, never from the stack. Wired into fewer functions than execute it = CRITICAL."},
-    {"label": "provider-fit-auditor", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "provider-fit-auditor.md", "profiles": ["full"], "gate": null, "idPrefix": "PF", "tags": ["provider-fit"]},
-    {"label": "edge-case-miner", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "edge-case-miner.md", "profiles": ["full", "focused"], "gate": null, "idPrefix": "EC", "tags": ["edge-case"]},
-    {"label": "security-miner", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "security-miner.md", "profiles": ["full"], "gate": "security", "idPrefix": "Sec", "tags": ["security"]},
-    {"label": "observability-auditor", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "observability-auditor.md", "profiles": ["full"], "gate": null, "idPrefix": "Obs", "tags": ["observability"]},
-    {"label": "live-evidence-auditor", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "live-evidence-auditor.md", "profiles": [], "gate": "liveSurface", "idPrefix": "LE", "tags": ["live-evidence"]},
-    {"label": "performance-architect", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "performance-architect.md", "profiles": [], "gate": "liveSurface", "idPrefix": "PERF", "tags": ["performance"]},
-    {"label": "operator-plane-architect", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "operator-plane-architect.md", "profiles": [], "gate": "operatorSurface", "idPrefix": "OP", "tags": []},
-    {"label": "dependency-currency", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "dependency-currency.md", "profiles": ["full", "focused", "hotfix"], "gate": null, "idPrefix": "DEP", "tags": ["dependency"]},
-    {"label": "system1-elevation", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "system1-elevation.md", "profiles": [], "gate": "decisionSurface", "idPrefix": "S1", "tags": ["system1"], "severities": "CRITICAL|MAJOR|MINOR|ELEVATE", "researchHandoffs": true, "reportEveryFinding": true},
-    {"label": "spec-drift-scout", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "spec-drift-scout.md", "profiles": ["full"], "gate": null, "idPrefix": "DRIFT", "tags": ["drift"]},
-    {"label": "critic-hotfix", "kind": "critic", "agentType": "critic", "model": "opus", "prompt": null, "profiles": ["hotfix"], "gate": null, "idPrefix": "CRIT", "tags": ["completeness", "codebase", "architecture", "provider-fit", "edge-case", "security", "observability", "drift", "live-evidence", "codex-adversarial"],
-      "brief": "# Hotfix critic\n\nProd-down review of the spec at {{SPEC_PATH}} (project root {{PROJECT_ROOT}}). Minutes matter: stress-test the fix for what would make it fail or make things worse (rollback safety, blast radius, data loss, the wrong root cause). Answer every assigned question; report only material findings."},
-    {"label": "codex-standard", "kind": "codex", "agentType": "codex-dispatch", "model": "gpt-6-sol", "prompt": "codex-standard-reviewer.md", "profiles": ["full"], "gate": null, "idPrefix": "CSTD", "tags": [], "codexClass": "verify"},
-    {"label": "codex-adversarial", "kind": "codex", "agentType": "codex-dispatch", "model": "gpt-6-sol", "prompt": "codex-adversarial-reviewer.md", "profiles": ["full", "focused"], "gate": null, "idPrefix": "CADV", "tags": ["codex-adversarial"], "codexClass": "falsifier"},
-    {"label": "codex-research", "kind": "codex", "agentType": "codex-dispatch", "model": "gpt-6-sol", "prompt": "codex-research-auditor.md", "profiles": ["full"], "gate": null, "idPrefix": "ELV", "tags": [], "codexClass": "research"},
-    {"label": "codex-frontier", "kind": "codex", "agentType": "codex-dispatch", "model": "gpt-6-astra", "prompt": "codex-frontier-judge.md", "profiles": ["full", "focused", "hotfix"], "gate": null, "idPrefix": "AST", "tags": ["codex-adversarial"], "fallback": true, "codexClass": "frontier"},
-    {"label": "critic-adversarial", "kind": "critic", "agentType": "critic", "model": "opus", "prompt": null, "profiles": [], "gate": null, "idPrefix": "CADV", "tags": ["codex-adversarial"], "substituteFor": "codex-adversarial",
-      "brief": "# Adversarial substitute (Codex lane dead)\n\nThe Codex adversarial lane produced no usable artifact. You replace it: adversarially review the spec at {{SPEC_PATH}} (project root {{PROJECT_ROOT}}): attack surface, data safety, rollback hazards, race conditions, degraded dependencies, observability gaps, architectural fit, over-engineering, vendor semantics under the spec's remedies. Material issues only, each with a concrete failure scenario and a fix."},
-    {"label": "critic-frontier", "kind": "critic", "agentType": "critic", "model": "opus", "prompt": null, "profiles": [], "gate": null, "idPrefix": "AST", "tags": ["codex-adversarial"], "substituteFor": "codex-frontier",
-      "brief": "# Frontier-judgment substitute (Astra lane dead)\n\nThe Codex Astra lane produced no usable artifact. You replace it as the final reviewer for the spec at {{SPEC_PATH}} (project root {{PROJECT_ROOT}}): rule on whether this is the RIGHT thing to build. Deliver (1) the one decision most likely to be wrong, with codebase evidence; (2) the three highest-leverage cross-cutting risks the narrow lanes miss; (3) what a best-in-class team would do differently here; (4) a verdict: approve / approve-with-changes / redesign. Also rule on whether the stated non-goals are the right non-goals. Set `verdict` in your envelope to that verdict word."}
-  ],
-  "support": [
-    {"label": "context-dossier-miner", "agentType": "general-purpose", "model": "opus", "prompt": "context-dossier-miner.md"},
-    {"label": "design-decisions-extractor", "agentType": "general-purpose", "model": "haiku", "prompt": "design-decisions-extractor.md"},
-    {"label": "spec-drift-investigator", "agentType": "general-purpose", "model": "opus", "prompt": "spec-drift-investigator.md", "idPrefix": "DI"},
-    {"label": "finding-falsifier", "agentType": "general-purpose", "model": "sonnet", "prompt": "finding-falsifier.md"},
-    {"label": "codex-envelope-extractor", "agentType": "general-purpose", "model": "sonnet", "prompt": null},
-    {"label": "finding-merger", "agentType": "general-purpose", "model": "sonnet", "prompt": null},
-    {"label": "synthesis-writer", "agentType": "general-purpose", "model": "opus", "prompt": null},
-    {"label": "script-runner", "agentType": "general-purpose", "model": "haiku", "prompt": null}
-  ]
-}
-// MANIFEST:END
-
 // ---------------------------------------------------------------------------
 // args + validation. Everything the stages need arrives here from the main loop.
 // ---------------------------------------------------------------------------
@@ -72,12 +20,6 @@ const RUN = need('runDir')
 if (!RUN.startsWith('/')) throw new Error('spec-review: args.runDir must be an absolute path')
 const SKILL = need('skillDir')
 const SPEC = need('spec')
-const PROFILE = need('profile')
-if (!MANIFEST.profiles.includes(PROFILE)) throw new Error(`spec-review: profile must be one of ${MANIFEST.profiles.join('|')}`)
-const GATES = need('gates')
-for (const g of MANIFEST.gates) {
-  if (!GATES[g] || typeof GATES[g].run !== 'boolean' || !GATES[g].reason) throw new Error(`spec-review: args.gates.${g} must be {run: boolean, reason: string}`)
-}
 const WIRING_TYPE = A.wiringAgentType || 'general-purpose'
 
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
@@ -165,25 +107,22 @@ async function putEnvelope(phaseName, label, env) {
   note(`${label}: envelope NOT written: ${why}`)
 }
 
-// The gate rule: a lane runs when its profile lists it OR its domain gate fired.
-// Skips carry the reason; nothing is dropped silently.
-function planLanes() {
-  const run = []
-  const skipped = []
-  for (const e of MANIFEST.lanes) {
-    if (e.substituteFor) continue
-    const gate = e.gate ? GATES[e.gate] : null
-    if (e.profiles.includes(PROFILE) || (gate && gate.run)) {
-      const entry = { ...e }
-      if (e.label === 'runtime-wiring') entry.agentType = WIRING_TYPE
-      run.push(entry)
-    } else {
-      skipped.push({ label: e.label, reason: gate ? `gate: ${gate.reason}` : `gate: profile ${PROFILE} does not include it` })
-    }
+// The lane plan (tier, profile, gates, lanes, budget, reasons) is resolved ONCE by `run_dir.py plan`
+// from lanes.json + the optional per-repo override, and validated there; this script only reads it.
+// The relayed copy is checksum-verified, because a cheap relay model can mangle a long line.
+async function loadPlan() {
+  let last = ''
+  for (const model of ['haiku', 'sonnet']) {
+    const j = await py('Prepare', 'show-plan', '', true, [model])
+    if (j.ok && typeof j.planText === 'string' && textSum(j.planText) === j.sum) return JSON.parse(j.planText)
+    last = (j.errors || []).join('; ') || 'checksum mismatch on the relayed plan'
   }
-  return { run, skipped }
+  throw new Error(`spec-review: cannot read ${RUN}/plan.json (run \`run_dir.py plan\` first): ${last}`)
 }
-const PLAN = planLanes()
+const P = await loadPlan()
+const PROFILE = P.profile
+const GATES = P.gates
+const PLAN = { run: P.run.map((e) => (e.label === 'runtime-wiring' ? { ...e, agentType: WIRING_TYPE } : e)), skipped: P.skipped }
 const labelsOf = (arr) => arr.map((e) => e.label)
 // Hard-stop wording, keyed by run_dir.py's hardStopReasons. An unknown reason is a gate-lane defect.
 const HARD = {
@@ -228,6 +167,7 @@ async function prepare() {
   if (!init) throw new Error(`spec-review: init printed no JSON object: ${String(r.stdout).slice(0, 300)}`)
   if (!init.ok) throw new Error(`spec-review: init failed: ${(init.errors || []).join('; ')}`)
   note(`decisions mining: ${init.decisionsNote}`)
+  note(`lane plan: tier ${P.tier}, ${P.planned} lanes (${P.plannedCodex} Codex) from ${P.files.join(' + ')}${P.overBudget.length ? '; over budget (advisory): ' + P.overBudget.join('; ') : ''}`)
 
   const MINER = { type: 'object', properties: { ok: { type: 'boolean' }, questions: { type: 'number' } }, required: ['ok'] }
   const minerJobs = [() => agent(`ROLE: context-dossier-miner\n${laneBrief(RUN + '/prompts/context-dossier-miner.md')}`,
@@ -309,8 +249,8 @@ async function synthesize() {
       note(`${e.label}: timed-out/${s ? s.status : 'NO-STATUS'} -- ${e.label === 'codex-adversarial' ? 'backfilled by critic (opus)' : e.label === 'codex-frontier' ? 'backfilled by critic (opus)' : 'no substitute (investigation / dossier carry it)'}; cross-examination unavailable for it`)
     }
   }
-  const subs = MANIFEST.lanes.filter((e) => e.substituteFor && dead.some((d) => d.label === e.substituteFor))
-  MANIFEST.lanes.filter((e) => e.substituteFor && !subs.includes(e)).forEach((e) => note(`${e.label}: SKIPPED (gate: ${e.substituteFor} produced its artifact)`))
+  const subs = P.substitutes.filter((e) => e.substituteFor && dead.some((d) => d.label === e.substituteFor))
+  P.substitutes.filter((e) => e.substituteFor && !subs.includes(e)).forEach((e) => note(`${e.label}: SKIPPED (gate: ${e.substituteFor} produced its artifact)`))
   if (subs.length) await py('Synthesize', 'lanes', `--spec ${sq(SPEC)} --lanes ${sq(labelsOf(subs).join(','))}`)
 
   const extractors = live.map((e) => () => agent(
@@ -377,18 +317,28 @@ async function synthesize() {
     ...PLAN.run.map((e) => `| ${e.label} | ${dead.some((d) => d.label === e.label) ? 'DEAD: ' + (st[e.label] ? st[e.label].status : 'NO-STATUS') : failed.includes(e.label) ? 'FAILED (no output)' : 'run'} | ${e.agentType}${e.model ? ' / ' + e.model : ''} |`),
     ...subs.map((e) => `| ${e.label} | run (substitute for ${e.substituteFor}) | ${e.agentType} / ${e.model} |`),
     ...PLAN.skipped.map((s) => `| ${s.label} | SKIPPED (${s.reason}) | - |`),
-    ...MANIFEST.lanes.filter((e) => e.substituteFor && !subs.includes(e)).map((e) => `| ${e.label} | SKIPPED (gate: ${e.substituteFor} produced its artifact) | - |`),
+    ...P.substitutes.filter((e) => e.substituteFor && !subs.includes(e)).map((e) => `| ${e.label} | SKIPPED (gate: ${e.substituteFor} produced its artifact) | - |`),
   ]
-  const manifestLabels = [...PLAN.run.map((e) => e.label), ...PLAN.skipped.map((s) => s.label), ...MANIFEST.lanes.filter((e) => e.substituteFor).map((e) => e.label)]
-  const skippedLabels = [...PLAN.skipped.map((s) => s.label), ...MANIFEST.lanes.filter((e) => e.substituteFor && !subs.includes(e)).map((e) => e.label)]
+  const manifestLabels = [...PLAN.run.map((e) => e.label), ...PLAN.skipped.map((s) => s.label), ...P.substitutes.filter((e) => e.substituteFor).map((e) => e.label)]
+  const skippedLabels = [...PLAN.skipped.map((s) => s.label), ...P.substitutes.filter((e) => e.substituteFor && !subs.includes(e)).map((e) => e.label)]
+  const gone = (e) => dead.some((d) => d.label === e.label) || failed.includes(e.label)
+  const ran = PLAN.run.filter((e) => !gone(e))
+  const ranCodex = ran.filter((e) => e.kind === 'codex').length
+  const planBlock = [
+    `### Lane plan: tier ${P.tier} (profile ${PROFILE}) — planned ${P.planned} lanes (${P.plannedCodex} Codex), ran ${ran.length} (${ranCodex} Codex); advisory budget: max ${P.budget.maxLanes} lanes / ${P.budget.maxCodexLanes} Codex, token ceiling ${P.budget.tokenCeiling} (actual spend: scripts/lane_spend.py on this Workflow run), falsifier scope ${P.budget.falsifier}. Manifest files: ${P.files.join(', ')}.`,
+    ...P.overBudget.map((w) => `- over budget (advisory): ${w}`),
+    ...PLAN.run.map((e) => `- ${e.label}: ${P.laneReasons[e.label]}`),
+  ]
   const falsLine = `${total} dispatched over ${total} CRITICAL/MAJOR — ${sum.refuted} REFUTED, ${total - sum.refuted} SURVIVES.`
   const synthPrompt = [
     'ROLE: synthesis-writer',
     `You write the final spec-review report. Write it to ${RUN}/report.md following the template ${SKILL}/report-template.md exactly (section order, one canonical Falsifier wave line, F-N ids assigned once). Do not read the spec's design discussion; read evidence only.`,
-    `Spec: ${SPEC}. Profile: ${PROFILE}. Run dir: ${RUN}. Investigation brief: ${A.investigationBrief || 'none (no investigation Workflow ran)'}.`,
+    `Spec: ${SPEC}. Tier: ${P.tier} (profile ${PROFILE}). Run dir: ${RUN}. Investigation brief: ${A.investigationBrief || 'none (no investigation Workflow ran)'}.`,
     `Inputs: every ${RUN}/envelopes/*.json (ids + severities per lane); full findings in ${RUN}/lanes/*.md and ${RUN}/codex/*.out.md; the merged units in ${RUN}/merged.json (use its F-N ids and member lists as the report's F-N ids); falsifier verdicts per F-N in ${RUN}/falsifiers/F-*.json (+ batch-*.md reasoning; a unit's verdict is every member's verdict); ground truth in ${RUN}/dossier.md and ${RUN}/decisions.json; LEARNINGS paths (read the parts that apply; never edit): ${RUN}/inputs/learnings.txt lists them.`,
     'Hard rules the pipeline checks mechanically after you finish:',
     `- EVERY CRITICAL/MAJOR id in ANY envelope appears in report.md, each on a line carrying its verdict word (REFUTED or SURVIVES from its falsifier verdict; SURVIVES-BUT-FIX-REJECTED and NEEDS-LIVE-EVIDENCE count as SURVIVES with the note). Keep each lane's own ids (EC-N, Sec-N, Obs-N, LE-N, DRIFT-N, COMP-N ...). Consensus / Codex-only / Claude-only entries get an F-N id AND list the lane ids they merge.`,
+    `- Right after the Profile line reproduce this block VERBATIM (it carries the planned-vs-actual lane count and the per-lane reasons):`, ...planBlock,
+    `- Falsifier scope at this tier is ${P.budget.falsifier} (${P.budget.falsifier === 'all' ? 'every CRITICAL/MAJOR' : P.budget.falsifier === 'critical' ? 'CRITICAL only' : 'none'}). A CRITICAL/MAJOR id outside that scope was not falsified: its report line carries the verdict word SURVIVES with the note "(not falsified at tier ${P.tier})".`,
     `- The falsifier line is exactly: ### Falsifier wave: ${falsLine}`,
     `- REFUTED findings go to the Resolved section with the refuting evidence; an unrefuted CRITICAL keeps its severity (no downgrade without a REFUTED verdict).`,
     `- Surviving Obs-/Sec-/LE- CRITICAL/MAJOR not applied as spec prose go under "Carried obligations".`,
@@ -415,7 +365,7 @@ async function synthesize() {
   return {
     stage: 'synthesize', reportPath: RUN + '/report.md', reviewPath: A.reviewPath || null,
     counts: { raw: sum.raw, surviving: sum.surviving, refuted: sum.refuted, falsifierDispatched: total },
-    hardStop: sum.hardStop, hardStopReasons: sum.hardStopReasons, failedLanes: failed, gateLog,
+    hardStop: sum.hardStop, hardStopReasons: sum.hardStopReasons, failedLanes: failed, lanes: { tier: P.tier, planned: P.planned, ran: ran.length, plannedCodex: P.plannedCodex, ranCodex, overBudget: P.overBudget }, gateLog,
   }
 }
 

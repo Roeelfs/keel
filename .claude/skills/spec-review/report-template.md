@@ -4,7 +4,7 @@ The synthesis agent writes `<run-dir>/report.md` to this shape. Section order is
 no content are omitted except the header block, the lane manifest and the falsifier-wave line.
 The pipeline checks mechanically (scripts/run_dir.py `check-report` + scripts/validate_review_report.py):
 the one canonical `### Falsifier wave:` line with the real counts; every CRITICAL/MAJOR id from any lane
-envelope present with a REFUTED/SURVIVES verdict on its line; every lane in the manifest as run or
+envelope present with a REFUTED/SURVIVES verdict on its line (SURVIVES with a "not falsified at tier" note when the tier's falsifier scope excludes it); every lane in the manifest as run or
 `SKIPPED (gate: <reason>)`; a Codex Frontier (Astra) or critic-frontier result; no unfilled placeholders;
 a `### Carried obligations` section whenever an Obs-/Sec-/LE- CRITICAL/MAJOR survives.
 
@@ -22,7 +22,8 @@ CRITICAL keeps its severity (downgrade guard). Never inject EC/Sec/Obs/DRIFT tab
 ## Spec Review — Final Report
 
 ### Spec: <filename>
-### Profile: <full | focused | hotfix> — dropped lanes: <none | list, each `SKIPPED (gate: <reason>)`>
+### Profile: <full | standard | light | hotfix> (tier <critical | standard | light | hotfix>) — dropped lanes: <none | list, each `SKIPPED (gate: <reason>)`>
+### Lane plan: <the block the pipeline gave you, verbatim: tier, planned vs ran lane counts, advisory budget, manifest files, per-lane reasons>
 ### Lane manifest
 (Reproduce the manifest table the pipeline gave you VERBATIM: every lane is `run`, `FAILED`, `DEAD: <status>`, or `SKIPPED (gate: <reason>)`. Add the Investigation Workflow as `run (brief: <path>)` or `SKIPPED (gate: <reason>)`.)
 ### Falsifier wave: <N> dispatched over <M> CRITICAL/MAJOR — <R> REFUTED, <S> SURVIVES.

@@ -4,8 +4,8 @@
 A Workflow script has no filesystem access, so every file-shaped job it needs
 (fill a prompt template, validate an envelope, check the report) is a
 subcommand here, run by a tiny script-runner agent. Static lane data
-(agent type, id prefix, question tags, prompt file) is read from the MANIFEST
-literal inside spec-review.workflow.js -- the one place it is declared.
+(agent type, id prefix, question tags, prompt file) is read from lanes.json (plus the
+optional per-repo override), resolved once by `plan` into <run>/manifest.json -- the one manifest.
 
 Run-dir contract (all paths under <run>):
   inputs/      context.md gates.json root.txt learnings.txt prefilter.md
@@ -22,6 +22,7 @@ Every subcommand prints ONE JSON object on stdout; exit 1 means the stage must
 fail (the JSON carries `errors`).
 """
 import argparse
+import copy
 import datetime
 import json
 import os
@@ -31,11 +32,15 @@ import sys
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
-WORKFLOW_JS = SKILL_DIR / "scripts" / "spec-review.workflow.js"
+LANES_JSON = SKILL_DIR / "lanes.json"
+OVERRIDE_REL = ".claude/spec-review.lanes.json"
+RETUNABLE = ("model", "profiles", "codexClass")
 PROMPTS_DIR = SKILL_DIR / "prompts"
 
 SEVERITIES = ("CRITICAL", "MAJOR", "MINOR", "ELEVATE", "CAUTION")
 FALSIFIED = ("CRITICAL", "MAJOR")
+# Per-tier falsifier scope (budget.falsifier): which severities get a falsifier verdict.
+FALSIFIER_MODES = {"all": FALSIFIED, "critical": ("CRITICAL",), "off": ()}
 # An unfilled placeholder is any of: {{NAME}}, <FOCUS...>, <ALL_CAPS_NAME>.
 PLACEHOLDER_RES = (
     re.compile(r"\{\{[^}\n]*\}\}"),
@@ -51,12 +56,92 @@ class StageError(Exception):
 # --------------------------------------------------------------------------
 # manifest + templates
 # --------------------------------------------------------------------------
-def load_manifest(js_path=WORKFLOW_JS):
-    text = Path(js_path).read_text(encoding="utf-8")
-    m = re.search(r"// MANIFEST:BEGIN\s*\nconst MANIFEST = (.*?);?\s*\n// MANIFEST:END", text, re.S)
-    if not m:
-        raise StageError(f"no MANIFEST block in {js_path}")
-    return json.loads(m.group(1))
+def load_manifest(run=None):
+    """The run's resolved manifest (written by `plan`), else the shipped default lanes.json."""
+    if run and (Path(run) / "manifest.json").is_file():
+        return json.loads((Path(run) / "manifest.json").read_text(encoding="utf-8"))
+    return json.loads(LANES_JSON.read_text(encoding="utf-8"))
+
+
+def validate_manifest(m, prompts_dir=PROMPTS_DIR):
+    """One schema for the shipped manifest and the override-merged one."""
+    errors = []
+    profiles, gates = m.get("profiles", []), m.get("gates", [])
+    labels = [e.get("label") for e in m.get("lanes", [])]
+    if len(labels) != len(set(labels)):
+        errors.append("duplicate lane labels")
+    prefixes = [e.get("idPrefix") for e in m.get("lanes", []) if not e.get("substituteFor")]
+    for e in m.get("lanes", []):
+        who = e.get("label", "?")
+        if e.get("kind") not in ("claude", "codex", "critic"):
+            errors.append(f"{who}: kind must be claude|codex|critic")
+        if not e.get("agentType") or not e.get("idPrefix"):
+            errors.append(f"{who}: agentType and idPrefix are required")
+        if not set(e.get("profiles", [])) <= set(profiles):
+            errors.append(f"{who}: profiles must be a subset of {profiles}")
+        if e.get("gate") is not None and e["gate"] not in gates:
+            errors.append(f"{who}: unknown gate {e['gate']}")
+        if e.get("prompt"):
+            if not (Path(prompts_dir) / e["prompt"]).is_file():
+                errors.append(f"{who}: prompt file {e['prompt']} not found")
+        elif not e.get("brief"):
+            errors.append(f"{who}: needs a prompt file or an inline brief")
+    if len(prefixes) != len(set(prefixes)):
+        errors.append("duplicate idPrefix")
+    for name, t in m.get("tiers", {}).items():
+        if t.get("profile") not in profiles:
+            errors.append(f"tier {name}: profile {t.get('profile')} is not declared")
+        b = t.get("budget", {})
+        if b.get("falsifier") not in FALSIFIER_MODES:
+            errors.append(f"tier {name}: budget.falsifier must be one of {sorted(FALSIFIER_MODES)}")
+        for k in ("maxLanes", "maxCodexLanes", "tokenCeiling"):
+            if not isinstance(b.get(k), int) or b[k] < 0:
+                errors.append(f"tier {name}: budget.{k} must be a non-negative integer")
+    for e in (x for x in m.get("lanes", []) if x.get("floor")):
+        missing = [p for p in profiles if p not in e.get("profiles", [])]
+        if missing:
+            errors.append(f"{e['label']}: floor lane must run in every profile (missing {missing})")
+    return errors
+
+
+def merge_override(base, ov):
+    """Apply <root>/.claude/spec-review.lanes.json over the default: add / disable / retune lanes,
+    budget dials per tier. Returns (manifest, errors)."""
+    m, errors = copy.deepcopy(base), []
+    if not isinstance(ov, dict) or set(ov) - {"lanes", "tiers"}:
+        return m, ["override must be an object with only 'lanes' and 'tiers'"]
+    lanes, by = ov.get("lanes", {}), {e["label"]: e for e in m["lanes"]}
+    if set(lanes) - {"add", "disable", "retune"}:
+        errors.append("override.lanes accepts only add, disable, retune")
+    for label in lanes.get("disable", []):
+        e = by.get(label)
+        if not e:
+            errors.append(f"disable: unknown lane {label}")
+        elif e.get("floor") or e.get("gate") or e.get("substituteFor"):
+            errors.append(f"disable: {label} is non-droppable (floor, domain-gate or substitute lane)")
+    m["lanes"] = [e for e in m["lanes"] if e["label"] not in lanes.get("disable", [])]
+    for label, changes in lanes.get("retune", {}).items():
+        e = by.get(label)
+        if not e or label in lanes.get("disable", []):
+            errors.append(f"retune: unknown or disabled lane {label}")
+        elif set(changes) - set(RETUNABLE):
+            errors.append(f"retune {label}: only {list(RETUNABLE)} may change")
+        else:
+            e.update(changes)
+    for e in lanes.get("add", []):
+        if e.get("label") in by:
+            errors.append(f"add: lane {e.get('label')} already exists (use retune)")
+        elif e.get("kind") != "claude" or e.get("prompt") or e.get("substituteFor") or e.get("floor"):
+            errors.append(f"add {e.get('label')}: only kind=claude lanes with an inline brief may be added")
+        else:
+            m["lanes"].append(e)
+            by[e["label"]] = e
+    for name, t in ov.get("tiers", {}).items():
+        if name not in m["tiers"] or set(t) - {"budget"}:
+            errors.append(f"tiers.{name}: unknown tier or non-budget key")
+        else:
+            m["tiers"][name]["budget"].update(t["budget"])
+    return m, errors
 
 
 def all_entries(manifest):
@@ -316,7 +401,7 @@ def cmd_init(a):
     pre.append(f"- open PRs (<=30): {out[:3000] if rc == 0 else 'unavailable: ' + err[:100]}")
     write(run / "inputs" / "prefilter.md", "\n".join(pre) + "\n")
 
-    manifest = load_manifest()
+    manifest = load_manifest(a.run)
     context = ctx.read_text(encoding="utf-8").strip()
     miners = ["context-dossier-miner"] + (["design-decisions-extractor"] if decisions_ok else [])
     for label in miners:
@@ -357,7 +442,7 @@ def cmd_init(a):
 
 def cmd_lanes(a):
     run = Path(a.run)
-    manifest = load_manifest()
+    manifest = load_manifest(a.run)
     errors = []
     try:
         dossier = run / "dossier.md"
@@ -422,7 +507,7 @@ def cmd_lanes(a):
 
 def cmd_drift_briefs(a):
     run = Path(a.run)
-    manifest = load_manifest()
+    manifest = load_manifest(a.run)
     scout = read_json(run / "envelopes" / "spec-drift-scout.json", {})
     items = scout.get("drift_investigations") or []
     if not items:
@@ -538,12 +623,20 @@ def cmd_codex_status(a):
     return emit({"ok": True, "lanes": rows})
 
 
-def all_critical_major(run, labels):
+def falsifier_severities(run):
+    """Severities the run's tier sends to the falsifier wave (plan.json budget.falsifier)."""
+    plan = read_json(Path(run) / "plan.json")
+    return FALSIFIER_MODES[plan["budget"]["falsifier"]] if isinstance(plan, dict) else FALSIFIED
+
+
+def all_critical_major(run, labels, scoped=False):
+    """Every CRITICAL/MAJOR envelope finding; scoped=True keeps only the tier's falsifier scope."""
+    severities = falsifier_severities(run) if scoped else FALSIFIED
     out = []
     for label in labels:
         env, _ = read_envelope(run, label)
         if env:
-            out += [{"lane": label, **f} for f in env["findings"] if f["severity"] in FALSIFIED]
+            out += [{"lane": label, **f} for f in env["findings"] if f["severity"] in severities]
     return out
 
 
@@ -620,7 +713,10 @@ def plan_batches(units, max_batches=6):
 
 def cmd_merge_check(a):
     run = Path(a.run)
-    findings = all_critical_major(run, expand_labels(run, csv(a.lanes)))
+    findings = all_critical_major(run, expand_labels(run, csv(a.lanes)), scoped=True)
+    if not findings:
+        write(run / "merged.json", json.dumps({"units": []}))
+        return emit({"ok": True, "totalIds": 0, "clusters": 0})
     raw = read_json(run / "merged.raw.json")
     if raw is None:
         # The index goes to a file, never stdout: a 60+ id one-line JSON gets mangled when relayed
@@ -641,13 +737,13 @@ def cmd_merge_check(a):
 def cmd_falsify_plan(a):
     run = Path(a.run)
     a.lanes = ",".join(expand_labels(run, csv(a.lanes)))
-    manifest = load_manifest()
+    manifest = load_manifest(a.run)
     root = (run / "inputs" / "root.txt").read_text(encoding="utf-8").strip()
     e = entry_by_label(manifest, "finding-falsifier")
     tpl = (PROMPTS_DIR / e["prompt"]).read_text(encoding="utf-8")
     role_line(tpl, "finding-falsifier")
     body = extract_body(tpl)
-    findings = all_critical_major(run, csv(a.lanes))
+    findings = all_critical_major(run, csv(a.lanes), scoped=True)
     units = load_units(run)
     if units is None:
         raise StageError("merged.json missing: run merge-check before falsify-plan")
@@ -730,7 +826,7 @@ def cmd_summary(a):
     run = Path(a.run)
     labels = expand_labels(run, csv(a.lanes))
     cm = all_critical_major(run, labels)
-    verdicts, refuted, unit_of = falsifier_counts(run, [f["id"] for f in cm])
+    verdicts, refuted, unit_of = falsifier_counts(run, [f["id"] for f in all_critical_major(run, labels, scoped=True)])
     raw = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0}
     surviving = {"CRITICAL": 0, "MAJOR": 0}
     for label in labels:
@@ -762,7 +858,7 @@ def cmd_ledger(a):
         return emit({"ok": False, "errors": [f"no ledger path: pass --path or set ${LEDGER_ENV}"]}, False)
     run = Path(a.run)
     labels = expand_labels(run, csv(a.lanes))
-    verdicts, _, _ = falsifier_counts(run, [f["id"] for f in all_critical_major(run, labels)])
+    verdicts, _, _ = falsifier_counts(run, [f["id"] for f in all_critical_major(run, labels, scoped=True)])
     tally = lambda word: sum(1 for v in verdicts.values() if v == word)
     row = {"date": datetime.date.today().isoformat(), "spec": a.spec or run.name,
            "dispatched": sum(1 for v in verdicts.values() if v != "MISSING"),
@@ -797,7 +893,7 @@ def cmd_check_report(a):
     for f in cm:
         if not re.search(r"(?<![A-Za-z0-9-])" + re.escape(f["id"]) + r"(?![A-Za-z0-9])", text):
             errors.append(f"envelope {f['severity']} id {f['id']} (lane {f['lane']}) is missing from report.md")
-    manifest = load_manifest()
+    manifest = load_manifest(a.run)
     for label in labels:
         if not entry_by_label(manifest, label).get("reportEveryFinding"):
             continue
@@ -819,8 +915,9 @@ def cmd_check_report(a):
     frontier = [l for l in ("codex-frontier", "critic-frontier") if (run / "envelopes" / f"{l}.json").is_file()]
     if not frontier:
         errors.append("Astra frontier lane: neither codex-frontier nor critic-frontier produced an envelope")
-    verdicts, refuted, _ = falsifier_counts(run, [f["id"] for f in cm])
-    n, m = len(cm), len(cm)
+    scoped = all_critical_major(run, labels, scoped=True)
+    verdicts, refuted, _ = falsifier_counts(run, [f["id"] for f in scoped])
+    n, m = len(scoped), len(scoped)
     line = f"{n} dispatched over {m} CRITICAL/MAJOR"
     if not re.search(re.escape(line) + r"[^\n]*?\b" + str(refuted) + r"\s+REFUTED,\s*" + str(n - refuted) + r"\s+SURVIVES", text, re.I):
         errors.append(f"falsifier line must read '{line} — {refuted} REFUTED, {n - refuted} SURVIVES.'")
@@ -830,6 +927,104 @@ def cmd_check_report(a):
     if not errors and a.publish:
         write(a.publish, text)
     return emit({"ok": not errors, "errors": errors, "falsifierLine": f"{n} dispatched over {m} CRITICAL/MAJOR — {refuted} REFUTED, {n - refuted} SURVIVES."}, not errors)
+
+
+# --------------------------------------------------------------------------
+# plan: tier + gates + lanePlan -> the one resolved manifest and lane plan
+# --------------------------------------------------------------------------
+SLIM = ("label", "kind", "agentType", "model", "idPrefix", "reportEveryFinding", "substituteFor", "gate", "profiles")
+
+
+def plan_lanes(m, tier, gates, lane_plan):
+    """The gate rule (a lane runs when its profile lists it OR its domain gate fired), then the
+    LLM's lanePlan add/drop validated against the manifest. Returns (plan, errors)."""
+    errors = []
+    if tier not in m["tiers"]:
+        return None, [f"lanePlan.tier must be one of {sorted(m['tiers'])}"]
+    profile = m["tiers"][tier]["profile"]
+    for g in m["gates"]:
+        if not isinstance(gates.get(g), dict) or not isinstance(gates[g].get("run"), bool) or not gates[g].get("reason"):
+            errors.append(f"gates.{g} must be {{run: boolean, reason: string}}")
+    if errors:
+        return None, errors
+    fired = [g for g in m["gates"] if gates[g]["run"]]
+    if tier == "light" and fired:
+        errors.append(f"tier light is below the floor: gate(s) {fired} fired (a fired gate forces standard or critical)")
+    add, drop, why = lane_plan.get("add", []), lane_plan.get("drop", []), lane_plan.get("reasons", {})
+    lanes = {e["label"]: e for e in m["lanes"] if not e.get("substituteFor")}
+    gate_of = lambda e: gates[e["gate"]] if e.get("gate") else None
+    for label in add + drop:
+        if label not in lanes:
+            errors.append(f"lanePlan: unknown lane label {label}")
+        if not why.get(label):
+            errors.append(f"lanePlan: {label} needs a reason in lanePlan.reasons")
+    for label in why:
+        if label not in lanes:
+            errors.append(f"lanePlan.reasons: unknown lane label {label}")
+    run, skipped, reasons = [], [], {}
+    for e in lanes.values():
+        g = gate_of(e)
+        label = e["label"]
+        if label in drop:
+            if tier == "critical":
+                errors.append(f"lanePlan: {label} cannot be dropped at tier critical (only add)")
+            elif e.get("floor") or (g and g["run"]):
+                errors.append(f"lanePlan: {label} is non-droppable (floor lane or its gate fired)")
+            elif not (profile in e["profiles"] or label in add):
+                errors.append(f"lanePlan: drop {label} is not in tier {tier}'s set")
+            skipped.append({"label": label, "reason": f"gate: lanePlan drop: {why.get(label, '')}"})
+        elif profile in e["profiles"] or (g and g["run"]) or label in add:
+            run.append(e)
+            reasons[label] = why.get(label) or (f"gate {e['gate']} fired: {g['reason']}" if g and g["run"] and profile not in e["profiles"] else f"tier {tier} default set")
+        else:
+            skipped.append({"label": label, "reason": f"gate: {g['reason']}" if g else f"gate: profile {profile} does not include it"})
+    if not errors and not any(e["label"] == "codex-frontier" for e in run):
+        errors.append("the Astra frontier lane is non-droppable in every tier")
+    if errors:
+        return None, errors
+    budget = m["tiers"][tier]["budget"]
+    codex = [e for e in run if e["kind"] == "codex"]
+    over = [f"{len(run)} lanes planned over maxLanes {budget['maxLanes']}"] if len(run) > budget["maxLanes"] else []
+    over += [f"{len(codex)} Codex lanes planned over maxCodexLanes {budget['maxCodexLanes']}"] if len(codex) > budget["maxCodexLanes"] else []
+    slim = lambda e: {k: e[k] for k in SLIM if k in e}
+    return {"tier": tier, "profile": profile, "gates": gates, "budget": budget, "overBudget": over,
+            "planned": len(run), "plannedCodex": len(codex), "laneReasons": reasons,
+            "run": [slim(e) for e in run], "skipped": skipped,
+            "substitutes": [slim(e) for e in m["lanes"] if e.get("substituteFor")]}, []
+
+
+def cmd_plan(a):
+    run, root = Path(a.run), Path(a.root)
+    frame = read_json(Path(a.input))
+    if not isinstance(frame, dict) or not isinstance(frame.get("lanePlan"), dict) or not isinstance(frame.get("gates"), dict):
+        return emit({"ok": False, "errors": ["--input must be a JSON object with 'gates' and 'lanePlan'"]}, False)
+    manifest, files, errors = load_manifest(), [str(LANES_JSON)], []
+    override = root / OVERRIDE_REL
+    if override.is_file():
+        files.append(str(override))
+        ov = read_json(override)
+        manifest, errors = merge_override(manifest, ov)
+    errors += validate_manifest(manifest)
+    if errors:
+        return emit({"ok": False, "errors": errors, "files": files}, False)
+    plan, errors = plan_lanes(manifest, frame["lanePlan"].get("tier"), frame["gates"], frame["lanePlan"])
+    if errors:
+        return emit({"ok": False, "errors": errors, "files": files}, False)
+    plan["files"] = files
+    write(run / "manifest.json", json.dumps(manifest, indent=1))
+    write(run / "plan.json", json.dumps(plan, indent=1))
+    return emit({"ok": True, "tier": plan["tier"], "profile": plan["profile"], "files": files, "planned": plan["planned"],
+                 "plannedCodex": plan["plannedCodex"], "budget": plan["budget"], "overBudget": plan["overBudget"],
+                 "lanes": plan["laneReasons"], "skipped": plan["skipped"]})
+
+
+def cmd_show_plan(a):
+    """The slim plan for the Workflow script, with a checksum so a relayed copy can be verified."""
+    plan = read_json(Path(a.run) / "plan.json")
+    if not isinstance(plan, dict):
+        return emit({"ok": False, "errors": ["plan.json missing: run `plan` first"]}, False)
+    text = json.dumps(plan)
+    return emit({"ok": True, "sum": text_sum(text), "planText": text})
 
 
 def main(argv=None):
@@ -844,6 +1039,8 @@ def main(argv=None):
         p.set_defaults(fn=fn)
         return p
 
+    add("plan", cmd_plan, "root", "input")
+    add("show-plan", cmd_show_plan)
     add("init", cmd_init, "spec", "root", "sid", "runtime", "skill-dir")
     add("lanes", cmd_lanes, "spec", "lanes")
     add("check-envelopes", cmd_check_envelopes, "lanes", "codex")

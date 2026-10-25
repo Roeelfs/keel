@@ -258,3 +258,45 @@ Should I apply Codex's recommendation, Claude's recommendation, or something els
 - If Codex raises a genuinely new concern during debate, add it to the findings
 - If both models converge after discussion, note it as "resolved via cross-examination"
 - **Never auto-resolve a disagreement without user input** on CRITICAL issues
+
+## Tiers, lane plan, per-repo lanes and budgets
+
+Spec review is mandatory; only its depth varies (founder 2026-10-25). `lanes.json` is the one owner of
+lane data: `profiles`, `tiers` (tier -> profile + `budget`), `gates`, `lanes`, `support`. A lane runs
+when its `profiles` list holds the tier's profile OR its domain gate fired OR the `lanePlan` adds it.
+
+| tier | profile | default lanes (plus every gate-fired lane) | falsifier |
+|---|---|---|---|
+| critical | `full` | the full 15-lane set (incl. adr, legal, provider-fit, observability, drift, 3 extra Codex) | every CRITICAL/MAJOR |
+| standard | `standard` | completeness, codebase-verifier, edge-case, dependency-currency, codex-frontier | CRITICAL only |
+| light | `light` | codebase-verifier, edge-case, codex-frontier; refused if any gate fired | off |
+| hotfix | `hotfix` | codebase-verifier, architecture, dependency-currency, critic-hotfix, codex-frontier | every CRITICAL/MAJOR |
+
+Findings outside the falsifier scope still appear in the report (verdict word SURVIVES with a
+"not falsified at tier" note); only the falsifier dispatch is narrowed (`run_dir.py` `FALSIFIER_MODES`).
+`floor` lanes (codex-frontier, codebase-verifier) are non-droppable, as is any lane whose gate fired.
+
+**lanePlan** (main loop, Step 1): `{tier, add, drop, reasons}`, validated by `run_dir.py plan`
+(unknown label, drop at critical, drop of a floor/gate-fired lane, light with a gate fired,
+missing reason: all errors). Reasons print in the report's `### Lane plan` block either way.
+
+**Per-repo override** `<project root>/.claude/spec-review.lanes.json`, merged over `lanes.json` and
+validated by the same `validate_manifest`; both file paths are logged in the plan and the report:
+
+```json
+{"lanes": {"add": [{"label": "pii-check", "kind": "claude", "agentType": "general-purpose", "model": "sonnet",
+                    "prompt": null, "brief": "...{{SPEC_PATH}} ... {{PROJECT_ROOT}}", "profiles": ["full"], "gate": null,
+                    "idPrefix": "PII", "tags": []}],
+           "disable": ["codex-research"],
+           "retune": {"edge-case-miner": {"model": "sonnet", "profiles": ["full", "standard"]}}},
+ "tiers": {"standard": {"budget": {"maxLanes": 9}}}}
+```
+
+Added lanes are `kind: claude` with an inline brief. Retunable fields: `model`, `profiles`, `codexClass`.
+Floor, gate and substitute lanes cannot be disabled.
+
+**Budget dials** (advisory only, never a hard kill): `maxLanes`, `maxCodexLanes`, `falsifier`
+(`all|critical|off`), `tokenCeiling`. The plan warns when planned lanes exceed a max, and the report
+prints planned vs ran lane counts. `tokenCeiling` is UNCALIBRATED: compare it with the per-lane totals
+`scripts/lane_spend.py <workflow run dir>` writes (input + cache + output tokens per `ROLE:` lane) and
+retune after a few real runs.

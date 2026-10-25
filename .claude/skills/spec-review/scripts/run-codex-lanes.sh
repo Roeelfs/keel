@@ -17,7 +17,7 @@
 set -uo pipefail
 
 RUN="${1:?usage: run-codex-lanes.sh <run-dir> <profile>}"
-PROFILE="${2:?missing profile (full|focused|hotfix)}"
+PROFILE="${2:?missing profile (full|standard|light|hotfix)}"
 DISPATCH="${CODEX_DISPATCH:-$HOME/.claude/scripts/codex-dispatch.sh}"
 PLAN="$RUN/codex/plan.tsv"
 STATUS="$RUN/codex/status.tsv"
