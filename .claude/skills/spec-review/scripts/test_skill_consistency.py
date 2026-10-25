@@ -160,7 +160,7 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual({t: v["profile"] for t, v in MANIFEST["tiers"].items()},
                          {"critical": "full", "standard": "standard", "light": "light", "hotfix": "hotfix"})
         by = lambda p: {e["label"] for e in MANIFEST["lanes"] if p in e["profiles"]}
-        self.assertEqual(by("standard"), {"completeness-reviewer", "codebase-verifier", "edge-case-miner", "dependency-currency", "codex-frontier"})
+        self.assertEqual(by("standard"), {"completeness-reviewer", "codebase-verifier", "edge-case-miner", "dependency-currency", "codex-frontier", "adr-auditor"})
         self.assertEqual(by("light"), {"codebase-verifier", "edge-case-miner", "codex-frontier"})
         self.assertEqual({t: v["budget"]["falsifier"] for t, v in MANIFEST["tiers"].items()},
                          {"critical": "all", "standard": "critical", "light": "off", "hotfix": "all"})

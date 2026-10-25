@@ -63,7 +63,7 @@ class LanePlanTests(unittest.TestCase):
     def test_tier_default_sets_and_gate_lanes(self):
         p, errs = plan("standard", gates(security="adds authz"))
         self.assertEqual(errs, [])
-        self.assertEqual({e["label"] for e in p["run"]}, {"completeness-reviewer", "codebase-verifier", "edge-case-miner", "dependency-currency", "codex-frontier", "security-miner"})
+        self.assertEqual({e["label"] for e in p["run"]}, {"completeness-reviewer", "codebase-verifier", "edge-case-miner", "dependency-currency", "codex-frontier", "adr-auditor", "security-miner"})
         self.assertEqual((p["planned"], p["plannedCodex"], p["overBudget"]), (6, 2, []))
         self.assertEqual(p["laneReasons"]["security-miner"], "gate security fired: adds authz")
 
