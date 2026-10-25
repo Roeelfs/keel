@@ -408,6 +408,10 @@ Depth and evidence for each rule are in [`references/manager-contract.md`](refer
 - **Overrides first, every tick:** terminal stop (zero further tools), then completion-mode freeze,
   then an owned child still inside its lease. Only then survey, classify, and dispatch every
   independent forcing function at once.
+- **Spec review is mandatory, depth by risk.** Every spec is `/spec-review`ed before its build lane
+  starts; tier (critical|standard|light) follows risk (access/security/architecture/infra = critical),
+  lanes are chosen per spec and configurable. A spec with no review artifact is not buildable
+  (contract §Spec review is mandatory).
 - **Parallel by default.** Dispatch the whole independent set each tick (Codex ≤5, one writer per
   file set); a blocker blocks only its dependents. Contract §Parallel by default.
 - **Three end states only: DONE, GRILLING, WORKING.** A manager session ends every turn either

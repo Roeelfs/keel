@@ -409,6 +409,20 @@ Missions stay self-contained regardless: MCP is for depth, not for the brief.
   where the lane reads it on its own next tick (its state file), not in its inbox. Address a
   session by id, never by name.
 
+## Spec review is mandatory, depth by risk (founder, 2026-10-25)
+
+Every spec a program produces or builds from is reviewed with `/spec-review` BEFORE any build lane
+starts; there is no "skip it, it is small". What varies is the **tier**, chosen when the spec is
+framed and printed in the report: **critical** (access, security, credentials, tenancy, money,
+personal data, high-level architecture, deep infrastructure, shared-store migrations, cutovers: the
+full wave, every fired lane, frontier judge, falsifier wave, highest budget), **standard** (any other
+behavior-bearing spec: reduced lane set plus any lane whose domain gate fired), **light** (low-risk,
+no gate fired: minimal lanes, small budget). The reviewing session chooses add/drop lanes per spec
+with a one-line reason each (lanes are a configurable manifest, with a per-repo override); a fired
+domain gate sets the floor and cannot be dropped. A manager's `define` unit therefore ends with a
+review verdict at its tier, and its `build` unit's prompt names the reviewed spec path. A spec with
+no review artifact is not buildable: send it back to `define`, do not start the build.
+
 ## Open items are grilled, never parked (founder, 2026-10-23)
 
 **The only three accepted end states (founder, 2026-10-24).** At every turn end, checkpoint and
