@@ -64,7 +64,7 @@ class LanePlanTests(unittest.TestCase):
         p, errs = plan("standard", gates(security="adds authz"))
         self.assertEqual(errs, [])
         self.assertEqual({e["label"] for e in p["run"]}, {"completeness-reviewer", "codebase-verifier", "edge-case-miner", "dependency-currency", "codex-frontier", "adr-auditor", "security-miner"})
-        self.assertEqual((p["planned"], p["plannedCodex"], p["overBudget"]), (6, 2, []))
+        self.assertEqual((p["planned"], p["plannedCodex"], p["overBudget"]), (7, 2, []))
         self.assertEqual(p["laneReasons"]["security-miner"], "gate security fired: adds authz")
 
     def test_light_is_refused_when_any_gate_fired(self):
