@@ -48,6 +48,100 @@ def make_run(tmp, questions=None):
     return run
 
 
+GATES_OFF = {g: {"run": False, "reason": "n/a"} for g in MANIFEST["gates"]}
+
+
+def gates(**fired):
+    return {g: {"run": g in fired, "reason": fired.get(g, "n/a")} for g in MANIFEST["gates"]}
+
+
+def plan(tier, g=None, add=(), drop=(), reasons=None, m=MANIFEST):
+    return run_dir.plan_lanes(m, tier, g or GATES_OFF, {"add": list(add), "drop": list(drop), "reasons": reasons or {}})
+
+
+class LanePlanTests(unittest.TestCase):
+    def test_tier_default_sets_and_gate_lanes(self):
+        p, errs = plan("standard", gates(security="adds authz"))
+        self.assertEqual(errs, [])
+        self.assertEqual({e["label"] for e in p["run"]}, {"completeness-reviewer", "codebase-verifier", "edge-case-miner", "dependency-currency", "codex-frontier", "security-miner"})
+        self.assertEqual((p["planned"], p["plannedCodex"], p["overBudget"]), (6, 2, []))
+        self.assertEqual(p["laneReasons"]["security-miner"], "gate security fired: adds authz")
+
+    def test_light_is_refused_when_any_gate_fired(self):
+        _, errs = plan("light", gates(liveSurface="touches prod"))
+        self.assertTrue(any("below the floor" in e for e in errs))
+        self.assertEqual(plan("light")[1], [])
+
+    def test_drop_rules(self):
+        self.assertTrue(plan("critical", drop=["codex-research"], reasons={"codex-research": "x"})[1])
+        self.assertTrue(any("non-droppable" in e for e in plan("standard", drop=["codex-frontier"], reasons={"codex-frontier": "x"})[1]))
+        _, errs = plan("standard", gates(security="s"), drop=["security-miner"], reasons={"security-miner": "x"})
+        self.assertTrue(any("non-droppable" in e for e in errs))
+        p, errs = plan("standard", drop=["dependency-currency"], reasons={"dependency-currency": "no deps touched"})
+        self.assertEqual(errs, [])
+        self.assertIn("dependency-currency", [s["label"] for s in p["skipped"]])
+
+    def test_unknown_label_and_missing_reason_are_errors(self):
+        self.assertTrue(any("unknown lane label" in e for e in plan("standard", add=["nope"], reasons={"nope": "x"})[1]))
+        self.assertTrue(any("needs a reason" in e for e in plan("standard", add=["codex-research"])[1]))
+
+    def test_add_over_budget_is_advisory_only(self):
+        p, errs = plan("light", add=["codex-research", "codex-adversarial"], reasons={"codex-research": "a", "codex-adversarial": "b"})
+        self.assertEqual(errs, [])
+        self.assertEqual(len(p["overBudget"]), 2)
+
+    def test_override_merge_and_validation(self):
+        ov = {"lanes": {"retune": {"edge-case-miner": {"model": "sonnet"}}, "disable": ["codex-research"],
+                        "add": [{"label": "pii-check", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": None,
+                                 "brief": "b {{SPEC_PATH}}", "profiles": ["standard"], "gate": None, "idPrefix": "PII", "tags": []}]},
+              "tiers": {"standard": {"budget": {"maxLanes": 9}}}}
+        m, errs = run_dir.merge_override(MANIFEST, ov)
+        self.assertEqual((errs, run_dir.validate_manifest(m)), ([], []))
+        self.assertEqual(m["tiers"]["standard"]["budget"]["maxLanes"], 9)
+        self.assertNotIn("codex-research", [e["label"] for e in m["lanes"]])
+        self.assertIn("PII", [e["idPrefix"] for e in m["lanes"]])
+        self.assertEqual(MANIFEST["tiers"]["standard"]["budget"]["maxLanes"], 11, "the default must not be mutated")
+        for bad in ({"lanes": {"disable": ["codex-frontier"]}}, {"lanes": {"disable": ["security-miner"]}},
+                    {"lanes": {"retune": {"edge-case-miner": {"gate": "security"}}}}, {"bogus": 1},
+                    {"lanes": {"add": [{"label": "edge-case-miner"}]}}):
+            self.assertTrue(run_dir.merge_override(MANIFEST, bad)[1], bad)
+        m2, _ = run_dir.merge_override(MANIFEST, {"lanes": {"retune": {"codex-frontier": {"profiles": ["full"]}}}})
+        self.assertTrue(any("floor lane" in e for e in run_dir.validate_manifest(m2)))
+
+    def test_plan_command_writes_manifest_plan_and_scopes_the_falsifier(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run, root = Path(tmp) / "run", Path(tmp) / "root"
+            (root / ".claude").mkdir(parents=True)
+            (root / ".claude" / "spec-review.lanes.json").write_text(json.dumps({"tiers": {"standard": {"budget": {"maxLanes": 4}}}}))
+            frame = Path(tmp) / "frame.json"
+            frame.write_text(json.dumps({"gates": GATES_OFF, "lanePlan": {"tier": "standard", "add": [], "drop": [], "reasons": {}}}))
+            rc, out = call("plan", "--run", str(run), "--root", str(root), "--input", str(frame))
+            self.assertEqual(rc, 0, out)
+            self.assertEqual(len(out["files"]), 2)
+            self.assertEqual(out["budget"]["maxLanes"], 4)
+            self.assertTrue(out["overBudget"])
+            rc, shown = call("show-plan", "--run", str(run))
+            self.assertEqual(run_dir.text_sum(shown["planText"]), shown["sum"])
+            self.assertEqual(run_dir.falsifier_severities(run), ("CRITICAL",))
+            self.assertEqual(run_dir.load_manifest(run)["tiers"]["standard"]["budget"]["maxLanes"], 4)
+            frame.write_text(json.dumps({"gates": GATES_OFF, "lanePlan": {"tier": "bogus"}}))
+            self.assertEqual(call("plan", "--run", str(run), "--root", str(root), "--input", str(frame))[0], 1)
+
+    def test_scoped_findings_follow_the_tier(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = make_run(tmp)
+            (run / "envelopes" / "edge-case-miner.json").write_text(json.dumps({"lane": "edge-case-miner", "answered_questions": [],
+                "findings": [{"id": "EC-1", "severity": "CRITICAL", "title": "a"}, {"id": "EC-2", "severity": "MAJOR", "title": "b"}]}))
+            ids = lambda scoped: [f["id"] for f in run_dir.all_critical_major(run, ["edge-case-miner"], scoped=scoped)]
+            self.assertEqual(ids(True), ["EC-1", "EC-2"], "no plan.json: full scope")
+            (run / "plan.json").write_text(json.dumps({"budget": {"falsifier": "critical"}}))
+            self.assertEqual((ids(True), ids(False)), (["EC-1"], ["EC-1", "EC-2"]))
+            (run / "plan.json").write_text(json.dumps({"budget": {"falsifier": "off"}}))
+            self.assertEqual(ids(True), [])
+            rc, out = call("merge-check", "--run", str(run), "--lanes", "edge-case-miner")
+            self.assertEqual((rc, out["totalIds"], out["clusters"]), (0, 0, 0))
+
+
 class TemplateTests(unittest.TestCase):
     def test_every_template_fills_to_zero_placeholders(self):
         for e in run_dir.all_entries(MANIFEST):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Consistency checks for the spec-review skill: the Workflow script's lane manifest is the
+"""Consistency checks for the spec-review skill: lanes.json is the
 single source of lane data, and everything else (prompt files, SKILL.md) must agree with it.
 
 Run: python3 -m unittest discover -s .claude/skills/spec-review/scripts
@@ -33,7 +33,9 @@ MANIFEST = run_dir.load_manifest()
 # S1 research hand-off step to Step 5 (the system1-elevation lane); all three are main-loop decisions.
 # 2026-10-22: 9647 -> 10029. The dependency-currency supplement (versions, CVE/KEV advisories, vendor docs)
 # runs in every profile; Step 1 names it and its advisory-feed failure rule, both main-loop decisions.
-MAX_SKILL_BYTES = 10029
+# 2026-10-25: 10029 -> 11800. Mandatory-by-tier review: Step 1 now owns the tier choice and the lanePlan
+# (main-loop decisions), the plan command, and the no-skip process gate; the Opt-in and When-NOT-to-use text is gone.
+MAX_SKILL_BYTES = 11800
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
 SUPPLEMENTS = {"adr-auditor", "legal-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "system1-elevation", "critic-hotfix", "critic-adversarial", "critic-frontier", "dependency-currency"}
@@ -153,6 +155,21 @@ class ManifestTests(unittest.TestCase):
         self.assertIn("system1", (SKILL_DIR / "prompts" / "context-dossier-miner.md").read_text(), "the dossier miner must be able to route questions to it")
         self.assertIn("### System 1 Intelligence", (SKILL_DIR / "report-template.md").read_text())
 
+    def test_tiers_map_onto_profiles_and_the_manifest_validates(self):
+        self.assertEqual(run_dir.validate_manifest(MANIFEST), [])
+        self.assertEqual({t: v["profile"] for t, v in MANIFEST["tiers"].items()},
+                         {"critical": "full", "standard": "standard", "light": "light", "hotfix": "hotfix"})
+        by = lambda p: {e["label"] for e in MANIFEST["lanes"] if p in e["profiles"]}
+        self.assertEqual(by("standard"), {"completeness-reviewer", "codebase-verifier", "edge-case-miner", "dependency-currency", "codex-frontier"})
+        self.assertEqual(by("light"), {"codebase-verifier", "edge-case-miner", "codex-frontier"})
+        self.assertEqual({t: v["budget"]["falsifier"] for t, v in MANIFEST["tiers"].items()},
+                         {"critical": "all", "standard": "critical", "light": "off", "hotfix": "all"})
+
+    def test_workflow_reads_the_plan_not_an_inline_manifest(self):
+        src = WORKFLOW_JS.read_text()
+        self.assertNotIn("MANIFEST", src)
+        self.assertIn("'show-plan'", src)
+
     def test_lanes_without_prompt_file_have_a_brief(self):
         for e in MANIFEST["lanes"]:
             if not e.get("prompt"):
@@ -212,6 +229,12 @@ class SkillMdTests(unittest.TestCase):
     def test_deleted_sections_stay_deleted(self):
         for header in ("## Quick Reference", "## Agent Summary"):
             self.assertNotIn(header, SKILL)
+
+    def test_review_is_mandatory_with_a_tier_floor(self):
+        self.assertNotIn("When NOT to use", SKILL)
+        self.assertNotIn("not a cap", SKILL)
+        for needle in ("skipping is not an option", "lanePlan", "run_dir.py plan", "never `light`", "critical", "standard", "light"):
+            self.assertIn(needle, SKILL)
 
     def test_launcher_states_opt_in_and_contract(self):
         for needle in ("opt-in", "spec-review.workflow.js", "run-codex-lanes.sh", "report-template.md",
