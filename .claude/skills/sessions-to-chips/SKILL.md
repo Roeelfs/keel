@@ -408,6 +408,10 @@ Depth and evidence for each rule are in [`references/manager-contract.md`](refer
 - **Overrides first, every tick:** terminal stop (zero further tools), then completion-mode freeze,
   then an owned child still inside its lease. Only then survey, classify, and dispatch every
   independent forcing function at once.
+- **One living map per manager.** The program's goal is a Linear `wayfinder:map` issue (manifest `map`);
+  every new piece of work is filed as a child ticket in the turn it is found, before any lane runs;
+  the manager advances the frontier in parallel until the Destination is met; every report opens with
+  the Map line (done/open/blocked, frontier, needed from you). Contract §Every manager owns one living map.
 - **Spec review is mandatory, depth by risk.** Every spec is `/spec-review`ed before its build lane
   starts; tier (critical|standard|light) follows risk (access/security/architecture/infra = critical),
   lanes are chosen per spec and configurable. A spec with no review artifact is not buildable

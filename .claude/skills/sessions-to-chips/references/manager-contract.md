@@ -180,6 +180,7 @@ Declaring the files is every manager's first act, in either mode. A resume-mode 
   "goal": "<outcome-shaped; allowed to be fuzzy — lanes give it precision>",
   "manager_session": "<sid>",
   "claims": { "issues": [], "paths": [], "branches": [] },
+  "map": { "issue": "CYN-n", "url": "", "project": "" },
   "orgs": [ { "slug": "<org>", "surface": "operator|owner" } ],
   "ceded": [ { "item": "…", "to": "<program>" } ],
   "shared_touch_not_owned": [],
@@ -408,6 +409,37 @@ Missions stay self-contained regardless: MCP is for depth, not for the brief.
   **never as the last act of an unattended wake**. For an unattended lane, leave the instruction
   where the lane reads it on its own next tick (its state file), not in its inbox. Address a
   session by id, never by name.
+
+## Every manager owns one living map (founder, 2026-10-25)
+
+A program is not a to-do list in a state file. Each manager owns exactly ONE **map**: a Linear issue
+labelled `wayfinder:map`, filed in the right Project with its Function label (repo law:
+`docs/agents/issue-tracker.md` §Wayfinding operations; the `/wayfinder` skill owns the shape:
+Destination, Notes, Decisions-so-far, Not-yet-specified, Out-of-scope). Declare it in the manifest as
+`map: {issue, url, project}` when the program is declared. A program that already has a map (e.g.
+CYN-2724, CYN-2162, CYN-2198, CYN-2765) adopts it; one that has none creates it before dispatching
+anything. Use every wayfinder primitive: child tickets as native sub-issues labelled
+`wayfinder:<research|prototype|grilling|task>`, `blockedBy` edges, the frontier query, claim-by-assignee,
+resolve = comment + Done + a line in Decisions-so-far.
+
+What differs from a vanilla wayfinder map: it is **living**. The manager adds to it as it goes.
+- **Every new piece of work becomes a map ticket in the same turn it is discovered**, before any lane
+  is dispatched for it: a finding, a defect, a dead end that needs a replacement path, a review
+  finding, a gate, a founder ruling with consequences, a bake that came back red. No lane runs on
+  work that is not a ticket under the map; the Units table is a view of the frontier, never a
+  second list.
+- Specs, spec reviews (tier per the rule below), builds, verify-release and bakes are tickets or
+  phases of tickets under the map, so "review, workflow and rules" are visible on the map itself.
+- **The goal is the map's Destination.** The manager's job every turn is to advance the frontier: all
+  independent unblocked tickets move in parallel (§Parallel by default); it never idles while the
+  frontier is non-empty. The map completes only when the Destination criteria are met and verified,
+  every child is Done or Canceled, and Not-yet-specified is empty. Then the end state is DONE.
+- **The founder outline is the map.** Every manager report opens with one Map line: `Map CYN-n:
+  done X / open Y / blocked Z; frontier now: <tickets in flight>; needed from you: <the grill round,
+  recommended answer first, kits for human steps, or "nothing">`. That replaces ad-hoc status and
+  tells the founder what is needed without a question from them.
+- Linear is the record (repo law): comments and states live on the tickets; the `.state.md` only
+  points to the map and holds the AT-WAKE pointer.
 
 ## Spec review is mandatory, depth by risk (founder, 2026-10-25)
 
