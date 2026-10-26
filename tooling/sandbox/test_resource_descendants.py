@@ -62,7 +62,7 @@ class DescendantBudgetTests(unittest.TestCase):
         self.state = os.path.join(self.tmp.name, ".keel", "heavy.slots")
         os.makedirs(os.path.dirname(self.state))
         with open(os.path.join(self.tmp.name, ".keel", "resource-policy.json"), "w") as handle:
-            json.dump({"min_free_percent": 0, "max_load_per_core": 0}, handle)
+            json.dump({"min_free_percent": 0, "max_load_per_core": 0, "protected_apps": []}, handle)
         self.wrapper = isolated_wrapper(self.tmp.name)
         self.children = []
         self.owned = []  # (pid, identity) of fixture processes outside any Popen handle.

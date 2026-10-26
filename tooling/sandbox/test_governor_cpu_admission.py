@@ -89,13 +89,59 @@ class PolicyLoadTests(unittest.TestCase):
             policy = heavy_resources.load_policy()
         self.assertEqual((policy.interactive_max_jobs, policy.max_load_per_core), (2, 0.7))
 
-    def test_a_named_app_list_is_not_a_policy_field(self):
+    def test_protected_apps_load_from_the_policy_file(self):
         with tempfile.TemporaryDirectory() as home, mock.patch.object(
                 heavy_resources, 'account_home', return_value=Path(home)):
             (Path(home) / '.keel').mkdir()
             (Path(home) / '.keel' / 'resource-policy.json').write_text(json.dumps({'protected_apps': ['x']}))
+            self.assertEqual(heavy_resources.load_policy().protected_apps, ['x'])
+
+    def test_protected_apps_must_be_strings(self):
+        with tempfile.TemporaryDirectory() as home, mock.patch.object(
+                heavy_resources, 'account_home', return_value=Path(home)):
+            (Path(home) / '.keel').mkdir()
+            (Path(home) / '.keel' / 'resource-policy.json').write_text(json.dumps({'protected_apps': [1]}))
             with self.assertRaises(ValueError):
                 heavy_resources.load_policy()
+
+
+class ProtectedAppTests(unittest.TestCase):
+    def run_state(self, policy, comms, load1=1.0):
+        def run(cmd, **_kwargs):
+            if cmd[-1] == 'comm=':
+                return subprocess.CompletedProcess([], 0, stdout=comms)
+            return ps_output([])
+        with mock.patch.object(heavy_resources.os, 'getloadavg', return_value=(load1, 0, 0)), \
+                mock.patch.object(heavy_resources.os, 'cpu_count', return_value=12), \
+                mock.patch.object(heavy_resources, 'frontmost_pid', return_value=None), \
+                mock.patch.object(heavy_resources.subprocess, 'run', side_effect=run):
+            return heavy_resources.cpu_state(policy, 0)
+
+    GAME = '/Applications/MapleStory Launcher.app/Contents/MacOS/MapleStory Launcher\n/bin/zsh\n'
+
+    def test_default_policy_defers_while_maplestory_runs_even_at_low_load(self):
+        self.assertEqual(self.run_state(Policy(), self.GAME)['reason'], 'protected_app:MapleStory')
+
+    def test_admits_when_no_protected_app_runs(self):
+        self.assertIsNone(self.run_state(Policy(), '/bin/zsh\n/usr/bin/node\n')['reason'])
+
+    def test_empty_list_disables_the_check(self):
+        self.assertIsNone(self.run_state(Policy(protected_apps=()), self.GAME)['reason'])
+
+    def test_configured_list_replaces_the_default(self):
+        policy = Policy(protected_apps=('Steam',))
+        self.assertIsNone(self.run_state(policy, self.GAME)['reason'])
+        self.assertEqual(self.run_state(policy, '/Applications/Steam.app/x\n')['reason'], 'protected_app:Steam')
+
+    def test_high_load_per_core_still_defers_without_a_protected_app(self):
+        self.assertEqual(self.run_state(Policy(), '/bin/zsh\n', load1=17.0)['reason'], 'cpu_pressure')
+
+    def test_ps_failure_fails_open(self):
+        with mock.patch.object(heavy_resources.os, 'getloadavg', return_value=(1, 0, 0)), \
+                mock.patch.object(heavy_resources, 'interactive_load', return_value=(0.0, 0.0)), \
+                mock.patch.object(heavy_resources.subprocess, 'run',
+                                  side_effect=subprocess.CalledProcessError(1, 'ps')):
+            self.assertIsNone(heavy_resources.cpu_state(Policy(), 0)['reason'])
 
 
 class ClaimSlotWiringTests(unittest.TestCase):

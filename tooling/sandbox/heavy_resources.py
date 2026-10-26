@@ -55,6 +55,10 @@ class Policy:
     interactive_busy_cores: float = 0.5
     interactive_reserve_cores: float = 2
     interactive_max_jobs: float = 1
+    # Protected foreground apps (2026-10-27: a heavy suite was admitted while MapleStory ran, and the
+    # game lagged). A running process whose executable path contains one of these names defers every
+    # heavy job with reason `protected_app:<name>`. Empty tuple disables the check.
+    protected_apps: tuple = ('MapleStory',)
     # idle_kill_hours/reclaim_min_interval_s/reclaim_daily_max/reclaim_max_runtime_s (r2) are gone:
     # they rate-limited the tick/lane reclaim engine, which the 2026-09-29 founder rescope dropped
     # in favor of machine-steward (docs/machine-steward.md). Nothing in this repo reads them.
@@ -74,7 +78,7 @@ def load_policy():
         raise ValueError('unknown resource policy fields: ' + ', '.join(sorted(unknown)))
     defaults = asdict(Policy())
     string_fields = {'governor_mode', 'jev_admission'}
-    list_fields = {'broker_shells'}
+    list_fields = {'broker_shells', 'protected_apps'}
     for key, value in values.items():
         if key in ('command_max_seconds', 'class_max_rss_mb'):
             continue
@@ -293,6 +297,18 @@ def interactive_load(policy, job_sessions):
     return front_cores, total
 
 
+def protected_app_running(policy):
+    """The first configured protected app name found in a running process's path, else None."""
+    if not policy.protected_apps:
+        return None
+    result = subprocess.run(['ps', '-axo', 'comm='], text=True, capture_output=True,
+                            check=True, timeout=5, env={**os.environ, 'LC_ALL': 'C'})
+    for name in policy.protected_apps:
+        if name and name in result.stdout:
+            return name
+    return None
+
+
 def cpu_state(policy, running_jobs, job_sessions=frozenset()):
     """The CPU admission decision for one more heavy job beside `running_jobs` held slots.
 
@@ -305,13 +321,16 @@ def cpu_state(policy, running_jobs, job_sessions=frozenset()):
         load1 = os.getloadavg()[0]
         ncpu = os.cpu_count() or 1
         front_cores, interactive_cores = interactive_load(policy, set(job_sessions))
+        protected = protected_app_running(policy)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         return {'reason': None, 'error': type(error).__name__}
     foreground_busy = front_cores >= policy.interactive_min_cores
     reserve = max(policy.interactive_reserve_cores, interactive_cores) if foreground_busy else 0.0
     capacity = policy.max_load_per_core * ncpu - reserve
     reason = None
-    if foreground_busy and running_jobs >= policy.interactive_max_jobs:
+    if protected:
+        reason = 'protected_app:' + protected
+    elif foreground_busy and running_jobs >= policy.interactive_max_jobs:
         reason = 'interactive_foreground'
     elif policy.max_load_per_core and load1 > capacity:
         reason = 'cpu_pressure'

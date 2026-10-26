@@ -53,7 +53,7 @@ class CommandPolicyTests(unittest.TestCase):
 
     def write_policy(self, **values):
         with open(os.path.join(self.keel, "resource-policy.json"), "w", encoding="utf-8") as handle:
-            json.dump({"min_free_percent": 0, "max_load_per_core": 0, **values}, handle)
+            json.dump({"min_free_percent": 0, "max_load_per_core": 0, "protected_apps": [], **values}, handle)
 
     def run_wrapper(self, args, **extra):
         env = {**os.environ, "HOME": self.tmp.name, "KEEL_HEAVY_POLL_SECONDS": "0.05",

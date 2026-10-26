@@ -67,7 +67,7 @@ class AdmissionSitesTests(unittest.TestCase):
 
     def test_admit_preview_prices_the_canonical_class(self):
         # A synthetic preview class maps to the executable the policy entry is keyed by.
-        policy = Policy(class_max_rss_mb={'cynap-sandbox': 1256.0}, max_load_per_core=0)
+        policy = Policy(class_max_rss_mb={'cynap-sandbox': 1256.0}, max_load_per_core=0, protected_apps=())
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch.dict(os.environ, {'KEEL_GOVERNOR_STATE_DIR': str(Path(tmp) / 'gov')}), \
                 mock.patch.object(heavy_runner, 'pressure_reason', return_value=None) as pressure:
@@ -87,7 +87,7 @@ class LoaderTests(unittest.TestCase):
 
     def status(self, **values):
         with open(os.path.join(self.keel, 'resource-policy.json'), 'w', encoding='utf-8') as handle:
-            json.dump({'min_free_percent': 0, 'max_load_per_core': 0, **values}, handle)
+            json.dump({'min_free_percent': 0, 'max_load_per_core': 0, 'protected_apps': [], **values}, handle)
         env = {**os.environ, 'HOME': self.tmp.name, 'KEEL_HEAVY_MIN_FREE_PERCENT': '0'}
         return subprocess.run([self.wrapper, '--status'], env=env, capture_output=True, text=True, timeout=15)
 
@@ -132,7 +132,7 @@ class RunTimeTests(unittest.TestCase):
 
     def run_job(self, **policy):
         with open(os.path.join(self.keel, 'resource-policy.json'), 'w', encoding='utf-8') as handle:
-            json.dump({'min_free_percent': 0, 'max_load_per_core': 0, **policy}, handle)
+            json.dump({'min_free_percent': 0, 'max_load_per_core': 0, 'protected_apps': [], **policy}, handle)
         env = {**os.environ, 'HOME': self.tmp.name, 'KEEL_HEAVY_POLL_SECONDS': '0.05',
                'KEEL_HEAVY_MIN_FREE_PERCENT': '0'}
         return subprocess.run([self.wrapper, sys.executable, '-c', ALLOC], env=env,
