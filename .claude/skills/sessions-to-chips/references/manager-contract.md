@@ -438,6 +438,13 @@ What differs from a vanilla wayfinder map: it is **living**. The manager adds to
   done X / open Y / blocked Z; frontier now: <tickets in flight>; needed from you: <the grill round,
   recommended answer first, kits for human steps, or "nothing">`. That replaces ad-hoc status and
   tells the founder what is needed without a question from them.
+- **Arm yourself and drive to completion (founder, 2026-10-26).** A manager never ends a turn with
+  the frontier non-empty, nothing in flight and no wake armed: that is a stalled program. At turn end
+  check three things and fix the failing one in the same turn: (1) every in-flight lane has a live
+  tracked task or an armed wake (§Every dispatch has a wake); (2) everything newly discovered this turn
+  is a map ticket; (3) every independent unblocked ticket is dispatched, or its blocker is named on
+  the ticket. The only legitimate stops are a GRILLING round (the founder's decisions, recommended
+  answer first) or DONE (Destination verified). "Waiting for the user" with a ready ticket is neither.
 - Linear is the record (repo law): comments and states live on the tickets; the `.state.md` only
   points to the map and holds the AT-WAKE pointer.
 
