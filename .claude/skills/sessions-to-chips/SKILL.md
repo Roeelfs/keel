@@ -332,7 +332,12 @@ message to one is queued to nowhere. Never relay to them.
    and ride the next batch; (b) the first send to a manager may be refused with "Workspace requires
    trust approval": do not retry, ask the human once for all refused sessions; (c) write every
    message you could not deliver to `relay/<date>-pending-sends.md` the moment it is refused, so
-   the resend survives compaction; (d) queued is not read: do not re-send.
+   the resend survives compaction; (d) queued is not read: do not re-send; (e) the catch-up
+   starts the manager's turn as "another session's message", so the app refuses every
+   `start_session` in it (measured 2026-10-26: 0 of 7 managers started a child; one filed a card,
+   five ran hidden lanes). Close the send round with ONE line to the human naming the managers
+   whose next step needs a child session: "type `go` in each"; after a human-typed turn their
+   starts are the human's.
 6. **Converge.** Do not poll. Append each one-line reply to
    `~/.claude/sessions-to-chips/relay/<date>-replies.md`. The program converges when, per manager:
    catch-up reply (archived N, live children X, decisions held), backlog-first reply (before →
