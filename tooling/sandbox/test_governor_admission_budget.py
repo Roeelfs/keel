@@ -20,11 +20,11 @@ import heavy_runner
 TOTAL = 24576.0
 
 
-def pressure(free, others_held=True, budget_mb=None, jev_admit=False, reserve_mb=0.0, **policy):
+def pressure(free, others_held=True, budget_mb=None, jev_admit=False, reserve_mb=0.0, job_class=None, **policy):
     with mock.patch.object(heavy_runner, 'free_percent', return_value=free), \
             mock.patch.object(heavy_runner, 'total_memory_mb', return_value=TOTAL):
         return heavy_runner.pressure_reason(Policy(**policy), others_held, budget_mb=budget_mb, jev_admit=jev_admit,
-                                        reserve_mb=reserve_mb)
+                                        reserve_mb=reserve_mb, job_class=job_class)
 
 
 class PressureReasonTests(unittest.TestCase):
@@ -58,8 +58,12 @@ class PressureReasonTests(unittest.TestCase):
         self.assertIsNone(pressure(33, budget_mb=4522, jev_admit=True))
         self.assertEqual(pressure(33, budget_mb=4522, jev_admit=True, reserve_mb=4000), 'memory_pressure')
 
-    def test_a_budget_is_capped_at_max_rss(self):
+    def test_a_budget_is_capped_at_the_effective_rss_cap(self):
         self.assertEqual(pressure(33, budget_mb=99999), pressure(33))
+        # A class entry moves the cap for that class only (heavy_runner.effective_rss_cap).
+        self.assertIsNone(pressure(33, budget_mb=99999, job_class='wt', class_max_rss_mb={'wt': 1256.0}))
+        self.assertEqual(pressure(33, budget_mb=99999, job_class='other', class_max_rss_mb={'wt': 1256.0}),
+                         'memory_pressure')
 
 
 class JevAdmitsTests(unittest.TestCase):

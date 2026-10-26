@@ -26,6 +26,9 @@ class Policy:
     poll_seconds: float = 0.5
     max_seconds: float = 7200
     command_max_seconds: dict = field(default_factory=dict)
+    # Per-class override of max_rss_mb, keyed by job class (executable basename). Read ONLY through
+    # heavy_runner.effective_rss_cap; absent = every class gets max_rss_mb.
+    class_max_rss_mb: dict = field(default_factory=dict)
     # Machine-governor fields (docs/specs/2026-09-29-machine-governor.md §5.5). Deleted 2026-11-15
     # along with governor_mode/jev_admission if phase 1b has not been promoted by then.
     governor_mode: str = 'shadow'  # 'shadow' | 'enforce'; no 'off' value — shadow enforces the fixed policy.
@@ -73,7 +76,7 @@ def load_policy():
     string_fields = {'governor_mode', 'jev_admission'}
     list_fields = {'broker_shells'}
     for key, value in values.items():
-        if key == 'command_max_seconds':
+        if key in ('command_max_seconds', 'class_max_rss_mb'):
             continue
         if key in string_fields:
             if value not in ('shadow', 'enforce'):
@@ -87,6 +90,7 @@ def load_policy():
             raise ValueError('invalid resource policy field: ' + key)
     policy = {**defaults, **values}
     commands = policy.pop('command_max_seconds')
+    class_caps = policy.pop('class_max_rss_mb')
     policy_max_seconds = policy['max_seconds']  # Commands are checked against the file, not a tightened run.
     # Runtime environment can tighten budgets, never grant extra slots or memory.
     variables = {'max_workers': 'KEEL_HEAVY_MAX_WORKERS',
@@ -122,7 +126,8 @@ def load_policy():
         raise ValueError('invalid pressure or admission wait budget')
     if any(policy[k] <= 0 for k in ['poll_seconds', 'max_rss_mb', 'max_seconds', 'run_pressure_seconds']):
         raise ValueError('resource limits and sample interval must be positive')
-    return Policy(**policy, command_max_seconds=command_budgets(commands, policy_max_seconds))
+    return Policy(**policy, command_max_seconds=command_budgets(commands, policy_max_seconds),
+                  class_max_rss_mb=class_rss_caps(class_caps))
 
 
 def command_budgets(value, max_seconds):
@@ -146,6 +151,30 @@ def command_budgets(value, max_seconds):
         print('with-heavy-lock: ignoring command_max_seconds entry ' + repr(prefix) + ': ' + problem,
               file=sys.stderr)
     return budgets
+
+
+def class_rss_caps(value):
+    """The usable `class_max_rss_mb` entries (class name -> positive finite MiB).
+
+    A bad entry, or a field that is not an object, is dropped with a warning: it must never refuse
+    every heavy command on the machine. A dropped entry falls back to `max_rss_mb`.
+    """
+    if not isinstance(value, dict):
+        print('with-heavy-lock: ignoring class_max_rss_mb: it must be an object mapping a class to MiB',
+              file=sys.stderr)
+        return {}
+    caps = {}
+    for name, mb in value.items():
+        if not isinstance(name, str) or not name or name != name.strip() or '/' in name or ' ' in name:
+            problem = 'the key must be a non-empty executable basename'
+        elif isinstance(mb, bool) or not isinstance(mb, (int, float)) or not math.isfinite(mb) or mb <= 0:
+            problem = 'the value must be a positive finite number of MiB'
+        else:
+            caps[name] = float(mb)
+            continue
+        print('with-heavy-lock: ignoring class_max_rss_mb entry ' + repr(name) + ': ' + problem,
+              file=sys.stderr)
+    return caps
 
 
 def command_seconds(policy, command):

@@ -194,6 +194,7 @@ admit_D      = no floor fires AND running < slots_now_D
 | `cheap_rss_seconds` | 131072 | §5.2 |
 | `disk_floor_gib` / `disk_reclaim_gib` / `swap_growth_floor_mb_per_min` | 10 / 25 / 256 | env overrides may only tighten |
 | `jev_deadline_ms` / `decision_ttl_s` / `admit_p_hi` / `admit_p_lo` / `saturation_deny` | 1500 / 20 / 0.60 / 0.40 / 3.5 | |
+| `class_max_rss_mb` | `{}` (class name -> MiB) | Per-class override of `max_rss_mb`, read ONLY through `heavy_runner.effective_rss_cap(job_class, policy, env)` = `min(class value if present else max_rss_mb, KEEL_HEAVY_MAX_RSS_MB if set)`. A class budget is `min(class p90, effective_rss_cap)`, not `min(class p90, max_rss_mb)`; the admission clamp, `job_budget`, the kill compare, its message and `admit_preview` all use it, so an environment ceiling can lower a class cap and never raise it. A bad entry is dropped with a stderr line, never fails the wrapper. A completed job whose peak exceeds 85% of its cap writes an `rss_headroom_low` event. |
 | `broker_shells` | `["bash","zsh","sh","dash"]` | §6 |
 
 **Removed from r2's field list** (2026-09-29 rescope): `idle_kill_hours`, `reclaim_min_interval_s`,
