@@ -30,7 +30,7 @@ exists the Node preload reads `max_workers` and `turbo_concurrency` from the pol
 file; an unreadable policy means two workers and one turbo task.
 With more than one slot, each job holds one `slot.<n>` lock. A job admitted while
 another slot is held must leave the admission threshold free after its whole
-budget: free MiB minus `max_rss_mb` must stay at or above `min_free_percent` of
+budget: free MiB minus its RSS cap (`max_rss_mb`, or the job class's `class_max_rss_mb` entry; `KEEL_HEAVY_MAX_RSS_MB` can only lower it) must stay at or above `min_free_percent` of
 total memory. Otherwise it waits with `memory_pressure`. A `min_free_percent` of 0
 disables both admission checks.
 The 2 GiB V8 heap setting is a per-process aid; aggregate RSS is measured every 0.5

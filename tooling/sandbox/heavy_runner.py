@@ -65,7 +65,25 @@ JEV_FLOOR_MARGIN_PERCENT = 2  # a JEV admit may never push free memory within th
 YIELD_MAX_SECONDS = 300  # a memory-refused waiter lets smaller jobs pass for at most this long
 
 
-def pressure_reason(policy, others_held, budget_mb=None, jev_admit=False, reserve_mb=0.0):
+def job_class_of(command):
+    return Path(command[0]).name if command else 'other-heavy'
+
+
+def effective_rss_cap(job_class, policy, env=None):
+    """The one owner of "what RSS may this job use", in MiB.
+
+    The class entry (else the policy default) tightened by `KEEL_HEAVY_MAX_RSS_MB` when set: an
+    environment ceiling can lower a class cap and never raise it.
+    """
+    env = os.environ if env is None else env
+    cap = float(policy.class_max_rss_mb.get(job_class, policy.max_rss_mb))
+    if 'KEEL_HEAVY_MAX_RSS_MB' in env:
+        cap = min(cap, float(env['KEEL_HEAVY_MAX_RSS_MB']))
+    return cap
+
+
+def pressure_reason(policy, others_held, budget_mb=None, jev_admit=False, reserve_mb=0.0,
+                    job_class=None):
     """A job alone needs min_free_percent. Beside others it needs that much left after ITS budget.
 
     `budget_mb` is the job's own class p90 RSS (2026-09-30: a flat `max_rss_mb` of 6 GB for every
@@ -83,7 +101,8 @@ def pressure_reason(policy, others_held, budget_mb=None, jev_admit=False, reserv
         return 'memory_pressure'
     if not others_held:
         return None
-    budget = min(budget_mb or policy.max_rss_mb, policy.max_rss_mb)
+    cap = effective_rss_cap(job_class, policy)
+    budget = min(budget_mb or cap, cap)
     after = free - 100 * (budget + (reserve_mb or 0.0)) / total_memory_mb()
     if after >= policy.min_free_percent:
         return None
@@ -207,7 +226,8 @@ def job_sessions(directory):
     return sessions
 
 
-def claim_slot(directory, policy, position, budget_mb=None, jev_admit=False, reserve_mb=0.0):
+def claim_slot(directory, policy, position, budget_mb=None, jev_admit=False, reserve_mb=0.0,
+               job_class=None):
     """Lock the first free slot when no more waiters are ahead than there are free slots.
 
     Returns (stream, slot) or (None, reason). A slot is free when its lock is available and no
@@ -237,7 +257,7 @@ def claim_slot(directory, policy, position, budget_mb=None, jev_admit=False, res
             other.close()
         free = []
         reason = pressure_reason(policy, others_held, budget_mb=budget_mb, jev_admit=jev_admit,
-                                 reserve_mb=reserve_mb) or cpu_state(policy, held, sessions)['reason']
+                                 reserve_mb=reserve_mb, job_class=job_class) or cpu_state(policy, held, sessions)['reason']
         if reason:
             stream.close()
             return None, reason
@@ -257,7 +277,7 @@ def announce_disk_reclaim(directory, command, policy):
         governor_dir = governor_directory()
         snapshot = take_snapshot(governor_dir, directory)
         if admission.needs_reclaim(snapshot, policy):
-            job_class = Path(command[0]).name if command else 'other-heavy'
+            job_class = job_class_of(command)
             context.append_inbox_deduped(governor_dir, context.build('disk_reclaim', job_class, snapshot, policy))
     except Exception as error:  # noqa: BLE001 - must never block a job
         print(f'with-heavy-lock: disk reclaim check unavailable ({type(error).__name__}: {error})',
@@ -277,7 +297,7 @@ def announce_governor_context(directory, reason, command, policy):
         from governor.snapshot import take as take_snapshot
         governor_dir = governor_directory()
         snapshot = take_snapshot(governor_dir, directory)
-        job_class = Path(command[0]).name if command else 'other-heavy'
+        job_class = job_class_of(command)
         table = processes()
         try:
             registry = governor_registry.build(table=table)
@@ -313,7 +333,7 @@ def consult_jev(directory, job_id, command, policy):
         from governor.snapshot import take as take_snapshot
         governor_dir = governor_directory()
         snapshot = take_snapshot(governor_dir, directory, persist=False)
-        job_class = Path(command[0]).name if command else 'other-heavy'
+        job_class = job_class_of(command)
         floors = admission.floors_fired(snapshot, policy)
         d_result = admission.rule_d(job_class, snapshot, policy)
         jev_decision = None
@@ -336,24 +356,25 @@ def queue_position(live, ticket, fresh_after):
 
 
 def job_budget(command, policy):
-    """(budget_mb, reserve_mb): this job's class p90 RSS capped at `max_rss_mb`, and the running
+    """(budget_mb, reserve_mb): this job's class p90 RSS capped at `effective_rss_cap`, and the running
     jobs' not-yet-reached peak (rule D's reserve), from ONE snapshot.
 
     An unmodeled class (fewer than 10 completions; `class_row` falls back to `other-heavy`) or any
-    read failure keeps the conservative flat `max_rss_mb` and a zero reserve. Never raises.
+    read failure keeps the conservative flat effective cap and a zero reserve. Never raises.
     """
     try:
         from governor import admission
         from governor.state import governor_directory
         from governor.snapshot import take as take_snapshot
         snapshot = take_snapshot(governor_directory(), state_directory(), persist=False)
-        job_class = Path(command[0]).name if command else 'other-heavy'
+        job_class = job_class_of(command)
         stats = snapshot.get('class_stats') or {}
         p90 = admission.class_row(stats, job_class).get('rss_p90_mb')
-        budget = min(float(p90), float(policy.max_rss_mb)) if p90 else float(policy.max_rss_mb)
+        cap = effective_rss_cap(job_class, policy)
+        budget = min(float(p90), cap) if p90 else cap
         return budget, admission.reserve_mb(snapshot.get('leases') or [], stats)
     except Exception:  # noqa: BLE001 - a budget read failure must fall back, never block admission
-        return float(policy.max_rss_mb), 0.0
+        return effective_rss_cap(job_class_of(command), policy), 0.0
 
 
 RESERVE_REFRESH_S = 5  # running jobs' unreached peak moves slowly; poll_seconds is 0.5
@@ -366,7 +387,7 @@ def jev_admits(command, policy):
     try:
         from governor import jev_client
         from governor.state import governor_directory
-        job_class = Path(command[0]).name if command else 'other-heavy'
+        job_class = job_class_of(command)
         cached = jev_client._cached_decision(governor_directory(), job_class, time.time(), policy.decision_ttl_s)
         return bool(cached and cached.get('admit') and cached.get('source') == 'jev')
     except Exception:  # noqa: BLE001 - no verdict is simply no JEV admit
@@ -432,7 +453,8 @@ def acquire(directory, policy, job_id, command):
                     reserve_at = time.monotonic() + RESERVE_REFRESH_S
                 jev_admit = jev_admits(command, policy)
                 stream, claimed = claim_slot(directory, policy, position, budget_mb=budget_mb,
-                                             jev_admit=jev_admit, reserve_mb=reserve_mb)
+                                             jev_admit=jev_admit, reserve_mb=reserve_mb,
+                                             job_class=job_class_of(command))
                 if stream:
                     if jev_admit:
                         invalidate_jev_admit(command)  # one admit = one job
@@ -591,11 +613,25 @@ def newer_job_running(directory, lease):
     return False
 
 
-def supervise(child, job, policy, max_seconds, directory, job_id, interruption):
+RSS_HEADROOM_WARN_FRACTION = 0.85
+
+
+def warn_headroom_low(directory, job_id, job_class, peak, cap):
+    """A completed job above 85% of its cap is one growth step from a kill: say so now."""
+    if peak <= RSS_HEADROOM_WARN_FRACTION * cap:
+        return
+    event(directory, 'rss_headroom_low', job_id=job_id, job_class=job_class,
+          peak_rss_mb=round(peak, 2), cap_mb=cap)
+    print(f'with-heavy-lock: rss_headroom_low; job peak {peak:.1f} MiB is over '
+          f'{RSS_HEADROOM_WARN_FRACTION:.0%} of its {cap:g} MiB cap.', file=sys.stderr)
+
+
+def supervise(child, job, policy, max_seconds, directory, job_id, interruption, job_class=None):
     started = time.monotonic()
     peak = 0.0
     low_since = None
     blind_since = None
+    cap = effective_rss_cap(job_class, policy)
     while True:
         if interruption():
             raise InterruptedError(interruption())
@@ -621,7 +657,7 @@ def supervise(child, job, policy, max_seconds, directory, job_id, interruption):
         low_since = (now if low_since is None else low_since) if low else None
         if low and now - low_since >= policy.run_pressure_seconds and newer_job_running(directory, job.lease):
             low_since = now  # The newest job is stopped first; this one gets a fresh window after it goes.
-        reason = ('resource_limit' if rss > policy.max_rss_mb else
+        reason = ('resource_limit' if rss > cap else
                   'wall_time_budget' if now - started > max_seconds else
                   'memory_pressure_during_run' if low and now - low_since >= policy.run_pressure_seconds
                   else None)
@@ -634,7 +670,7 @@ def supervise(child, job, policy, max_seconds, directory, job_id, interruption):
             event(directory, 'completed', job_id=job_id, reason=reason,
                   peak_rss_mb=round(peak, 2), exit_code=137, **budget)
             print(f'with-heavy-lock: {reason}; job peak {peak:.1f} MiB '
-                  f'(budget {policy.max_rss_mb:g} MiB). Only this job was stopped.', file=sys.stderr)
+                  f'(budget {cap:g} MiB). Only this job was stopped.', file=sys.stderr)
             return 137
         code = child.poll()
         if code is not None and not members:
@@ -646,6 +682,7 @@ def supervise(child, job, policy, max_seconds, directory, job_id, interruption):
             result = code if code >= 0 else 128 - code
             event(directory, 'completed', job_id=job_id, reason='exit',
                   peak_rss_mb=round(peak, 2), exit_code=result)
+            warn_headroom_low(directory, job_id, job_class, peak, cap)
             return result
         time.sleep(policy.poll_seconds)
 
@@ -693,7 +730,7 @@ def run_job(command, directory, policy, job_id, stream, slot):
         os.close(gate_write)
         gate_write = None
         return supervise(child, job, policy, command_seconds(policy, command), directory, job_id,
-                         lambda: received_signal)
+                         lambda: received_signal, job_class_of(command))
     except InterruptedError as error:
         event(directory, 'interrupted', job_id=job_id, reason='signal', signal=error.args[0])
         return 128 + int(error.args[0])
@@ -789,7 +826,8 @@ def admit_preview(directory, policy, job_class):
 
     floors = admission.floors_fired(snapshot, policy)
     fast_reason = None if admission.any_unknown(snapshot) else (
-        pressure_reason(policy, running >= 1) or cpu_state(policy, running, job_sessions(directory))['reason'])
+        pressure_reason(policy, running >= 1, job_class=admission.canonical_class(job_class))
+        or cpu_state(policy, running, job_sessions(directory))['reason'])
 
     cached_jev = None
     if not floors and running < policy.slots and fast_reason is None:
