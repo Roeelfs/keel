@@ -297,6 +297,30 @@ def interactive_load(policy, job_sessions):
     return front_cores, total
 
 
+def background_load(policy, job_sessions):
+    """(counted, uncounted) cores of non-job, non-frontmost processes, for the reserve measurement.
+
+    Counted = processes at or above interactive_busy_cores (what interactive_load sums);
+    uncounted = the diffuse remainder it ignores. Anonymous figures only.
+    """
+    front = frontmost_pid()
+    result = subprocess.run(['ps', '-axo', 'pid=,pcpu='], text=True, capture_output=True,
+                            check=True, timeout=5, env={**os.environ, 'LC_ALL': 'C'})
+    counted = uncounted = 0.0
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            continue
+        pid, cores = int(fields[0]), float(fields[1]) / 100
+        if pid == front or session_of(pid) in job_sessions:
+            continue
+        if cores >= policy.interactive_busy_cores:
+            counted += cores
+        else:
+            uncounted += cores
+    return counted, uncounted
+
+
 def protected_app_running(policy):
     """The first configured protected app name found in a running process's path, else None."""
     if not policy.protected_apps:
