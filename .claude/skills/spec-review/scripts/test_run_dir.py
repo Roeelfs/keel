@@ -55,8 +55,8 @@ def gates(**fired):
     return {g: {"run": g in fired, "reason": fired.get(g, "n/a")} for g in MANIFEST["gates"]}
 
 
-def plan(tier, g=None, add=(), drop=(), reasons=None, m=MANIFEST):
-    return run_dir.plan_lanes(m, tier, g or GATES_OFF, {"add": list(add), "drop": list(drop), "reasons": reasons or {}})
+def plan(tier, g=None, add=(), drop=(), reasons=None, m=MANIFEST, **scope):
+    return run_dir.plan_lanes(m, tier, g or GATES_OFF, {"add": list(add), "drop": list(drop), "reasons": reasons or {}}, scope or None)
 
 
 class LanePlanTests(unittest.TestCase):
@@ -66,6 +66,37 @@ class LanePlanTests(unittest.TestCase):
         self.assertEqual({e["label"] for e in p["run"]}, {"completeness-reviewer", "codebase-verifier", "edge-case-miner", "dependency-currency", "codex-frontier", "adr-auditor", "security-miner"})
         self.assertEqual((p["planned"], p["plannedCodex"], p["overBudget"]), (7, 2, []))
         self.assertEqual(p["laneReasons"]["security-miner"], "gate security fired: adds authz")
+
+    def test_critical_needs_a_floor_domain_in_a_cynap_repo(self):
+        self.assertTrue(any("R4" in e for e in plan("critical")[1]), "R4: no floor domain")
+        self.assertEqual(plan("critical", gates(security="adds authz"))[1], [])
+        self.assertEqual(plan("critical", floorDomain="money")[1], [])
+        self.assertEqual(plan("critical", gates(legalSurface="pii"))[1], [])
+        self.assertTrue(any("R2" in e for e in plan("critical", gates(security="x"), harnessOnly=True)[1]))
+        self.assertTrue(any("R3" in e for e in plan("critical", repo="keel")[1]))
+        self.assertTrue(any("R3" in e for e in plan("critical", gates(legalSurface="pii"), repo="keel")[1]), "legal is cynap-only and is no floor elsewhere")
+        self.assertEqual(plan("critical", gates(security="x"), repo="keel")[1], [])
+        self.assertEqual(plan("standard", harnessOnly=True)[1], [])
+
+    def test_cynap_only_lanes_are_skipped_in_other_repos_even_when_their_gate_fired(self):
+        g = gates(legalSurface="pii", operatorSurface="op", security="authz")
+        p, errs = plan("standard", g, repo="keel")
+        self.assertEqual(errs, [])
+        labels = {e["label"] for e in p["run"]}
+        self.assertNotIn("legal-auditor", labels)
+        self.assertNotIn("operator-plane-architect", labels)
+        self.assertIn("security-miner", labels)
+        why = {s["label"]: s["reason"] for s in p["skipped"]}
+        self.assertIn("cynap-only", why["legal-auditor"])
+        p, _ = plan("standard", g)
+        self.assertIn("legal-auditor", {e["label"] for e in p["run"]})
+
+    def test_skip_reason_is_real_never_gate_none(self):
+        p, _ = plan("standard", gates(security="x"))
+        why = {s["label"]: s["reason"] for s in p["skipped"]}
+        self.assertEqual(why["legal-auditor"], "gate: legalSurface not fired")
+        self.assertEqual(why["architecture-auditor"], "gate: not in tier standard (profile standard)")
+        self.assertFalse([r for r in why.values() if "none" in r or "n/a" in r])
 
     def test_light_is_refused_when_any_gate_fired(self):
         _, errs = plan("light", gates(liveSurface="touches prod"))
@@ -114,7 +145,7 @@ class LanePlanTests(unittest.TestCase):
             (root / ".claude").mkdir(parents=True)
             (root / ".claude" / "spec-review.lanes.json").write_text(json.dumps({"tiers": {"standard": {"budget": {"maxLanes": 4}}}}))
             frame = Path(tmp) / "frame.json"
-            frame.write_text(json.dumps({"gates": GATES_OFF, "lanePlan": {"tier": "standard", "add": [], "drop": [], "reasons": {}}}))
+            frame.write_text(json.dumps({"repo": "cynap-monorepo-next", "gates": GATES_OFF, "lanePlan": {"tier": "standard", "add": [], "drop": [], "reasons": {}}}))
             rc, out = call("plan", "--run", str(run), "--root", str(root), "--input", str(frame))
             self.assertEqual(rc, 0, out)
             self.assertEqual(len(out["files"]), 2)

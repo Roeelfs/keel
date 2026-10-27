@@ -180,9 +180,15 @@ def mentions_changed(text, changed):
     return False
 
 
+FIX_VERIFY_MAX_LINES = 150
+
+
 def build_delta(run, prior, plan):
-    """Copy the prior dossier, decide per planned lane re-run vs carry-forward, copy the carried
-    lanes' envelopes (minus REFUTED and applied findings). Returns the state fields and a report."""
+    """Re-review depth (R1). Copy the prior dossier, decide per planned lane re-run vs carry-forward,
+    copy the carried lanes' envelopes (minus REFUTED and applied findings). One mechanism, two modes:
+    fix-verify (edit <= FIX_VERIFY_MAX_LINES changed lines and no newly fired gate): floor lanes plus the
+    lane that raised each applied finding; delta (larger edit): also fired-gate lanes and every lane whose
+    findings cite a changed section. Returns the state fields and a report."""
     run, prior = Path(run), Path(prior)
     need = ["dossier.md", "questions.json", "plan.json", "inputs/spec.snapshot.md"]
     gone = [n for n in need if not (prior / n).is_file()]
@@ -196,6 +202,10 @@ def build_delta(run, prior, plan):
     changed, removed = changed_sections(old, new)
     diff = "".join(difflib.unified_diff(old.splitlines(True), new.splitlines(True), "prior", "current", n=2))
     rd.write(run / "inputs" / "spec.delta.diff", diff)
+    edit_lines = sum(1 for l in diff.splitlines() if l[:1] in "+-" and not l.startswith(("+++", "---")))
+    prior_gates = (rd.read_json(prior / "plan.json", {}) or {}).get("gates") or {}
+    new_gates = [g for g, v in plan["gates"].items() if v["run"] and not (prior_gates.get(g) or {}).get("run")]
+    mode = "fix-verify" if edit_lines <= FIX_VERIFY_MAX_LINES and not new_gates else "delta"
 
     prior_units = (rd.read_json(prior / "merged.json", {}) or {}).get("units") or []
     verdicts = {}
@@ -214,8 +224,8 @@ def build_delta(run, prior, plan):
         reason = None
         if e.get("floor"):
             reason = "tier floor lane"
-        elif protected(e, plan):
-            reason = "fired-gate lane"
+        elif protected(e, plan) and (mode == "delta" or e.get("gate") in new_gates):
+            reason = "fired-gate lane" if mode == "delta" else "newly fired gate"
         elif env is None:
             reason = "no usable prior result"
         else:
@@ -225,7 +235,7 @@ def build_delta(run, prior, plan):
             if mine:
                 reason = f"raised finding(s) {', '.join(mine)} that the spec fix touched"
                 own_extra[label] = "### Prior findings the spec fix addressed (verify each fix is correct and complete)\n" + "\n".join(f"- {i}" for i in mine)
-            elif mentions_changed(text, changed):
+            elif mode == "delta" and mentions_changed(text, changed):
                 reason = "its prior findings reference a changed section"
         if reason:
             rerun.append(label)
@@ -248,13 +258,15 @@ def build_delta(run, prior, plan):
     heads = "\n".join(f"- {c['heading'] or '(preamble)'} (line {c['line']})" for c in changed) or "- (no section text changed)"
     rd.write(run / "inputs" / "delta.md", (
         "\n## Delta re-review (added by the pipeline script -- binding)\n"
-        f"This spec was already reviewed (prior run {prior}). The shared dossier is the prior one. Your prior-round findings for UNCHANGED sections are carried forward and are NOT to be re-raised.\n"
-        f"Review ONLY the changed sections below, plus any unchanged text a change newly depends on. The unified diff is {run}/inputs/spec.delta.diff.\n"
+        f"This spec was already reviewed (prior run {prior}); re-review mode: {mode} ({edit_lines} changed lines). The shared dossier is the prior one. Your prior-round findings for UNCHANGED sections are carried forward and are NOT to be re-raised.\n"
+        + ("Verify ONLY that each fix listed for you is correct and complete and introduced no new defect in the lines it touched.\n" if mode == "fix-verify" else
+           "Review ONLY the changed sections below, plus any unchanged text a change newly depends on.\n")
+        + f"The unified diff is {run}/inputs/spec.delta.diff.\n"
         f"Changed or new sections:\n{heads}\n"
         + (f"Removed sections: {', '.join(removed)}\n" if removed else "")))
     for label, text in own_extra.items():
         rd.write(run / "inputs" / "delta-lanes" / f"{label}.md", text + "\n")
-    return {"rerun": rerun, "carried": carried, "why": why, "changed": changed, "removed": removed, "refutedDropped": sorted(refuted), "appliedDropped": sorted(applied_ids)}
+    return {"mode": mode, "editLines": edit_lines, "newGates": new_gates, "rerun": rerun, "carried": carried, "why": why, "changed": changed, "removed": removed, "refutedDropped": sorted(refuted), "appliedDropped": sorted(applied_ids)}
 
 
 # ---------------------------------------------------------------------------
@@ -274,9 +286,9 @@ def cmd_prepare(a):
     out = {"ok": True, "decisions": init["decisions"], "notes": notes}
     if a.prior:
         d = build_delta(a.run, a.prior, plan)
-        st.update({"rerun": d["rerun"], "carried": d["carried"], "why": d["why"]})
-        notes.append(f"delta re-review of {a.prior}: re-run {len(d['rerun'])} lane(s), carried {len(d['carried'])}; changed sections: {len(d['changed'])}")
-        out.update({"next": "finish-prepare", "delta": {k: d[k] for k in ("rerun", "carried", "why")}})
+        st.update({"rerun": d["rerun"], "carried": d["carried"], "why": d["why"], "reMode": d["mode"]})
+        notes.append(f"{d['mode']} re-review of {a.prior} ({d['editLines']} changed lines): re-run {len(d['rerun'])} lane(s), carried {len(d['carried'])}; changed sections: {len(d['changed'])}")
+        out.update({"next": "finish-prepare", "delta": {k: d[k] for k in ("mode", "rerun", "carried", "why")}})
     else:
         out.update({"next": "extract", "extractCommand": f"bash {a.skill_dir}/scripts/run-codex-lanes.sh {a.run} extract"})
     save_state(a.run, st)
@@ -293,12 +305,11 @@ def cmd_finish_prepare(a):
     st["claude"], st["codex"] = lanes["claude"], lanes["codex"]
     save_state(run, st)
     by = {e["label"]: e for e in plan["run"]}
-    notes = [f"{s['label']}: SKIPPED (gate: {s['reason'].replace('gate: ', '', 1)})" for s in plan["skipped"]]
-    notes += [f"{l}: {st['why'][l]}" for l in st.get("carried", []) if l in st.get("why", {})]
+    notes = [f"{l}: {st['why'][l]}" for l in st.get("carried", []) if l in st.get("why", {})]
     return rd.emit({"ok": True, "claudeLanes": lanes["claude"], "codexLanes": lanes["codex"], "carried": st.get("carried", []),
                     "reviewLanes": [lane_meta(by[l], a.wiring_type) for l in lanes["claude"]],
                     "codexCommand": f"bash {rd.SKILL_DIR}/scripts/run-codex-lanes.sh {run} {plan['profile']}",
-                    "skipped": plan["skipped"], "notes": notes})
+                    "skipped": [f"{s['label']}: {s['reason']}" for s in plan["skipped"]], "notes": notes})
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +320,13 @@ def cmd_post_review(a):
     plan, st = load_plan(run), load_state(run)
     by = {e["label"]: e for e in plan["run"]}
     present = [l for l in st["claude"] if has_envelope(run, l)]
-    notes = [f"{l}: FAILED (no envelope written)" for l in st["claude"] if l not in present]
+    failed = [l for l in st["claude"] if l not in present]
+    if failed:
+        return rd.emit({"ok": False, "failed": failed,
+                        "errors": [f"{l}: FAILED (no envelope written)" for l in failed],
+                        "relaunch": {"stage": "review", "lanes": [lane_meta(by[l]) for l in failed]},
+                        "next": "run Workflow with `relaunch`, then rerun post-review"}, False)
+    notes = []
     if "spec-drift-scout" in present and "driftBriefs" not in st:
         rc, d = sub(rd.cmd_drift_briefs, run=a.run, spec=a.spec)
         if rc:

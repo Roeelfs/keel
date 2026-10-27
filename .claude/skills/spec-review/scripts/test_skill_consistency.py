@@ -37,7 +37,9 @@ MANIFEST = run_dir.load_manifest()
 # (main-loop decisions), the plan command, and the no-skip process gate; the Opt-in and When-NOT-to-use text is gone.
 # 2026-10-27 (CYN-3219): 11800 -> 13500. The script-runner wrapper agents are gone, so the Bash gates (stage.py) and the
 # stage-by-stage launch sequence are main-loop steps that must be named here; the old Step 2-4 prose is deleted.
-MAX_SKILL_BYTES = 13500
+# 2026-10-27 (CYN-3222): 13500 -> 13950. Depth ladder R1-R4 (critical only for a cynap floor-domain spec, fix-verify vs
+# delta re-review, frame.json repo/harnessOnly/floorDomain) is a Step 1/2 launcher decision; superseded text was trimmed.
+MAX_SKILL_BYTES = 13950
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
 SUPPLEMENTS = {"adr-auditor", "legal-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "system1-elevation", "critic-hotfix", "critic-adversarial", "critic-frontier", "dependency-currency"}

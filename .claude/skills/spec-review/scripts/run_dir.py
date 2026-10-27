@@ -1073,9 +1073,37 @@ def cmd_check_report(a):
 SLIM = ("label", "kind", "agentType", "model", "idPrefix", "reportEveryFinding", "substituteFor", "gate", "profiles")
 
 
-def plan_lanes(m, tier, gates, lane_plan):
+FLOOR_GATES = ("security", "cutover")
+
+
+def tier_rule_errors(m, tier, gates, scope, cynap):
+    """Depth rules R2-R4: `critical` is for a spec in a cynap repo that touches a floor domain
+    (security/money/tenancy/cutover/access/personal data/architecture). Everything else tops out at
+    `standard`; a fired floor gate still adds its lane at any tier."""
+    if tier != "critical":
+        return []
+    if scope.get("harnessOnly"):
+        return ["tier critical refused (R2): a tooling/harness-only spec runs at standard; a fired gate still adds its lane"]
+    floor = any(gates[g]["run"] for g in FLOOR_GATES if g in gates) or bool(scope.get("floorDomain")) \
+        or (cynap and gates.get("legalSurface", {}).get("run"))
+    if not floor:
+        why = "R4" if cynap else "R3: not a cynap repo"
+        return [f"tier critical refused ({why}): no security/money/tenancy/cutover floor domain (set frame.floorDomain, or fire a floor gate); use standard"]
+    return []
+
+
+def skip_reason(e, g, profile, tier):
+    if g:
+        r = (g.get("reason") or "").strip()
+        return f"gate: {e['gate']} not fired" + (f" ({r})" if r.lower() not in ("", "none", "n/a", "na") else "")
+    return f"gate: not in tier {tier} (profile {profile})"
+
+
+def plan_lanes(m, tier, gates, lane_plan, scope=None):
     """The gate rule (a lane runs when its profile lists it OR its domain gate fired), then the
     LLM's lanePlan add/drop validated against the manifest. Returns (plan, errors)."""
+    scope = scope or {}
+    cynap = scope.get("repo", m["cynapRepos"][0]) in m["cynapRepos"]
     errors = []
     if tier not in m["tiers"]:
         return None, [f"lanePlan.tier must be one of {sorted(m['tiers'])}"]
@@ -1085,6 +1113,7 @@ def plan_lanes(m, tier, gates, lane_plan):
             errors.append(f"gates.{g} must be {{run: boolean, reason: string}}")
     if errors:
         return None, errors
+    errors += tier_rule_errors(m, tier, gates, scope, cynap)
     fired = [g for g in m["gates"] if gates[g]["run"]]
     if tier == "light" and fired:
         errors.append(f"tier light is below the floor: gate(s) {fired} fired (a fired gate forces standard or critical)")
@@ -1103,7 +1132,9 @@ def plan_lanes(m, tier, gates, lane_plan):
     for e in lanes.values():
         g = gate_of(e)
         label = e["label"]
-        if label in drop:
+        if e.get("cynapOnly") and not cynap:
+            skipped.append({"label": label, "reason": f"gate: cynap-only lane, repo {scope.get('repo')} is not a cynap repo"})
+        elif label in drop:
             if tier == "critical":
                 errors.append(f"lanePlan: {label} cannot be dropped at tier critical (only add)")
             elif e.get("floor") or (g and g["run"]):
@@ -1115,7 +1146,7 @@ def plan_lanes(m, tier, gates, lane_plan):
             run.append(e)
             reasons[label] = why.get(label) or (f"gate {e['gate']} fired: {g['reason']}" if g and g["run"] and profile not in e["profiles"] else f"tier {tier} default set")
         else:
-            skipped.append({"label": label, "reason": f"gate: {g['reason']}" if g else f"gate: profile {profile} does not include it"})
+            skipped.append({"label": label, "reason": skip_reason(e, g, profile, tier)})
     if not errors and not any(e["label"] == "codex-frontier" for e in run):
         errors.append("the Astra frontier lane is non-droppable in every tier")
     if errors:
@@ -1145,10 +1176,13 @@ def cmd_plan(a):
     errors += validate_manifest(manifest)
     if errors:
         return emit({"ok": False, "errors": errors, "files": files}, False)
-    plan, errors = plan_lanes(manifest, frame["lanePlan"].get("tier"), frame["gates"], frame["lanePlan"])
+    if not isinstance(frame.get("repo"), str) or not frame["repo"]:
+        return emit({"ok": False, "errors": ["frame.repo (the repo name the spec belongs to) is required"], "files": files}, False)
+    scope = {"repo": frame["repo"], "harnessOnly": bool(frame.get("harnessOnly")), "floorDomain": str(frame.get("floorDomain") or "")}
+    plan, errors = plan_lanes(manifest, frame["lanePlan"].get("tier"), frame["gates"], frame["lanePlan"], scope)
     if errors:
         return emit({"ok": False, "errors": errors, "files": files}, False)
-    plan["files"] = files
+    plan["files"], plan["scope"] = files, scope
     write(run / "manifest.json", json.dumps(manifest, indent=1))
     write(run / "plan.json", json.dumps(plan, indent=1))
     return emit({"ok": True, "tier": plan["tier"], "profile": plan["profile"], "files": files, "planned": plan["planned"],

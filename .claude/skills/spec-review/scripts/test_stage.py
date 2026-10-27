@@ -43,12 +43,12 @@ def gates(**fired):
     return {g: {"run": g in fired, "reason": fired.get(g, "n/a")} for g in MANIFEST["gates"]}
 
 
-def new_run(tmp, tier="standard", name="run", spec=SPEC_V1, fired=None):
+def new_run(tmp, tier="standard", name="run", spec=SPEC_V1, fired=None, repo="cynap-monorepo-next", **scope):
     run, root = Path(tmp) / name, Path(tmp) / "root"
     root.mkdir(exist_ok=True)
     (root / "spec.md").write_text(spec)
     frame = Path(tmp) / f"{name}-frame.json"
-    frame.write_text(json.dumps({"gates": gates(**(fired or {})), "lanePlan": {"tier": tier, "add": [], "drop": [], "reasons": {}}}))
+    frame.write_text(json.dumps({"repo": repo, **({"floorDomain": "test floor"} if tier == "critical" else {}), **scope, "gates": gates(**(fired or {})), "lanePlan": {"tier": tier, "add": [], "drop": [], "reasons": {}}}))
     rc, out = rcall("plan", "--run", str(run), "--root", str(root), "--input", str(frame))
     assert rc == 0, out
     for d in ("inputs", "envelopes", "lanes", "codex", "prompts", "falsifiers"):
@@ -162,7 +162,11 @@ class ReviewFlowTests(unittest.TestCase):
             self.assertIn("codebase-verifier", out["codexLanes"])
             self.assertIn("bash ", out["codexCommand"])
             rc, out = scall("post-review", "--run", str(run), "--spec", "spec.md")
-            self.assertTrue(out["notes"] and "FAILED (no envelope written)" in out["notes"][0] or True)
+            self.assertFalse(out["ok"], "a lane with no envelope must fail the gate loudly")
+            self.assertEqual(rc, 1)
+            self.assertIn("edge-case-miner", out["failed"])
+            self.assertEqual(out["relaunch"]["stage"], "review")
+            self.assertIn("FAILED (no envelope written)", out["errors"][0])
             # edge-case-miner answers nothing -> a repair job is asked for
             assign = json.loads((run / "assignments.json").read_text())
             for label in stage.load_state(run)["claude"]:
@@ -385,6 +389,31 @@ class DeltaReviewTests(unittest.TestCase):
             kept = [f["id"] for f in env_prior["findings"] if f["id"] not in refuted | applied]
             self.assertEqual(kept, ["EC-3"])
             self.assertTrue(plan["run"])
+
+    def test_small_edit_is_fix_verify_only_and_large_edit_is_delta(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prior, root = self.prior_run(tmp)
+            plan = stage.load_plan(prior)
+            fired = next(e for e in plan["run"] if e.get("gate")) if any(e.get("gate") for e in plan["run"]) else None
+            run, _ = new_run(tmp, name="small", spec=SPEC_V2)
+            out = prepare(run, root, "--prior", str(prior))[1]
+            self.assertEqual(out["delta"]["mode"], "fix-verify")
+            self.assertEqual(sorted(out["delta"]["rerun"]), ["codebase-verifier", "codex-frontier", "edge-case-miner"])
+            self.assertIn("fix-verify", (run / "inputs" / "delta.md").read_text())
+            big = SPEC_V1.replace("the design", "the design\n" + "\n".join(f"line {i}" for i in range(stage.FIX_VERIFY_MAX_LINES + 5)))
+            run2, _ = new_run(tmp, name="big", spec=big)
+            out = prepare(run2, root, "--prior", str(prior))[1]
+            self.assertEqual(out["delta"]["mode"], "delta")
+            self.assertIn("edge-case-miner", out["delta"]["rerun"])
+            self.assertEqual(fired, None)
+
+    def test_newly_fired_gate_forces_delta_and_reruns_that_lane(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prior, root = self.prior_run(tmp)
+            run, _ = new_run(tmp, name="gate", spec=SPEC_V2, fired={"security": "adds authz"})
+            out = prepare(run, root, "--prior", str(prior))[1]
+            self.assertEqual(out["delta"]["mode"], "delta")
+            self.assertIn("security-miner", out["delta"]["rerun"])
 
     def test_unseedable_prior_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -319,16 +319,24 @@ cost follows turns x context. The levers, all in this skill: no LLM agent runs a
 `stage.py` gate the main loop runs); the dossier and decisions miners and the Codex envelope extraction run on
 Codex (`verify` / `luna` / `luna`), with the Claude lane as the fallback only when the Codex lane is DEAD,
 BLOCKED-ON-QUOTA or fails validation (graded by artifact); a re-review reuses the prior dossier and re-runs only
-the changed-input lanes; the falsifier skips corroborated MAJOR; ceilings are enforced.
+the lanes its depth mode selects; the falsifier skips corroborated MAJOR; ceilings are enforced.
 
-**Delta re-review** (`stage.py prepare --prior <old run dir>`): copies the prior dossier, questions and decisions;
-diffs the spec by markdown section (`inputs/spec.delta.diff`, `inputs/delta.md`). A lane RE-RUNS when it is a
-`floor` lane, its gate fired, it has no usable prior result, it raised a finding that `mark-applied` recorded as
-applied (verify the fix), or its prior findings text names a changed section heading or `section N`. Every other
-lane is CARRIED: its prior envelope and findings file are copied minus REFUTED and applied findings, and listed in
-the manifest as "carried forward". Re-run lanes get a delta block in their brief (changed sections only). The
-merge and falsifier waves run over carried + new findings together. A review whose prior run dir has no
-`inputs/spec.snapshot.md` (any run made before this change) cannot seed a delta: run a full review.
+**Re-review depth (R1, one mechanism)** (`stage.py prepare --prior <old run dir>`): copies the prior dossier,
+questions and decisions and diffs the spec by markdown section (`inputs/spec.delta.diff`, `inputs/delta.md`). The
+mode is measured, not chosen: **fix-verify** when the edit is 150 changed lines or fewer (`FIX_VERIFY_MAX_LINES`) and
+no gate fired that the prior plan did not have; **delta** otherwise. Both RE-RUN a `floor` lane, a lane with no
+usable prior result, and a lane that raised a finding `mark-applied` recorded as applied (verify the fix). Delta
+also re-runs fired-gate lanes and lanes whose prior findings name a changed section heading or `section N`;
+fix-verify re-runs a gate lane only if its gate is newly fired. Every other lane is CARRIED: prior envelope and
+findings copied minus REFUTED and applied findings, listed as "carried forward". Re-run briefs get the delta block.
+Merge and falsifier waves run over carried + new findings. No new dossier in either mode; a prior run without
+`inputs/spec.snapshot.md` cannot seed a re-review: run a full review. No spec is ever skipped by this ladder.
+
+**Tier rules (R2-R4)**, enforced by `run_dir.py plan` from `frame.json` (`repo`, `harnessOnly`, `floorDomain`):
+`critical` is refused unless the repo is in `lanes.json` `cynapRepos`, the spec is not tooling/harness-only, and a
+floor domain exists (security or cutover gate fired, legalSurface fired in a cynap repo, or `floorDomain` named);
+otherwise run `standard`, where every fired gate still adds its lane. Lanes marked `cynapOnly` (legal-auditor,
+operator-plane-architect) are skipped, with that reason, in any other repo.
 
 **Applied flag.** Each merged unit in `merged.json` carries `applied` (null until the fixing step records it with
 `stage.py mark-applied --ids F-1,F-3 [--status false]`), so value per token is measured, not guessed.
