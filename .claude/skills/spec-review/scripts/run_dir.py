@@ -1075,6 +1075,14 @@ SLIM = ("label", "kind", "agentType", "model", "idPrefix", "reportEveryFinding",
 
 FLOOR_GATES = ("security", "cutover")
 
+# A fired gate must quote what it matched: a path, file:line, backticked token or a snake_case/camelCase identifier.
+GATE_EVIDENCE = re.compile(r"`[^`\s]+`|[\w.-]{2,}/[\w./-]{2,}|\b[\w-]+\.(?:tsx?|jsx?|mjs|py|sh|json|md|sql|ya?ml|tf)\b|\w:\d+\b|\b[a-z]+_[a-z0-9_]+\b|\b[a-z]+[A-Z]\w*\b")
+
+
+def gate_evidence_errors(gates):
+    return [f"gates.{g}.reason must quote the evidence that fired it (a path, file:line, `identifier` or snake_case/camelCase name); got: {v['reason']!r}"
+            for g, v in gates.items() if v.get("run") and not GATE_EVIDENCE.search(v["reason"])]
+
 
 def tier_rule_errors(m, tier, gates, scope, cynap):
     """Depth rules R2-R4: `critical` is for a spec in a cynap repo that touches a floor domain
@@ -1111,6 +1119,7 @@ def plan_lanes(m, tier, gates, lane_plan, scope=None):
     for g in m["gates"]:
         if not isinstance(gates.get(g), dict) or not isinstance(gates[g].get("run"), bool) or not gates[g].get("reason"):
             errors.append(f"gates.{g} must be {{run: boolean, reason: string}}")
+    errors += gate_evidence_errors(gates) if not errors else []
     if errors:
         return None, errors
     errors += tier_rule_errors(m, tier, gates, scope, cynap)

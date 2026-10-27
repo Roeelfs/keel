@@ -39,7 +39,9 @@ MANIFEST = run_dir.load_manifest()
 # stage-by-stage launch sequence are main-loop steps that must be named here; the old Step 2-4 prose is deleted.
 # 2026-10-27 (CYN-3222): 13500 -> 13950. Depth ladder R1-R4 (critical only for a cynap floor-domain spec, fix-verify vs
 # delta re-review, frame.json repo/harnessOnly/floorDomain) is a Step 1/2 launcher decision; superseded text was trimmed.
-MAX_SKILL_BYTES = 13950
+# 2026-10-27 (CYN-3222): 13950 -> 14500. Tightened liveSurface/cutover trigger wording, the tier-from-changed-surface
+# clause (docs-only is no downgrade) and the evidence-quote rule are main-loop gate decisions; superseded wording was replaced.
+MAX_SKILL_BYTES = 14500
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
 SUPPLEMENTS = {"adr-auditor", "legal-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "system1-elevation", "critic-hotfix", "critic-adversarial", "critic-frontier", "dependency-currency"}
@@ -223,6 +225,20 @@ class ScriptSyntaxTests(unittest.TestCase):
 
 
 class SkillMdTests(unittest.TestCase):
+    def test_gate_and_tier_wording_is_tightened(self):
+        skill = (SKILL_DIR / "SKILL.md").read_text()
+        ref = (SKILL_DIR / "reference.md").read_text()
+        self.assertIn("AND names it", skill)
+        self.assertIn("states a switch-over step", skill)
+        self.assertIn("shared-store, prod-traffic or credential-bearing", skill)
+        self.assertNotIn("shared-store migrations, cutovers;", skill)
+        self.assertNotIn("touches an existing runtime path", skill)
+        self.assertIn("docs-only spec that specifies a money, security, tenancy, credential or shared-infrastructure change keeps the floor", skill)
+        self.assertIn("shared reader/writer used by every Lambda", skill)
+        self.assertIn("gate_evidence_errors", ref)
+        self.assertIn("CYN-3023", ref)
+        self.assertIn("CYN-3160", ref)
+
     def test_skill_byte_ratchet(self):
         size = len(SKILL.encode("utf-8"))
         self.assertLessEqual(size, MAX_SKILL_BYTES, f"SKILL.md grew to {size}B over the {MAX_SKILL_BYTES}B ceiling")

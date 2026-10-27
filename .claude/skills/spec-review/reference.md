@@ -334,9 +334,11 @@ Merge and falsifier waves run over carried + new findings. No new dossier in eit
 
 **Tier rules (R2-R4)**, enforced by `run_dir.py plan` from `frame.json` (`repo`, `harnessOnly`, `floorDomain`):
 `critical` is refused unless the repo is in `lanes.json` `cynapRepos`, the spec is not tooling/harness-only, and a
-floor domain exists (security or cutover gate fired, legalSurface fired in a cynap repo, or `floorDomain` named);
+floor domain exists (security or cutover gate fired, the cutover being shared-store, prod-traffic or credential-bearing, legalSurface fired in a cynap repo, or `floorDomain` named);
 otherwise run `standard`, where every fired gate still adds its lane. Lanes marked `cynapOnly` (legal-auditor,
 operator-plane-architect) are skipped, with that reason, in any other repo.
+
+**Gate evidence (CYN-3222, founder 2026-10-27).** `run_dir.py plan` rejects a fired gate whose reason quotes no path, file:line, backticked token or snake_case/camelCase identifier (`gate_evidence_errors`). liveSurface fires only for a changed, named deployed artifact; cutover only for a removed/replaced owner with a stated switch-over step. Tier follows the changed surface: "docs only" is never a downgrade for a money, security, tenancy, credential or shared-infrastructure spec (a docs PR specifying a money migration stays on the floor), and a shared reader/writer used by every Lambda or process/sandbox-killing code stays critical (replay cases CYN-3023, CYN-3160).
 
 **Applied flag.** Each merged unit in `merged.json` carries `applied` (null until the fixing step records it with
 `stage.py mark-applied --ids F-1,F-3 [--status false]`), so value per token is measured, not guessed.

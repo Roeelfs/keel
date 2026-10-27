@@ -52,7 +52,7 @@ GATES_OFF = {g: {"run": False, "reason": "n/a"} for g in MANIFEST["gates"]}
 
 
 def gates(**fired):
-    return {g: {"run": g in fired, "reason": fired.get(g, "n/a")} for g in MANIFEST["gates"]}
+    return {g: {"run": g in fired, "reason": (fired[g] + " (apps/x/y.ts:1)") if g in fired else "n/a"} for g in MANIFEST["gates"]}
 
 
 def plan(tier, g=None, add=(), drop=(), reasons=None, m=MANIFEST, **scope):
@@ -65,7 +65,16 @@ class LanePlanTests(unittest.TestCase):
         self.assertEqual(errs, [])
         self.assertEqual({e["label"] for e in p["run"]}, {"completeness-reviewer", "codebase-verifier", "edge-case-miner", "dependency-currency", "codex-frontier", "adr-auditor", "security-miner"})
         self.assertEqual((p["planned"], p["plannedCodex"], p["overBudget"]), (7, 2, []))
-        self.assertEqual(p["laneReasons"]["security-miner"], "gate security fired: adds authz")
+        self.assertEqual(p["laneReasons"]["security-miner"], "gate security fired: adds authz (apps/x/y.ts:1)")
+
+    def test_fired_gate_reason_must_quote_evidence(self):
+        for bad in ("touches prod", "adds authz", "n/a"):
+            _, errs = plan("standard", {**GATES_OFF, "liveSurface": {"run": True, "reason": bad}})
+            self.assertTrue(any("must quote the evidence" in e and "liveSurface" in e for e in errs), bad)
+        for good in ("edits apps/backend/src/x.ts:12", "changes `handler_wrapper`", "flips runtimeWiring flag", "table org_erasure"):
+            self.assertEqual(plan("standard", {**GATES_OFF, "cutover": {"run": True, "reason": good}})[1], [], good)
+        # an unfired gate needs no evidence
+        self.assertEqual(plan("standard", {**GATES_OFF, "liveSurface": {"run": False, "reason": "spec-only"}})[1], [])
 
     def test_critical_needs_a_floor_domain_in_a_cynap_repo(self):
         self.assertTrue(any("R4" in e for e in plan("critical")[1]), "R4: no floor domain")

@@ -40,7 +40,7 @@ def scall(*argv):
 
 
 def gates(**fired):
-    return {g: {"run": g in fired, "reason": fired.get(g, "n/a")} for g in MANIFEST["gates"]}
+    return {g: {"run": g in fired, "reason": (fired[g] + " (apps/x/y.ts:1)") if g in fired else "n/a"} for g in MANIFEST["gates"]}
 
 
 def new_run(tmp, tier="standard", name="run", spec=SPEC_V1, fired=None, repo="cynap-monorepo-next", **scope):
