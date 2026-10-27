@@ -452,10 +452,10 @@ What differs from a vanilla wayfinder map: it is **living**. The manager adds to
   So (1) every in-flight lane, branch, worktree and PR is named on a ticket with its owner;
   (2) each ticket's state matches reality (Done only with a closing comment that cites the
   verifying object; merged-but-unbaked and claimed-but-unverified stay open, labelled as such);
-  (3) one dated comment on the MAP headed `State as of <ISO time>` is rewritten at every turn that
+  (3) one dated comment on the MAP headed `State as of <ISO time>` is posted anew at every turn that
   changes anything, at takeover (reconcile first: tickets for every gap the dispatcher's sweeps
   found), and before any wrap-up: done/open/blocked, merged vs claimed vs unproven, and what is
-  owed from the founder. A state file or a transcript that knows more than the map is a defect.
+  owed from the founder. The Linear MCP cannot edit comments, so each refresh is a NEW comment and the newest `State as of` wins; never edit the old ones. A state file or a transcript that knows more than the map is a defect.
 
 ## Spec review is mandatory, depth by risk (founder, 2026-10-25)
 

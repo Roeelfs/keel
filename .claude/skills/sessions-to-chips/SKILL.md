@@ -354,7 +354,7 @@ message to one is queued to nowhere. Never relay to them.
    after, each kept ≥1-day session with its reason), sweep fixes confirmed (fixed N of M), the
    worktree rows pushed by their owners or named as a live child's, and the standing rulings
    recorded in its state file with a fresh `updated_at`, and its Linear map carries a `State as of`
-   comment (the reply names its URL; open the map and confirm the comment is newer than the
+   comment (a new comment per refresh, since the MCP cannot edit; the reply names its URL; open the map and confirm the comment is newer than the
    catch-up before calling the program converged). `pending-sends.md` must be empty or
    listed to the human. Close with which managers hold open founder decisions and a link to each;
    the decisions themselves stay in those sessions.
