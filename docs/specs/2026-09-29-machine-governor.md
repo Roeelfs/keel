@@ -253,14 +253,15 @@ from a real contended acquire; see §5.4). Any internal failure exits non-zero, 
 verify-route's own contract reads as R4 ("preview unavailable").
 
 `cynap-sandbox verify` calls `verify-route --mode <quick|full> [--after-deferral] --json` exactly once, where the CYN-1951 reroute block is today (`cynap-sandbox:891-908`). `verify-route` reads the governor through `with-heavy-lock --admit-preview --class cynap-verify-<mode> --json` under a 3 s timeout.
-- `--admit-preview` runs the §5 decision for a hypothetical job without enqueuing and without requesting reclaim. It returns `{decision, source, slots_now, running, queued, eta_wait_p90_s, eta_run_p50_s, eta_total_s}`.
+- `--admit-preview` runs the §5 decision for a hypothetical job without enqueuing and without requesting reclaim. It returns `{decision, source, slots_now, running, queued, eta_wait_p90_s, eta_run_p50_s, eta_total_s, load, deny_reason}` (CYN-3161).
+- **Load fields (CYN-3161).** `load = {load1, ncpu, capacity, reserve_cores, running_jobs, cpu_reason, memory, error?}` keeps what was observed: `cpu_reason` is `cpu_state`'s own reason, `memory` is `ok` | `pressure` | `unknown` (unknown unless observed), and a CPU read error is kept as `error`, never collapsed to a null reason. `deny_reason` is the effective blocker: `null` on admit, otherwise memory pressure, then `cpu_pressure` / `interactive_foreground` (`protected_app:<name>` passes through), else `queue`. One evaluator, `heavy_runner.evaluate_load()`, computes both outside the shadow/enforce branch, so shadow mode and the 2026-11-15 sunset of the shadow branch cannot erase them. The lock (`claim_slot`), `--cpu-check` and the preview read the same `running_jobs` (`running_job_count()`: held slots, not lease records), so the preview can no longer admit while the lock defers on `interactive_foreground`. Each preview also appends a `background_cpu` event (`counted_cores`, `uncounted_cores`, `load1`, `running_jobs`) to `events.jsonl`: the measurement a later background-reserve spec needs; the foreground-only reserve in `cpu_state` is unchanged.
 - **Phase-1 ETA (deterministic):**
   - `eta_wait_p90_s = 0` when admitted. Otherwise it is `min over leases of max(0, run_p90(lease.class) − age) + floor(queued / slots_now) × run_p90(cynap-verify-<mode>)`.
   - `eta_total_s = eta_wait_p90_s + run_p50(class)`.
-  - The run term is p50, not p90. A p90 run term of 612 s would exceed 600 on its own and would send *every* feature-branch verify to CI, uncontended ones included. That costs about 19–20 billed jobs per push (stall report).
+  - The run term is p50, not p90. A p90 run term of 612 s would exceed the threshold on its own and would send *every* feature-branch verify to CI, uncontended ones included. That costs about 19–20 billed jobs per push (stall report).
   - A refined model is deferred to phase 2 (§16).
 
-**Rules, first match wins.** `LOCAL_WAIT_CI_THRESHOLD_S = 600` is the only definition of 600.
+**Rules, first match wins.** `LOCAL_WAIT_CI_THRESHOLD_S = 300` is the only definition of the CI threshold (it was 600 until CYN-3161 aligned this section with cynap's code).
 
 | # | Condition | Route |
 |---|---|---|
@@ -269,8 +270,8 @@ verify-route's own contract reads as R4 ("preview unavailable").
 | R3 | `--after-deferral` (the lock already exited 75 once in this invocation) | **CI.** A deferral is never retried locally. |
 | R4 | preview unavailable (timeout, keel absent) | LOCAL with the policy wait; `route_source=no_governor` |
 | R5 | `decision=admit` | LOCAL |
-| R6 | `eta_total_s > 600` on a feature branch | **CI** |
-| R7 | otherwise | LOCAL with `KEEL_HEAVY_WAIT_MAX = min(eta_wait_p90_s + 120, 600)` |
+| R6 | `eta_total_s > 300` on a feature branch | **CI** |
+| R7 | otherwise | LOCAL with `KEEL_HEAVY_WAIT_MAX = min(eta_wait_p90_s + 120, 300)` |
 
 **Choosing the CI action (R3/R6). Never double-dispatch.**
 - (a) There is an open PR and `HEAD` equals the pushed PR head. The PR's `pull_request` run already covers this `headSha`, so do not dispatch. Resolve that run and print its URL.
@@ -478,6 +479,7 @@ the existing convention -- every prior test file already assumes that cwd). cyna
   rendered block and its JSON never contain the string `"kill"`, and the instruction line names
   `machine-steward` by name. `heavy_runner.announce_governor_context()` never raises even when
   `governor.snapshot.take` itself raises, and it emits exactly one `governor_decision` event.
+- **Load evaluator** (`test_governor_load_evaluator.py`, 8 tests -- see §7): `deny_reason`/`load` in shadow and enforce, memory vs cpu provenance, queue-only deny, preserved read error, preview/lock `running_jobs` and verdict parity, counted/uncounted `background_cpu` event.
 - **`--admit-preview`** (`test_governor_admit_preview.py`, 8 tests -- see §7). No leases admits via
   the fast path and writes no ticket or lease. A full slot set denies with numeric `eta_*` fields.
   A disk floor always denies even when D would admit. A cached JEV decision can flip a D-rule deny
@@ -512,7 +514,7 @@ the existing convention -- every prior test file already assumes that cwd). cyna
 
 - `tooling/sandbox/__tests__/verify-route.test.mjs` has one test per rule R1–R7 and per CI action (a)–(c). This includes the case "an existing dispatch run for headSha → no second dispatch". `with-heavy-lock` is stubbed on PATH. Confirm that the `--quick` glob matches `.mjs`.
 - Invariant tests:
-  - `600` appears only in `LOCAL_WAIT_CI_THRESHOLD_S`, and there is no `slots` literal;
+  - the CI threshold literal appears only in `LOCAL_WAIT_CI_THRESHOLD_S`, and there is no `slots` literal;
   - `grep -c 'gh run watch' tooling/sandbox/cynap-sandbox` → 0;
   - there is exactly one `select(.headSha` across the two files;
   - `vitest-watchdog.mjs` has no `process.kill`.

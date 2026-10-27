@@ -11,7 +11,7 @@ import sys
 import time
 import uuid
 
-from heavy_resources import (MAX_SLOTS, account_home, ancestors, command_seconds, cpu_state, event, free_percent,
+from heavy_resources import (MAX_SLOTS, account_home, ancestors, command_seconds, background_load, cpu_state, event, free_percent,
                              job_members, load_policy, processes, read_record, total_memory_mb, write_record)
 
 QUEUE_PROGRESS_SECONDS = 30
@@ -226,6 +226,38 @@ def job_sessions(directory):
     return sessions
 
 
+def running_job_count(directory, policy):
+    """Held heavy slots: the one `running_jobs` figure the lock, --cpu-check and the preview share."""
+    return sum(1 for slot in range(1, policy.slots + 1)
+               if not lock_available(directory, slot) or lease_group_alive(read_record(lease_path(directory, slot))))
+
+
+def evaluate_load(directory, policy, running_jobs, memory_reason=None, memory='unknown', log=False):
+    """The one load evaluator: CPU state, observed load fields and the effective blocker.
+
+    Runs outside any shadow/enforce branch, so `--admit-preview` and the lock cannot disagree on
+    `running_jobs` and the 2026-11-15 shadow-branch sunset cannot erase it. `memory_reason` is the
+    caller's pressure_reason() result; `memory` is 'ok' | 'pressure' | 'unknown' (unknown unless
+    observed). Returns `{blocker, load}`: `blocker` is the effective reason (memory first, then
+    cpu_state's), `load` keeps what was observed, including a cpu read error (not collapsed).
+    """
+    cpu = cpu_state(policy, running_jobs, job_sessions(directory))
+    load = {key: cpu[key] for key in ('load1', 'ncpu', 'capacity', 'reserve_cores', 'running_jobs') if key in cpu}
+    load['running_jobs'] = running_jobs
+    load['cpu_reason'] = cpu['reason']
+    load['memory'] = memory
+    if 'error' in cpu:
+        load['error'] = cpu['error']
+    if log:
+        try:
+            counted, uncounted = background_load(policy, job_sessions(directory))
+            event(directory, 'background_cpu', counted_cores=round(counted, 2),
+                  uncounted_cores=round(uncounted, 2), load1=load.get('load1'), running_jobs=running_jobs)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass  # Measurement only: it must never change an admission result.
+    return {'blocker': memory_reason or cpu['reason'], 'load': load}
+
+
 def claim_slot(directory, policy, position, budget_mb=None, jev_admit=False, reserve_mb=0.0,
                job_class=None):
     """Lock the first free slot when no more waiters are ahead than there are free slots.
@@ -250,14 +282,14 @@ def claim_slot(directory, policy, position, budget_mb=None, jev_admit=False, res
         if position > len(free):
             return None, 'previous_job_alive' if position <= len(free) + orphaned else 'resource_busy'
         held = policy.slots - len(free)  # Read while every free slot is still locked here.
-        sessions = job_sessions(directory)
         others_held = held > 0
         stream, slot = free.pop(0)
         for other, _ in free:
             other.close()
         free = []
-        reason = pressure_reason(policy, others_held, budget_mb=budget_mb, jev_admit=jev_admit,
-                                 reserve_mb=reserve_mb, job_class=job_class) or cpu_state(policy, held, sessions)['reason']
+        memory_reason = pressure_reason(policy, others_held, budget_mb=budget_mb, jev_admit=jev_admit,
+                                        reserve_mb=reserve_mb, job_class=job_class)
+        reason = evaluate_load(directory, policy, held, memory_reason)['blocker']
         if reason:
             stream.close()
             return None, reason
@@ -825,12 +857,16 @@ def admit_preview(directory, policy, job_class):
     run_p90 = class_row.get('run_p90_s')
 
     floors = admission.floors_fired(snapshot, policy)
-    fast_reason = None if admission.any_unknown(snapshot) else (
-        pressure_reason(policy, running >= 1, job_class=admission.canonical_class(job_class))
-        or cpu_state(policy, running, job_sessions(directory))['reason'])
+    running_jobs = running_job_count(directory, policy)
+    unknown = admission.any_unknown(snapshot)
+    memory_reason = None if unknown else pressure_reason(
+        policy, running_jobs >= 1, job_class=admission.canonical_class(job_class))
+    memory = 'unknown' if unknown else ('pressure' if memory_reason else 'ok')
+    evaluation = evaluate_load(directory, policy, running_jobs, memory_reason, memory, log=True)
+    fast_reason = None if unknown else evaluation['blocker']
 
     cached_jev = None
-    if not floors and running < policy.slots and fast_reason is None:
+    if not floors and running_jobs < policy.slots and fast_reason is None:
         decision, source, slots_now = 'admit', 'fast_path', policy.slots
     else:
         d_result = admission.cheap_class_bonus(
@@ -884,8 +920,9 @@ def admit_preview(directory, policy, job_class):
     eta_run_p50_s = run_p50 if run_p50 is not None else 0.0
     eta_total_s = eta_wait_p90_s + eta_run_p50_s
 
+    deny_reason = None if decision == 'admit' else (fast_reason or 'queue')
     return {'decision': decision, 'source': source, 'slots_now': slots_now, 'running': running,
-            'queued': queued, 'eta_wait_p90_s': round(eta_wait_p90_s, 1),
+            'load': evaluation['load'], 'deny_reason': deny_reason, 'queued': queued, 'eta_wait_p90_s': round(eta_wait_p90_s, 1),
             'eta_run_p50_s': round(eta_run_p50_s, 1), 'eta_total_s': round(eta_total_s, 1),
             'jev': cached_jev}
 
@@ -906,8 +943,7 @@ def main():
                               'leases': leases, 'state_dir': str(directory)}))
             return 0
         if command == ['--cpu-check']:  # dry: the CPU admission decision for one more job, nothing claimed
-            held = sum(1 for slot in range(1, policy.slots + 1)
-                       if not lock_available(directory, slot) or lease_group_alive(read_record(lease_path(directory, slot))))
+            held = running_job_count(directory, policy)
             print(json.dumps({**cpu_state(policy, held, job_sessions(directory)),
                               'max_load_per_core': policy.max_load_per_core,
                               'interactive_max_jobs': policy.interactive_max_jobs}, sort_keys=True))
