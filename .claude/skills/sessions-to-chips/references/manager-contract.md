@@ -447,6 +447,15 @@ What differs from a vanilla wayfinder map: it is **living**. The manager adds to
   answer first) or DONE (Destination verified). "Waiting for the user" with a ready ticket is neither.
 - Linear is the record (repo law): comments and states live on the tickets; the `.state.md` only
   points to the map and holds the AT-WAKE pointer.
+- **The map must let a stranger resume (founder, 2026-10-27).** The test: a new manager on another
+  account, reading only the map and its tickets, finds the real state without your transcript.
+  So (1) every in-flight lane, branch, worktree and PR is named on a ticket with its owner;
+  (2) each ticket's state matches reality (Done only with a closing comment that cites the
+  verifying object; merged-but-unbaked and claimed-but-unverified stay open, labelled as such);
+  (3) one dated comment on the MAP headed `State as of <ISO time>` is rewritten at every turn that
+  changes anything, at takeover (reconcile first: tickets for every gap the dispatcher's sweeps
+  found), and before any wrap-up: done/open/blocked, merged vs claimed vs unproven, and what is
+  owed from the founder. A state file or a transcript that knows more than the map is a defect.
 
 ## Spec review is mandatory, depth by risk (founder, 2026-10-25)
 

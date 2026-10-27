@@ -353,7 +353,9 @@ message to one is queued to nowhere. Never relay to them.
    catch-up reply (archived N, live children X, decisions held), backlog-first reply (before →
    after, each kept ≥1-day session with its reason), sweep fixes confirmed (fixed N of M), the
    worktree rows pushed by their owners or named as a live child's, and the standing rulings
-   recorded in its state file with a fresh `updated_at`. `pending-sends.md` must be empty or
+   recorded in its state file with a fresh `updated_at`, and its Linear map carries a `State as of`
+   comment (the reply names its URL; open the map and confirm the comment is newer than the
+   catch-up before calling the program converged). `pending-sends.md` must be empty or
    listed to the human. Close with which managers hold open founder decisions and a link to each;
    the decisions themselves stay in those sessions.
 7. **Archiving on the other account is the human's.** When an audit clears the other account's
