@@ -35,7 +35,9 @@ MANIFEST = run_dir.load_manifest()
 # runs in every profile; Step 1 names it and its advisory-feed failure rule, both main-loop decisions.
 # 2026-10-25: 10029 -> 11800. Mandatory-by-tier review: Step 1 now owns the tier choice and the lanePlan
 # (main-loop decisions), the plan command, and the no-skip process gate; the Opt-in and When-NOT-to-use text is gone.
-MAX_SKILL_BYTES = 11800
+# 2026-10-27 (CYN-3219): 11800 -> 13500. The script-runner wrapper agents are gone, so the Bash gates (stage.py) and the
+# stage-by-stage launch sequence are main-loop steps that must be named here; the old Step 2-4 prose is deleted.
+MAX_SKILL_BYTES = 13500
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
 SUPPLEMENTS = {"adr-auditor", "legal-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "system1-elevation", "critic-hotfix", "critic-adversarial", "critic-frontier", "dependency-currency"}
@@ -163,12 +165,23 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(by("standard"), {"completeness-reviewer", "codebase-verifier", "edge-case-miner", "dependency-currency", "codex-frontier", "adr-auditor"})
         self.assertEqual(by("light"), {"codebase-verifier", "edge-case-miner", "codex-frontier"})
         self.assertEqual({t: v["budget"]["falsifier"] for t, v in MANIFEST["tiers"].items()},
-                         {"critical": "all", "standard": "critical", "light": "off", "hotfix": "all"})
+                         {"critical": "uncorroborated", "standard": "critical", "light": "off", "hotfix": "all"})
 
-    def test_workflow_reads_the_plan_not_an_inline_manifest(self):
+    def test_workflow_runs_no_commands_and_reads_no_plan(self):
+        """A Workflow script has no shell: every command is a Bash gate (stage.py) the main loop runs.
+        No LLM agent exists just to run a command or relay JSON."""
         src = WORKFLOW_JS.read_text()
-        self.assertNotIn("MANIFEST", src)
-        self.assertIn("'show-plan'", src)
+        for gone in ("MANIFEST", "script-runner", "show-plan", "put-envelope", "PYOUT", "textSum", "py("):
+            self.assertNotIn(gone, src, f"{gone} was deleted with the wrapper agents")
+        self.assertIn("stage.py", src)
+        self.assertNotIn("script-runner", [e["label"] for e in MANIFEST["support"]])
+
+    def test_ceilings_are_calibrated_and_enforced(self):
+        ceilings = {t: v["budget"]["tokenCeiling"] for t, v in MANIFEST["tiers"].items()}
+        self.assertEqual(ceilings, {"critical": 45_000_000, "standard": 22_000_000, "light": 2_000_000, "hotfix": 3_000_000})
+        stage = (HERE / "stage.py").read_text()
+        self.assertIn("lane_spend.STOP_RATIO", stage)
+        self.assertEqual(__import__("lane_spend").STOP_RATIO, 1.5)
 
     def test_lanes_without_prompt_file_have_a_brief(self):
         for e in MANIFEST["lanes"]:
@@ -187,38 +200,24 @@ class ScriptSyntaxTests(unittest.TestCase):
         r = subprocess.run([node, "--check", str(tmp)], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
 
-    def test_py_relay_json_extraction(self):
-        node = shutil.which("node")
-        if not node:
-            self.skipTest("node not installed")
+    def test_codex_envelope_extraction_is_codex_first_with_claude_fallback_only(self):
         src = WORKFLOW_JS.read_text()
-        block = src.split("// EXTRACT:BEGIN")[1].split("// EXTRACT:END")[0]
-        probe = block + """
-const eq = (a, b) => { if (JSON.stringify(a) !== JSON.stringify(b)) { console.log('FAIL', JSON.stringify(a), JSON.stringify(b)); process.exit(1) } }
-eq(lastJsonObject('{"ok":true,"n":1}'), {ok: true, n: 1})
-eq(lastJsonObject('noise\\n{"ok":false}\\n{"ok":true}\\n'), {ok: true})
-eq(lastJsonObject('102 dispatched over 102 CRITICAL/MAJOR'), null)
-eq(lastJsonObject('{"ok":true}\\ntrailing prose'), {ok: true})
-eq(lastJsonObject('[1,2]'), null)
-eq(lastJsonObject(''), null)
-"""
-        # The workflow's checksum must equal run_dir.text_sum, or put-envelope refuses every write.
-        sample = '{"title":"it\'s `x` \u2014 \u05e2\u05d1\u05e8\u05d9\u05ea \U0001f600 $HOME"}'
-        probe += f"eq(textSum({json.dumps(sample)}), {run_dir.text_sum(sample)})\n"
-        r = subprocess.run([node, "-e", probe], capture_output=True, text=True)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-
-    def test_workflow_not_the_extractor_writes_codex_envelopes(self):
-        src = WORKFLOW_JS.read_text()
-        prompt = next(l for l in src.splitlines() if "ROLE: codex-envelope-extractor" in l)
-        self.assertIn("write no file", prompt)
-        self.assertNotIn("then write", prompt)
-        self.assertIn("putEnvelope('Synthesize', x.e.label", src)
-        self.assertIn("'put-envelope'", src)
+        self.assertEqual(src.count("ROLE: codex-envelope-extractor"), 1, "one fallback prompt, in the critics stage")
+        self.assertIn("Fallback only", src)
+        sh = (HERE / "run-codex-lanes.sh").read_text()
+        for needle in ("extract-plan", "extract-envelopes", "extract-finish", "extract.tsv"):
+            self.assertIn(needle, sh)
+        self.assertIn('"luna"', (HERE / "stage.py").read_text())
 
     def test_shell_wrapper_parses(self):
         r = subprocess.run(["bash", "-n", str(HERE / "run-codex-lanes.sh")], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_stage_cli_parses_every_gate(self):
+        import stage
+        for gate in ("prepare", "finish-prepare", "post-review", "synth-prep", "falsify-prep", "falsify-check", "report-check",
+                     "mark-applied", "extract-plan", "extract-envelopes", "spend"):
+            self.assertIn(f"  {gate}", stage.__doc__, f"{gate} is undocumented in stage.py")
 
 
 class SkillMdTests(unittest.TestCase):

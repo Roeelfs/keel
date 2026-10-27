@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """spec-review run-dir helper: the deterministic half of the Workflow pipeline.
 
-A Workflow script has no filesystem access, so every file-shaped job it needs
-(fill a prompt template, validate an envelope, check the report) is a
-subcommand here, run by a tiny script-runner agent. Static lane data
+A Workflow script has no filesystem access and no shell, so every file-shaped job (fill a prompt
+template, validate an envelope, check the report) is a subcommand here, run by the MAIN loop with the
+Bash tool between Workflow stages. No LLM agent exists just to run a command. Static lane data
 (agent type, id prefix, question tags, prompt file) is read from lanes.json (plus the
 optional per-repo override), resolved once by `plan` into <run>/manifest.json -- the one manifest.
 
@@ -40,7 +40,9 @@ PROMPTS_DIR = SKILL_DIR / "prompts"
 SEVERITIES = ("CRITICAL", "MAJOR", "MINOR", "ELEVATE", "CAUTION")
 FALSIFIED = ("CRITICAL", "MAJOR")
 # Per-tier falsifier scope (budget.falsifier): which severities get a falsifier verdict.
-FALSIFIER_MODES = {"all": FALSIFIED, "critical": ("CRITICAL",), "off": ()}
+# "uncorroborated": every CRITICAL, plus each MAJOR unit that only ONE lane raised (a MAJOR a second
+# lane also raised is corroborated and skips the falsifier). "all" is every CRITICAL/MAJOR.
+FALSIFIER_MODES = {"all": FALSIFIED, "uncorroborated": FALSIFIED, "critical": ("CRITICAL",), "off": ()}
 # An unfilled placeholder is any of: {{NAME}}, <FOCUS...>, <ALL_CAPS_NAME>.
 PLACEHOLDER_RES = (
     re.compile(r"\{\{[^}\n]*\}\}"),
@@ -360,6 +362,107 @@ def focus_text(questions):
 # --------------------------------------------------------------------------
 # subcommands
 # --------------------------------------------------------------------------
+DOSSIER_QUESTION_TAGS = ("completeness", "codebase", "architecture", "provider-fit", "edge-case", "security",
+                         "observability", "drift", "live-evidence", "codex-adversarial", "system1")
+DECISION_KEYS = ("decisions", "rejected_alternatives", "corrections", "scope_boundaries", "open_concerns", "requirements", "gaps")
+QUESTIONS_MARK = "===QUESTIONS_JSON==="
+MIN_CODEX_DOSSIER = 1500
+
+CODEX_DOSSIER_CONTRACT = """
+
+## Run contract (added by the pipeline script -- binding; it overrides any delivery or tool instructions above)
+- You run as a Codex lane, read-only: you cannot write files, and your FINAL MESSAGE is the deliverable. The spec is {spec} (relative paths resolve from the repository root, your working directory). Also read {run}/inputs/prefilter.md (merge-base pin + open PRs) as resolved ground truth.
+- No MCP tools exist for you. Reach the tracker through the shell route docs/agents/issue-tracker.md names (CLI or GraphQL), plus the version-control CLI and gh. If the tracker cannot be reached, write "Tracker lineage: UNREACHABLE (<why>)" in the dossier; never guess a ticket body.
+- FINAL MESSAGE layout: the complete dossier (the "Output format" section above, including its generated questions), then one line containing exactly {mark}, then ONE JSON array of 8-15 objects {{"id": "Q1", "lane": "<tag>", "text": "<question>"}} where <tag> is exactly one of {tags}. Nothing after the JSON array.
+"""
+
+CODEX_DECISIONS_CONTRACT = """
+
+## Run contract (added by the pipeline script -- binding; it overrides any delivery or tool instructions above)
+- You run as a Codex lane, read-only: your FINAL MESSAGE is the deliverable. Read {run}/inputs/session-decisions.raw.json.
+- FINAL MESSAGE: ONE JSON object and nothing else, with array-valued keys decisions, rejected_alternatives, corrections, scope_boundaries, open_concerns, requirements, gaps; each item {{"text": "...", "evidence": "..."}}. This replaces the markdown output format above; the content rules are unchanged.
+"""
+
+
+def last_json(text, want=dict):
+    """The last parseable JSON value of type `want` in a free-text message (fenced, bare or multi-line)."""
+    t = re.sub(r"```(?:json)?", "", text or "")
+    best, pos = None, 0
+    dec = json.JSONDecoder()
+    while True:
+        m = re.compile(r"[\[{]").search(t, pos)
+        if not m:
+            return best
+        try:
+            v, end = dec.raw_decode(t[m.start():])
+        except ValueError:
+            pos = m.start() + 1
+            continue
+        if isinstance(v, want):
+            best = v
+        pos = m.start() + end
+
+
+def validate_codex_questions(qs):
+    if not isinstance(qs, list) or not 8 <= len(qs) <= 15:
+        return "questions must be a JSON array of 8-15 objects"
+    seen = set()
+    for q in qs:
+        if not isinstance(q, dict) or not q.get("id") or not q.get("text") or q.get("lane") not in DOSSIER_QUESTION_TAGS:
+            return f"malformed question {q!r}"
+        if q["id"] in seen:
+            return f"duplicate question id {q['id']}"
+        seen.add(q["id"])
+    return None
+
+
+def cmd_extract_finish(a):
+    """Parse the Codex dossier + decisions outputs into dossier.md, questions.json, decisions.json.
+    A lane that is not OK by artifact, or whose output fails validation, is listed in `fallback`:
+    those (and only those) rerun as the Claude lane."""
+    run = Path(a.run)
+    status = {}
+    sp = run / "codex" / "extract-status.tsv"
+    if sp.is_file():
+        for line in sp.read_text(encoding="utf-8").splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                status[parts[0]] = parts[1]
+    wanted = [l for l in ("context-dossier-miner", "design-decisions-extractor")
+              if (run / "codex" / f"{l}.prompt.md").is_file()]
+    fallback, reasons, used = [], {}, []
+    for label in wanted:
+        out = run / "codex" / f"{label}.out.md"
+        why = None
+        if status.get(label) != "OK" or not out.is_file():
+            why = f"codex status {status.get(label, 'NO-STATUS')}"
+        else:
+            text = out.read_text(encoding="utf-8", errors="replace")
+            if label == "context-dossier-miner":
+                head, sep, tail = text.partition(QUESTIONS_MARK)
+                qs = last_json(tail, list) if sep else None
+                why = None if sep else f"no {QUESTIONS_MARK} line"
+                if not why and len(head.strip()) < MIN_CODEX_DOSSIER:
+                    why = f"dossier under {MIN_CODEX_DOSSIER} bytes"
+                if not why:
+                    why = validate_codex_questions(qs)
+                if not why:
+                    write(run / "dossier.md", head.strip() + "\n")
+                    write(run / "questions.json", json.dumps(qs, indent=1))
+            else:
+                obj = last_json(text, dict)
+                if not obj or not any(isinstance(obj.get(k), list) for k in DECISION_KEYS):
+                    why = "no decisions JSON object"
+                else:
+                    write(run / "decisions.json", json.dumps({k: obj.get(k) if isinstance(obj.get(k), list) else [] for k in DECISION_KEYS}, indent=1))
+        if why:
+            fallback.append(label)
+            reasons[label] = why
+        else:
+            used.append(label)
+    return emit({"ok": True, "codex": used, "fallback": fallback, "reasons": reasons})
+
+
 def cmd_init(a):
     run = Path(a.run)
     errors = []
@@ -370,11 +473,19 @@ def cmd_init(a):
         errors.append("inputs/context.md missing or empty")
     gates = read_json(run / "inputs" / "gates.json")
     if not isinstance(gates, dict):
-        errors.append("inputs/gates.json missing or not an object")
+        plan_gates = (read_json(run / "plan.json") or {}).get("gates")
+        if isinstance(plan_gates, dict):
+            gates = plan_gates
+            write(run / "inputs" / "gates.json", json.dumps(gates))
+        else:
+            errors.append("inputs/gates.json missing and no plan.json to take the gates from")
     if errors:
         return emit({"ok": False, "errors": errors}, False)
 
     write(run / "inputs" / "root.txt", a.root)
+    write(run / "inputs" / "sid.txt", a.sid or "")
+    spec_abs = Path(a.spec) if os.path.isabs(a.spec) else Path(a.root) / a.spec
+    write(run / "inputs" / "spec.snapshot.md", spec_abs.read_text(encoding="utf-8") if spec_abs.is_file() else "")
     learnings = learnings_paths(a.skill_dir)
     write(run / "inputs" / "learnings.txt", "\n".join(learnings))
 
@@ -404,6 +515,7 @@ def cmd_init(a):
     manifest = load_manifest(a.run)
     context = ctx.read_text(encoding="utf-8").strip()
     miners = ["context-dossier-miner"] + (["design-decisions-extractor"] if decisions_ok else [])
+    codex_rows = []
     for label in miners:
         e = entry_by_label(manifest, label)
         tpl = (PROMPTS_DIR / e["prompt"]).read_text(encoding="utf-8")
@@ -435,9 +547,28 @@ def cmd_init(a):
         if left:
             errors.append(f"{label}: unfilled placeholders {sorted(set(left))}")
         write(run / "prompts" / f"{label}.md", text)
+        if label == "context-dossier-miner":
+            codex_contract_text = CODEX_DOSSIER_CONTRACT.format(run=run, spec=a.spec, mark=QUESTIONS_MARK, tags=", ".join(DOSSIER_QUESTION_TAGS))
+            codex_class = "verify"
+        else:
+            codex_contract_text = CODEX_DECISIONS_CONTRACT.format(run=run)
+            codex_class = "luna"
+        write(run / "codex" / f"{label}.prompt.md", f"ROLE: {label}\n{body}{codex_contract_text}")
+        codex_rows.append((label, codex_class, run / "codex" / f"{label}.prompt.md", run / "codex" / f"{label}.out.md"))
     if errors:
         return emit({"ok": False, "errors": errors}, False)
+    write(run / "codex" / "extract.tsv", "".join(f"{l}\t{c}\t{pp}\t{o}\n" for l, c, pp, o in codex_rows))
     return emit({"ok": True, "decisions": decisions_ok, "decisionsNote": note, "miners": miners, "learnings": learnings})
+
+
+def delta_block(run, label):
+    """On a delta re-review, inputs/delta.md names the changed spec sections; each re-run lane's brief gets it."""
+    p = Path(run) / "inputs" / "delta.md"
+    if not p.is_file():
+        return ""
+    extra = Path(run) / "inputs" / "delta-lanes" / f"{label}.md"
+    own = extra.read_text(encoding="utf-8") if extra.is_file() else ""
+    return "\n" + p.read_text(encoding="utf-8").rstrip() + "\n" + (own.rstrip() + "\n" if own else "")
 
 
 def cmd_lanes(a):
@@ -476,6 +607,7 @@ def cmd_lanes(a):
                 text = f"ROLE: {label}\n" + fill(extract_body(tpl), values) + "\n"
                 if e.get("codexContract"):
                     text += codex_contract(run, e, qs, spec_rel)
+                text += delta_block(run, label)
                 left = find_placeholders(text)
                 if left:
                     errors.append(f"{label}: unfilled placeholders {sorted(set(left))}")
@@ -488,7 +620,7 @@ def cmd_lanes(a):
                 body = fill(extract_body(tpl), lane_values(run, spec, root))
             else:
                 body = (e["brief"].replace("{{SPEC_PATH}}", spec).replace("{{PROJECT_ROOT}}", root))
-            text = f"ROLE: {label}\n{body}" + run_contract(run, e, qs)
+            text = f"ROLE: {label}\n{body}" + run_contract(run, e, qs) + delta_block(run, label)
             left = find_placeholders(text)
             if left:
                 errors.append(f"{label}: unfilled placeholders {sorted(set(left))}")
@@ -559,34 +691,6 @@ def read_envelope(run, label):
     return (None, err) if err else (env, None)
 
 
-def text_sum(text):
-    """Checksum over UTF-16 code units; textSum in spec-review.workflow.js computes the same number."""
-    h = 0
-    data = text.encode("utf-16-le")
-    for i in range(0, len(data), 2):
-        h = (h * 31 + int.from_bytes(data[i:i + 2], "little")) & 0xFFFFFFFF
-    return h
-
-
-def cmd_put_envelope(a):
-    """Write the envelope an agent RETURNED. The JSON travels inside a relayed command, so the
-    caller's checksum must match before anything is written: a mangled relay writes nothing."""
-    if str(text_sum(a.json)) != a.sum:
-        return emit({"ok": False, "errors": [f"{a.lane}: envelope JSON does not match its checksum (relay mangled it); nothing written"]}, False)
-    try:
-        env = json.loads(a.json)
-    except ValueError:
-        env = None
-    err = envelope_error(env)
-    if not err and env.get("lane") != a.lane:
-        err = f"envelope names lane {env.get('lane')!r}"
-    if err:
-        return emit({"ok": False, "errors": [f"{a.lane}: {err}; nothing written"]}, False)
-    path = Path(a.run) / "envelopes" / f"{a.lane}.json"
-    write(path, json.dumps(env, indent=1) + "\n")
-    return emit({"ok": True, "lane": a.lane, "path": str(path), "findings": len(env["findings"])})
-
-
 def cmd_check_envelopes(a):
     run = Path(a.run)
     assignments = read_json(run / "assignments.json", {})
@@ -612,15 +716,16 @@ def cmd_check_envelopes(a):
                  "criticalMajor": {l: [f["id"] for f in fs if f["severity"] in FALSIFIED] for l, fs in findings.items()}}, ok)
 
 
-def cmd_codex_status(a):
+def codex_status_rows(run, name="status.tsv"):
+    """{lane: {status, bytes}} from a run-codex-lanes.sh status file (graded by artifact, never exit code)."""
     rows = {}
-    p = Path(a.run) / "codex" / "status.tsv"
+    p = Path(run) / "codex" / name
     if p.is_file():
         for line in p.read_text(encoding="utf-8").splitlines():
             parts = line.split("\t")
             if len(parts) >= 3:
                 rows[parts[0]] = {"status": parts[1], "bytes": int(parts[2]) if parts[2].isdigit() else 0}
-    return emit({"ok": True, "lanes": rows})
+    return rows
 
 
 def falsifier_severities(run):
@@ -679,11 +784,40 @@ def validate_merged(merged, findings):
                       "title": str(c.get("title") or want[valid[0]]["title"]),
                       "seam": str(c.get("seam") or ""),
                       "members": valid,
+                      "lanes": sorted({want[m]["lane"] for m in valid}),
+                      # null until the fixing step records whether the finding changed the spec (mark-applied)
+                      "applied": None,
                       "cites": [str(x) for x in (c.get("cites") or [])]})
     missing = [i for i in want if i not in seen]
     if missing:
         errors.append(f"CRITICAL/MAJOR ids in no cluster: {missing}")
     return units, errors
+
+
+def falsifier_mode(run):
+    plan = read_json(Path(run) / "plan.json")
+    return plan["budget"]["falsifier"] if isinstance(plan, dict) else "all"
+
+
+def unit_falsify(unit, mode):
+    """Does this merged unit get a falsifier verdict? uncorroborated: every CRITICAL, and each MAJOR
+    unit only ONE lane raised; a MAJOR a second lane also raised is corroborated and skips it."""
+    if mode == "off":
+        return False
+    if mode == "uncorroborated":
+        return unit["severity"] == "CRITICAL" or len(unit.get("lanes") or []) < 2
+    return True
+
+
+def falsified_ids(run, labels):
+    """Envelope ids that get a falsifier verdict: the mode's universe, narrowed (after the merge) to
+    the members of units with falsify true."""
+    universe = all_critical_major(run, labels, scoped=True)
+    units = load_units(run)
+    if units is None:
+        return [f["id"] for f in universe]
+    keep = {m for u in units if u.get("falsify", True) for m in u["members"]}
+    return [f["id"] for f in universe if f["id"] in keep]
 
 
 def load_units(run):
@@ -720,7 +854,7 @@ def cmd_merge_check(a):
     raw = read_json(run / "merged.raw.json")
     if raw is None:
         # The index goes to a file, never stdout: a 60+ id one-line JSON gets mangled when relayed
-        # through the script-runner model, which made the whole stage fail (CYN-2850).
+        # through a relay model, which made the whole stage fail (CYN-2850).
         idx = run / "merge-index.txt"
         write(idx, "\n".join(
             f"- {f['id']} [{f['lane']}, {f['severity']}] {f['title']}"
@@ -730,6 +864,9 @@ def cmd_merge_check(a):
     units, errors = validate_merged(raw, findings)
     if errors:
         return emit({"ok": False, "errors": errors, "totalIds": len(findings)}, False)
+    mode = falsifier_mode(run)
+    for u in units:
+        u["falsify"] = unit_falsify(u, mode)
     write(run / "merged.json", json.dumps({"units": units}, indent=1))
     return emit({"ok": True, "totalIds": len(findings), "clusters": len(units)})
 
@@ -748,6 +885,7 @@ def cmd_falsify_plan(a):
     if units is None:
         raise StageError("merged.json missing: run merge-check before falsify-plan")
     lane_of = {f["id"]: f["lane"] for f in findings}
+    units = [u for u in units if u.get("falsify", True)]
     by_unit = {u["id"]: u for u in units}
     batches = plan_batches(units, int(a.max_batches or 6))
     plan, errors = [], []
@@ -782,7 +920,7 @@ def cmd_falsify_plan(a):
         plan.append({"batch": n, "ids": b["ids"], "seams": b["seams"], "prompt": str(path)})
     if errors:
         return emit({"ok": False, "errors": errors}, False)
-    return emit({"ok": True, "totalUnits": len(units), "totalIds": len(findings), "plan": plan})
+    return emit({"ok": True, "totalUnits": len(units), "totalIds": sum(len(u["members"]) for u in units), "plan": plan})
 
 
 def falsifier_counts(run, expected_ids):
@@ -826,7 +964,7 @@ def cmd_summary(a):
     run = Path(a.run)
     labels = expand_labels(run, csv(a.lanes))
     cm = all_critical_major(run, labels)
-    verdicts, refuted, unit_of = falsifier_counts(run, [f["id"] for f in all_critical_major(run, labels, scoped=True)])
+    verdicts, refuted, unit_of = falsifier_counts(run, falsified_ids(run, labels))
     raw = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0}
     surviving = {"CRITICAL": 0, "MAJOR": 0}
     for label in labels:
@@ -858,7 +996,7 @@ def cmd_ledger(a):
         return emit({"ok": False, "errors": [f"no ledger path: pass --path or set ${LEDGER_ENV}"]}, False)
     run = Path(a.run)
     labels = expand_labels(run, csv(a.lanes))
-    verdicts, _, _ = falsifier_counts(run, [f["id"] for f in all_critical_major(run, labels, scoped=True)])
+    verdicts, _, _ = falsifier_counts(run, falsified_ids(run, labels))
     tally = lambda word: sum(1 for v in verdicts.values() if v == word)
     row = {"date": datetime.date.today().isoformat(), "spec": a.spec or run.name,
            "dispatched": sum(1 for v in verdicts.values() if v != "MISSING"),
@@ -915,9 +1053,9 @@ def cmd_check_report(a):
     frontier = [l for l in ("codex-frontier", "critic-frontier") if (run / "envelopes" / f"{l}.json").is_file()]
     if not frontier:
         errors.append("Astra frontier lane: neither codex-frontier nor critic-frontier produced an envelope")
-    scoped = all_critical_major(run, labels, scoped=True)
-    verdicts, refuted, _ = falsifier_counts(run, [f["id"] for f in scoped])
-    n, m = len(scoped), len(scoped)
+    universe = all_critical_major(run, labels, scoped=True)
+    verdicts, refuted, _ = falsifier_counts(run, falsified_ids(run, labels))
+    n, m = len(verdicts), len(universe)
     line = f"{n} dispatched over {m} CRITICAL/MAJOR"
     if not re.search(re.escape(line) + r"[^\n]*?\b" + str(refuted) + r"\s+REFUTED,\s*" + str(n - refuted) + r"\s+SURVIVES", text, re.I):
         errors.append(f"falsifier line must read '{line} — {refuted} REFUTED, {n - refuted} SURVIVES.'")
@@ -1018,15 +1156,6 @@ def cmd_plan(a):
                  "lanes": plan["laneReasons"], "skipped": plan["skipped"]})
 
 
-def cmd_show_plan(a):
-    """The slim plan for the Workflow script, with a checksum so a relayed copy can be verified."""
-    plan = read_json(Path(a.run) / "plan.json")
-    if not isinstance(plan, dict):
-        return emit({"ok": False, "errors": ["plan.json missing: run `plan` first"]}, False)
-    text = json.dumps(plan)
-    return emit({"ok": True, "sum": text_sum(text), "planText": text})
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1040,12 +1169,10 @@ def main(argv=None):
         return p
 
     add("plan", cmd_plan, "root", "input")
-    add("show-plan", cmd_show_plan)
     add("init", cmd_init, "spec", "root", "sid", "runtime", "skill-dir")
+    add("extract-finish", cmd_extract_finish)
     add("lanes", cmd_lanes, "spec", "lanes")
     add("check-envelopes", cmd_check_envelopes, "lanes", "codex")
-    add("put-envelope", cmd_put_envelope, "lane", "json", "sum")
-    add("codex-status", cmd_codex_status)
     add("drift-briefs", cmd_drift_briefs, "spec")
     add("merge-check", cmd_merge_check, "lanes")
     p = add("falsify-plan", cmd_falsify_plan, "lanes", "spec", "max-batches")

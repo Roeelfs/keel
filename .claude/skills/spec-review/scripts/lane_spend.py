@@ -61,11 +61,16 @@ def load(path):
     return out
 
 
-def lane_spend(run_dir):
+def roles_from_files(paths, marker=None):
+    """Per-ROLE token totals over agent transcripts. With `marker`, only agents whose first user
+    messages mention it (the run dir, which every lane prompt names) are counted."""
     roles = {}
-    for path in sorted(Path(run_dir).glob("agent-*.jsonl")):
+    for path in sorted(paths):
         records = load(path)
-        m = ROLE_RE.search(first_user_text(records))
+        head = first_user_text(records)
+        if marker and marker not in head:
+            continue
+        m = ROLE_RE.search(head)
         role = m.group(1) if m else "UNLABELED"
         usage = agent_usage(records)
         row = roles.setdefault(role, {"agents": 0, **{k: 0 for k in USAGE_KEYS}, "total": 0})
@@ -74,6 +79,49 @@ def lane_spend(run_dir):
             row[k] += usage[k]
         row["total"] += sum(usage.values())
     return dict(sorted(roles.items(), key=lambda kv: -kv[1]["total"]))
+
+
+def lane_spend(run_dir):
+    return roles_from_files(Path(run_dir).glob("agent-*.jsonl"))
+
+
+def workflow_dirs(sid, projects_root=None):
+    """Every Workflow run dir of this session (~/.claude/projects/<project>/<sid>/subagents/workflows/wf_*)."""
+    root = Path(projects_root or Path.home() / ".claude" / "projects")
+    return sorted(root.glob(f"*/{sid}/subagents/workflows/wf_*")) if sid else []
+
+
+TOKENS_RE = re.compile(r"tokens used\s*:?\s*\n?\s*([\d,]+)", re.I)
+
+
+def codex_tokens(run):
+    """Tokens each Codex dispatch of the run reported (`tokens used` in its .log), keyed by out-file stem."""
+    out = {}
+    for log in sorted((Path(run) / "codex").glob("*.log")):
+        if log.name.endswith(".dispatch.log"):
+            continue
+        hits = TOKENS_RE.findall(log.read_text(encoding="utf-8", errors="replace"))
+        if hits:
+            out[log.name.replace(".out.md.log", "").replace(".log", "")] = int(hits[-1].replace(",", ""))
+    return out
+
+
+def run_spend(run, sid, ceiling, wf_dirs=None, projects_root=None):
+    """Spend of ONE spec-review run: its Claude lanes (agents whose prompt names the run dir) plus its
+    Codex dispatches, against the tier's tokenCeiling. warn at 1.0x, stop at 1.5x."""
+    dirs = [Path(d) for d in wf_dirs] if wf_dirs else workflow_dirs(sid, projects_root)
+    files = [f for d in dirs for f in d.glob("agent-*.jsonl")]
+    roles = roles_from_files(files, marker=str(run))
+    claude = sum(r["total"] for r in roles.values())
+    codex = codex_tokens(run)
+    total = claude + sum(codex.values())
+    ratio = round(total / ceiling, 3) if ceiling else 0
+    return {"claudeTotal": claude, "codexTotal": sum(codex.values()), "total": total, "tokenCeiling": ceiling,
+            "ratio": ratio, "warn": bool(ceiling) and ratio >= 1.0, "stop": bool(ceiling) and ratio >= STOP_RATIO,
+            "roles": roles, "codex": codex, "workflowDirs": [str(d) for d in dirs]}
+
+
+STOP_RATIO = 1.5
 
 
 def main(argv):

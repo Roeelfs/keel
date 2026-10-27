@@ -1,8 +1,8 @@
 {
   "profiles": ["full", "standard", "light", "hotfix"],
   "tiers": {
-    "critical": {"profile": "full", "budget": {"maxLanes": 24, "maxCodexLanes": 6, "falsifier": "all", "tokenCeiling": 20000000}},
-    "standard": {"profile": "standard", "budget": {"maxLanes": 11, "maxCodexLanes": 2, "falsifier": "critical", "tokenCeiling": 6000000}},
+    "critical": {"profile": "full", "budget": {"maxLanes": 24, "maxCodexLanes": 6, "falsifier": "uncorroborated", "tokenCeiling": 45000000}},
+    "standard": {"profile": "standard", "budget": {"maxLanes": 11, "maxCodexLanes": 2, "falsifier": "critical", "tokenCeiling": 22000000}},
     "light": {"profile": "light", "budget": {"maxLanes": 3, "maxCodexLanes": 2, "falsifier": "off", "tokenCeiling": 2000000}},
     "hotfix": {"profile": "hotfix", "budget": {"maxLanes": 5, "maxCodexLanes": 3, "falsifier": "all", "tokenCeiling": 3000000}}
   },
@@ -40,7 +40,6 @@
     {"label": "finding-falsifier", "agentType": "general-purpose", "model": "sonnet", "prompt": "finding-falsifier.md"},
     {"label": "codex-envelope-extractor", "agentType": "general-purpose", "model": "sonnet", "prompt": null},
     {"label": "finding-merger", "agentType": "general-purpose", "model": "sonnet", "prompt": null},
-    {"label": "synthesis-writer", "agentType": "general-purpose", "model": "opus", "prompt": null},
-    {"label": "script-runner", "agentType": "general-purpose", "model": "haiku", "prompt": null}
+    {"label": "synthesis-writer", "agentType": "general-purpose", "model": "opus", "prompt": null}
   ]
 }

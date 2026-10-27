@@ -166,7 +166,7 @@ A spec written in a long session accumulates blind spots. This skill breaks that
 
 ### Step 4b: Progressive Drift Investigation
 
-**Script-driven since the Workflow rewrite.** The review stage of `scripts/spec-review.workflow.js` does this itself: when the scout's envelope carries `drift_investigations`, `run_dir.py drift-briefs` materializes one investigator brief per candidate (capped at 5; the rest are logged as a user decision) and the stage runs them as `spec-drift-investigator` lanes before the coverage check. The trigger conditions and result handling below are the policy those lanes and the synthesis follow.
+**Script-driven.** The `post-review` gate (`scripts/stage.py`) does this: when the scout's envelope carries `drift_investigations`, `run_dir.py drift-briefs` materializes one investigator brief per candidate (capped at 5; the rest are logged as a user decision) and the `review2` Workflow stage runs them as `spec-drift-investigator` lanes before the coverage check. At the spend stop (below) the investigators are not launched. The trigger conditions and result handling below are the policy those lanes and the synthesis follow.
 
 **When to dispatch drift investigators:**
 - Scout reports `Needs Investigator: yes`
@@ -267,13 +267,13 @@ when its `profiles` list holds the tier's profile OR its domain gate fired OR th
 
 | tier | profile | default lanes (plus every gate-fired lane) | falsifier |
 |---|---|---|---|
-| critical | `full` | the full 15-lane set (incl. adr, legal, provider-fit, observability, drift, 3 extra Codex) | every CRITICAL/MAJOR |
+| critical | `full` | the full 15-lane set (incl. adr, legal, provider-fit, observability, drift, 3 extra Codex) | every CRITICAL, plus each MAJOR only one lane raised (`uncorroborated`) |
 | standard | `standard` | completeness, codebase-verifier, edge-case, dependency-currency, codex-frontier | CRITICAL only |
 | light | `light` | codebase-verifier, edge-case, codex-frontier; refused if any gate fired | off |
-| hotfix | `hotfix` | codebase-verifier, architecture, dependency-currency, critic-hotfix, codex-frontier | every CRITICAL/MAJOR |
+| hotfix | `hotfix` | codebase-verifier, architecture, dependency-currency, critic-hotfix, codex-frontier | every CRITICAL/MAJOR (`all`) |
 
 Findings outside the falsifier scope still appear in the report (verdict word SURVIVES with a
-"not falsified at tier" note); only the falsifier dispatch is narrowed (`run_dir.py` `FALSIFIER_MODES`).
+"not falsified at tier" note naming why: corroborated by a second lane, outside the tier scope or ceiling stop); only the falsifier dispatch is narrowed (`run_dir.py` `FALSIFIER_MODES`). `uncorroborated` is decided per merged unit after the merge: a MAJOR unit whose members come from two or more distinct lanes skips the falsifier; any unit with a CRITICAL member is always falsified.
 `floor` lanes (codex-frontier, codebase-verifier) are non-droppable, as is any lane whose gate fired.
 
 **lanePlan** (main loop, Step 1): `{tier, add, drop, reasons}`, validated by `run_dir.py plan`
@@ -295,8 +295,40 @@ validated by the same `validate_manifest`; both file paths are logged in the pla
 Added lanes are `kind: claude` with an inline brief. Retunable fields: `model`, `profiles`, `codexClass`.
 Floor, gate and substitute lanes cannot be disabled.
 
-**Budget dials** (advisory only, never a hard kill): `maxLanes`, `maxCodexLanes`, `falsifier`
-(`all|critical|off`), `tokenCeiling`. The plan warns when planned lanes exceed a max, and the report
-prints planned vs ran lane counts. `tokenCeiling` is UNCALIBRATED: compare it with the per-lane totals
-`scripts/lane_spend.py <workflow run dir>` writes (input + cache + output tokens per `ROLE:` lane) and
-retune after a few real runs.
+**Budget dials**: `maxLanes`, `maxCodexLanes` (advisory: the plan warns and the report prints planned vs ran),
+`falsifier` (`all|uncorroborated|critical|off`) and `tokenCeiling`, which is calibrated and ENFORCED.
+
+**Token ceilings (CYN-3219).** Calibrated at about 0.7x the measured means (64.6M critical, 32.3M standard):
+critical 45,000,000, standard 22,000,000, light 2,000,000, hotfix 3,000,000. Spend is Claude lane tokens
+(`lane_spend.py`: input + cache + output per `ROLE:` lane, counting only agents whose prompt names this run dir)
+plus the `tokens used` of this run's Codex dispatches. Every gate in `stage.py` re-measures it into
+`<run>/lane-spend.json` (the per-lane spend log of every run; `report-check` writes the final one
+automatically). At 1.0x of the ceiling the gate prints `SPEND WARNING` (also in the report's Lane plan block).
+At 1.5x it prints `SPEND STOP`: no NEW optional work is launched, and the report names what ran and what did not
+(`stoppedLanes` in `lane-spend.json`). Never dropped by the stop: the mandatory review itself, tier-floor
+(`floor`) lanes, fired-gate lanes, codebase-verifier, the Astra frontier judge (and its critic), the coverage
+repair of a floor or fired-gate lane, and the falsification of every CRITICAL unit. Droppable at the stop: the
+second-wave drift investigators, the coverage repair of other lanes, the critic substitute for a dead
+adversarial lane, and the falsification of MAJOR units. Wave 1 (the reviewer lanes) is one concurrent fan-out
+launched before any spend is known, so the stop governs only the later waves; no lane is demoted by it.
+
+## Run costs (what this skill spends)
+
+The measured study (CYN-3219) found Claude lanes carry 99.6% of spec-review tokens and cache reads dominate, so
+cost follows turns x context. The levers, all in this skill: no LLM agent runs a command (every Bash step is a
+`stage.py` gate the main loop runs); the dossier and decisions miners and the Codex envelope extraction run on
+Codex (`verify` / `luna` / `luna`), with the Claude lane as the fallback only when the Codex lane is DEAD,
+BLOCKED-ON-QUOTA or fails validation (graded by artifact); a re-review reuses the prior dossier and re-runs only
+the changed-input lanes; the falsifier skips corroborated MAJOR; ceilings are enforced.
+
+**Delta re-review** (`stage.py prepare --prior <old run dir>`): copies the prior dossier, questions and decisions;
+diffs the spec by markdown section (`inputs/spec.delta.diff`, `inputs/delta.md`). A lane RE-RUNS when it is a
+`floor` lane, its gate fired, it has no usable prior result, it raised a finding that `mark-applied` recorded as
+applied (verify the fix), or its prior findings text names a changed section heading or `section N`. Every other
+lane is CARRIED: its prior envelope and findings file are copied minus REFUTED and applied findings, and listed in
+the manifest as "carried forward". Re-run lanes get a delta block in their brief (changed sections only). The
+merge and falsifier waves run over carried + new findings together. A review whose prior run dir has no
+`inputs/spec.snapshot.md` (any run made before this change) cannot seed a delta: run a full review.
+
+**Applied flag.** Each merged unit in `merged.json` carries `applied` (null until the fixing step records it with
+`stage.py mark-applied --ids F-1,F-3 [--status false]`), so value per token is measured, not guessed.
