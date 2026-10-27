@@ -294,6 +294,16 @@ message to one is queued to nowhere. Never relay to them.
    all in one message; each writes `handoff/<date>-<slug>-children.md` with the AT-RISK rows.
    Route the no-manager file's rows to the likeliest program by hand.
 
+   **Prove the sweep was complete before sending anything:**
+   `python3 -I $SCR/coverage_audit.py --account <other> --since <checkpoint> --ledger-dir <dir>`.
+   Test A lists any session active since the checkpoint that no ledger holds (a HOLE is a defect:
+   widen the sweep). Test B lists older unmerged descendants of a manager that no handoff names.
+   Reconcilers run after the handoff miners finish, or are told to judge against the state file;
+   run in the same message they find no handoff to check against (measured 2026-10-26).
+   Standing sessions with no `[Manager]` title and no lineage (identity-browser, harness,
+   machine-steward) appear only in the no-manager ledger: ask the human whether to mine them
+   (Mode 2) instead of waiting to be asked.
+
    **Then the decisions sweep and the worktree sweep.** A handoff names PRs, not rulings:
    founder rulings, specs, ADRs and cross-cutting calls (a model ceiling, a tool ban) made on the
    other account can sit in one state file of eight. The worktree sweep walks `git worktree list`
