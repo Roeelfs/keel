@@ -50,6 +50,17 @@ const MINER = { type: 'object', properties: { ok: { type: 'boolean' }, questions
 const MERGED = { type: 'object', properties: { units: { type: 'number' } }, required: ['units'] }
 const SYNTH = { type: 'object', properties: { report_path: { type: 'string' } }, required: ['report_path'] }
 
+// Dead-agent cap (CYN-3231): mirrors lanes.json agentTurnCaps (test_skill_consistency pins the equality). A Workflow
+// agent() has no turn option, so the cap is a brief rule; an agent with no result is DEAD, retried once, then failed.
+const TURN_CAPS = A.turnCaps || { 'synthesis-writer': 40, 'context-dossier-miner': 80 }
+const capRule = (role) => `\nTURN CAP: at most ${TURN_CAPS[role]} turns. By turn ${TURN_CAPS[role] - 5} stop reading and write your deliverable, then reply via StructuredOutput; a run with no result by the cap is declared dead and discarded.`
+async function withDeadRetry(role, run) {
+  const first = await run('')
+  if (first) return first
+  log(`${role}: DEAD (no result within ${TURN_CAPS[role]} turns); one retry`)
+  return await run('\nA previous attempt died without a result: write the deliverable file early and keep reads minimal.')
+}
+
 const gateLog = []
 const note = (s) => { gateLog.push(s); log(s) }
 const labelsOf = (arr) => (arr || []).map((e) => e.label)
@@ -71,8 +82,8 @@ async function prepare() {
   const jobs = []
   if (fb.includes('context-dossier-miner')) jobs.push(['context-dossier-miner', 'opus'])
   if (fb.includes('design-decisions-extractor')) jobs.push(['design-decisions-extractor', 'haiku'])
-  const done = await parallel(jobs.map(([label, model]) => () => agent(`ROLE: ${label}\n${laneBrief(RUN + '/prompts/' + label + '.md')}`,
-    { label, phase: 'Prepare', agentType: 'general-purpose', model, schema: MINER })))
+  const done = await parallel(jobs.map(([label, model]) => () => withDeadRetry(label, (extra) => agent(`ROLE: ${label}\n${laneBrief(RUN + '/prompts/' + label + '.md')}${capRule(label)}${extra}`,
+    { label, phase: 'Prepare', agentType: 'general-purpose', model, schema: MINER }))))
   jobs.forEach(([label], i) => {
     if (done[i]) return
     if (label === 'context-dossier-miner') throw new Error('spec-review: the context dossier miner died; no dossier, no review')
@@ -157,9 +168,9 @@ async function report() {
   const repair = (A.repairErrors && A.repairErrors.length)
     ? `\nYour report ${RUN}/report.md failed the mechanical check. Read it and the brief, fix ONLY what these errors name, and rewrite ${RUN}/report.md.\nERRORS:\n${A.repairErrors.join('\n')}`
     : ''
-  const w = await agent(`ROLE: synthesis-writer\nYour complete brief is the file ${brief}. Read it now and follow every rule in it; spec ${SPEC}.${repair}`,
-    { label: repair ? 'synthesis-writer:repair' : 'synthesis-writer', phase: 'Synthesize', agentType: 'general-purpose', model: 'opus', schema: SYNTH })
-  if (!w) throw new Error('spec-review: synthesis writer returned nothing')
+  const w = await withDeadRetry('synthesis-writer', (extra) => agent(`ROLE: synthesis-writer\nYour complete brief is the file ${brief}. Read it now and follow every rule in it; spec ${SPEC}.${repair}${capRule('synthesis-writer')}${extra}`,
+    { label: repair ? 'synthesis-writer:repair' : 'synthesis-writer', phase: 'Synthesize', agentType: 'general-purpose', model: 'opus', schema: SYNTH }))
+  if (!w) throw new Error('spec-review: synthesis writer died twice (no result within the turn cap); report failed')
   return { stage: 'report', runDir: RUN, reportPath: RUN + '/report.md', gateLog }
 }
 

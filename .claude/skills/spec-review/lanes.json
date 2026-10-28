@@ -6,6 +6,7 @@
     "light": {"profile": "light", "budget": {"maxLanes": 3, "maxCodexLanes": 2, "falsifier": "off", "tokenCeiling": 2000000}},
     "hotfix": {"profile": "hotfix", "budget": {"maxLanes": 5, "maxCodexLanes": 3, "falsifier": "all", "tokenCeiling": 3000000}}
   },
+  "agentTurnCaps": {"synthesis-writer": 40, "context-dossier-miner": 80},
   "cynapRepos": ["cynap-monorepo-next"],
   "gates": ["liveSurface", "security", "cutover", "runtimeWiring", "operatorSurface", "legalSurface", "decisionSurface"],
   "lanes": [

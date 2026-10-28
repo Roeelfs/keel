@@ -91,6 +91,29 @@ def workflow_dirs(sid, projects_root=None):
     return sorted(root.glob(f"*/{sid}/subagents/workflows/wf_*")) if sid else []
 
 
+QUOTA_RE = re.compile(r"you.?ve hit your (?:\w+ )?limit|hit your (?:weekly|session|usage) limit", re.I)
+
+
+def quota_hits(paths, marker=None):
+    """Session/weekly-limit messages in agent transcripts. The harness writes them as a synthetic assistant
+    message (model `<synthetic>`, error `rate_limit`); an agent quoting the phrase in prose never matches."""
+    hits = []
+    for path in sorted(paths):
+        records = load(path)
+        head = first_user_text(records)
+        if marker and marker not in head:
+            continue
+        m = ROLE_RE.search(head)
+        for rec in records:
+            msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+            if rec.get("type") != "assistant" or not (msg.get("model") == "<synthetic>" or rec.get("error") == "rate_limit"):
+                continue
+            text = "\n".join(b.get("text", "") for b in msg.get("content") or [] if isinstance(b, dict))
+            if QUOTA_RE.search(text):
+                hits.append({"role": m.group(1) if m else "UNLABELED", "text": text.strip()[:160], "ts": rec.get("timestamp", "")})
+    return hits
+
+
 TOKENS_RE = re.compile(r"tokens used\s*:?\s*\n?\s*([\d,]+)", re.I)
 
 

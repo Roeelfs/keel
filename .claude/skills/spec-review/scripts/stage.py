@@ -17,11 +17,13 @@ ceiling, report brief) and prints ONE JSON object with the exact args of the nex
   extract-plan   list the OK Codex lanes whose prose output needs an envelope (luna extraction)
   extract-envelopes   validate and write the envelopes the luna extraction produced
   spend          write lane-spend.json now
+  quota-clear    resume a quota-stopped review after the limit reset (the gates refuse until then)
 
 Run state lives in <run>/state.json (no other store). Exit 1 means the stage must fail.
 """
 import argparse
 import contextlib
+import datetime
 import difflib
 import io
 import json
@@ -113,6 +115,53 @@ def note_stopped(run, labels):
     sp = rd.read_json(p, {}) or {}
     sp["stoppedLanes"] = sorted(set(sp.get("stoppedLanes", [])) | set(labels))
     rd.write(p, json.dumps(sp, indent=1))
+
+
+def quota_gate(run, at, sid=None, wf_dirs=None):
+    """The first session/weekly limit in a review (a Claude agent's limit message, or a Codex lane graded QUOTA)
+    stops the whole review: sticky `quotaStopped` in state.json, no further lane, retry or stage. Returns the
+    stop object, or None. `quota-clear` (after the reset) is the only way to resume."""
+    st = load_state(run)
+    since = st.get("quotaClearedAt", "")
+    sid_file = Path(run) / "inputs" / "sid.txt"
+    if not sid and sid_file.is_file():
+        sid = sid_file.read_text(encoding="utf-8").strip()
+    dirs = [Path(d) for d in wf_dirs] if wf_dirs else lane_spend.workflow_dirs(sid)
+    hits = [h for h in lane_spend.quota_hits([f for d in dirs for f in d.glob("agent-*.jsonl")], marker=str(run)) if h["ts"] > since]
+    status = rd.codex_status_rows(run)
+    codex = [] if since else [l for l, r in status.items() if r["status"] == "QUOTA"]
+    if not (hits or codex or st.get("quotaStopped")):
+        return None
+    prev = st.get("quotaStopped") or {}
+    plan = rd.read_json(Path(run) / "plan.json")
+    labels = [e["label"] for e in plan["run"]] if isinstance(plan, dict) else []
+    not_run = [l for l in labels if not has_envelope(run, l) and status.get(l, {}).get("status") != "OK"]
+    stop = {"claude": sorted({h["role"] for h in hits} | set(prev.get("claude", []))), "codex": sorted(set(codex) | set(prev.get("codex", []))),
+            "message": (hits[0]["text"] if hits else prev.get("message", "Codex lane BLOCKED-ON-QUOTA")), "at": prev.get("at", at),
+            "notRun": [f"{l}: not run: quota" for l in not_run]}
+    st["quotaStopped"] = stop
+    save_state(run, st)
+    note_stopped(run, not_run)
+    p = Path(run) / "lane-spend.json"
+    sp = rd.read_json(p, {}) or {}
+    sp["quotaStopped"] = stop
+    rd.write(p, json.dumps(sp, indent=1))
+    return stop
+
+
+def quota_emit(stop):
+    line = (f"QUOTA STOP ({stop['message']}): launch NO further lane, retry or Workflow in this review; "
+            f"resume only after the reset with `stage.py quota-clear --run <runDir>`, then rerun this gate")
+    return rd.emit({"ok": False, "quotaStopped": True, "stop": line, "claude": stop["claude"], "codex": stop["codex"],
+                    "notRun": stop["notRun"], "errors": [line]}, False)
+
+
+def cmd_quota_clear(a):
+    st = load_state(a.run)
+    st.pop("quotaStopped", None)
+    st["quotaClearedAt"] = a.after or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    save_state(a.run, st)
+    return rd.emit({"ok": True, "clearedAt": st["quotaClearedAt"]})
 
 
 def spend_brief(sp):
@@ -318,6 +367,9 @@ def cmd_finish_prepare(a):
 def cmd_post_review(a):
     run = Path(a.run)
     plan, st = load_plan(run), load_state(run)
+    stop = quota_gate(run, "post-review")
+    if stop:
+        return quota_emit(stop)
     by = {e["label"]: e for e in plan["run"]}
     present = [l for l in st["claude"] if has_envelope(run, l)]
     failed = [l for l in st["claude"] if l not in present]
@@ -432,6 +484,9 @@ def cmd_extract_envelopes(a):
 def cmd_synth_prep(a):
     run = Path(a.run)
     plan, st = load_plan(run), load_state(run)
+    stop = quota_gate(run, "synth-prep")
+    if stop:
+        return quota_emit(stop)
     manifest = rd.load_manifest(str(run))
     status = rd.codex_status_rows(run)
     notes, live, dead = [], [], []
@@ -500,6 +555,9 @@ def cmd_synth_prep(a):
 def cmd_falsify_prep(a):
     run = Path(a.run)
     plan, st = load_plan(run), load_state(run)
+    stop = quota_gate(run, "falsify-prep")
+    if stop:
+        return quota_emit(stop)
     ok = st["synth"]["ok"]
     rc, mc = sub(rd.cmd_merge_check, run=a.run, lanes=",".join(ok))
     if not mc.get("ok"):
@@ -603,6 +661,9 @@ def report_prompt(run, plan, st, sp, a):
 def cmd_falsify_check(a):
     run = Path(a.run)
     plan, st = load_plan(run), load_state(run)
+    stop = quota_gate(run, "falsify-check")
+    if stop:
+        return quota_emit(stop)
     ok = st["synth"]["ok"]
     rc, s = sub(rd.cmd_summary, run=a.run, lanes=",".join(ok), planned=",".join(e["label"] for e in plan["run"]))
     notes = []
@@ -626,7 +687,7 @@ def cmd_falsify_check(a):
     save_state(run, st)
     if summ["hardStop"]:
         notes.append(f"HARD STOP surfaced in report.md ({', '.join(summ['hardStopReasons'])})")
-    return rd.emit({"ok": True, "redo": False, "reportArgs": {"stage": "report", "briefPath": str(brief_path)}, "counts": {"raw": s["raw"], "surviving": s["surviving"], "refuted": s["refuted"], "falsifierDispatched": total},
+    return rd.emit({"ok": True, "redo": False, "reportArgs": {"stage": "report", "briefPath": str(brief_path), "turnCaps": rd.load_manifest(str(run)).get("agentTurnCaps", {})}, "counts": {"raw": s["raw"], "surviving": s["surviving"], "refuted": s["refuted"], "falsifierDispatched": total},
                     "hardStop": s["hardStop"], "hardStopReasons": s["hardStopReasons"], "notes": notes, "spend": spend_brief(sp)})
 
 
@@ -692,6 +753,7 @@ def main(argv=None):
     add("falsify-check", cmd_falsify_check, "spec", "investigation", "review-path")
     add("report-check", cmd_report_check)
     add("mark-applied", cmd_mark_applied, "ids", "status")
+    add("quota-clear", cmd_quota_clear, "after")
     add("spend", cmd_spend, "checkpoint", "sid", "wf-dirs")
     a = ap.parse_args(argv)
     if hasattr(a, "status") and not a.status:

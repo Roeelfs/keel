@@ -312,6 +312,16 @@ second-wave drift investigators, the coverage repair of other lanes, the critic 
 adversarial lane, and the falsification of MAJOR units. Wave 1 (the reviewer lanes) is one concurrent fan-out
 launched before any spend is known, so the stop governs only the later waves; no lane is demoted by it.
 
+**Quota stop and dead-agent cap (CYN-3231).** The first session/weekly limit message in any of this run's Claude
+agents (a synthetic `rate_limit` assistant message, `quota_hits` in `lane_spend.py`) or a Codex lane graded QUOTA
+sets a sticky `quotaStopped` in `state.json` and `lane-spend.json`; `post-review`, `synth-prep`, `falsify-prep` and
+`falsify-check` then refuse (exit 1, `quotaStopped:true`, one `QUOTA STOP` line) and launch nothing, so a limit is
+never followed by relaunches (the audit's wf_d570cfb2 re-ran 17 lanes into the wall: 43M tokens). Lanes that
+already wrote envelopes stay; the rest are listed `not run: quota`. `quota-clear [--after <ISO>]` resumes after the
+reset. `lanes.json` `agentTurnCaps` (synthesis-writer 40, context-dossier-miner 80, from the audit's successful
+agents: synthesis-writer p95 33, max 42, n=48; dossier-miner p95 67, max 84, n=42) are stated in the agent brief; an
+agent with no result is DEAD, retried once, then the stage fails (the workflow's `withDeadRetry`).
+
 ## Run costs (what this skill spends)
 
 The measured study (CYN-3219) found Claude lanes carry 99.6% of spec-review tokens and cache reads dominate, so

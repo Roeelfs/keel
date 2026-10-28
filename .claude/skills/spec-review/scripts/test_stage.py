@@ -211,6 +211,70 @@ class ReviewFlowTests(unittest.TestCase):
             self.assertEqual(sp["tokenCeiling"], 22_000_000)
 
 
+class QuotaStopTests(unittest.TestCase):
+    LIMIT = "You've hit your session limit \u00b7 resets 1:30am (Asia/Jerusalem)"
+
+    def limit_agent(self, tmp, run, ts="2026-10-25T23:15:43.774Z"):
+        wf = Path(tmp) / "wf"
+        wf.mkdir(exist_ok=True)
+        recs = [{"type": "user", "message": {"role": "user", "content": f"ROLE: legal-auditor\nrun {run}"}},
+                {"type": "assistant", "timestamp": ts, "error": "rate_limit", "message": {"id": "m", "model": "<synthetic>", "role": "assistant",
+                 "usage": {"input_tokens": 0, "output_tokens": 0}, "content": [{"type": "text", "text": self.LIMIT}]}}]
+        (wf / "agent-q.jsonl").write_text("\n".join(json.dumps(r) for r in recs))
+        return wf
+
+    def test_claude_limit_message_stops_every_gate_and_lists_not_run_lanes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run, root = new_run(tmp)
+            full_prepare(run, root)
+            wf = self.limit_agent(tmp, run)
+            with mock.patch.object(lane_spend, "workflow_dirs", return_value=[wf]):
+                rc, out = scall("post-review", "--run", str(run), "--spec", "spec.md")
+            self.assertEqual(rc, 1)
+            self.assertTrue(out["quotaStopped"])
+            self.assertIn("QUOTA STOP", out["stop"])
+            self.assertNotIn("relaunch", out)
+            self.assertNotIn("review2Args", out)
+            self.assertIn("legal-auditor", out["claude"])
+            self.assertTrue(any(n.endswith("not run: quota") for n in out["notRun"]))
+            st = stage.load_state(run)
+            self.assertIn("message", st["quotaStopped"])
+            self.assertTrue(json.loads((run / "lane-spend.json").read_text())["stoppedLanes"])
+            # sticky: with no transcripts left, every later gate still refuses
+            for gate in ("synth-prep", "falsify-prep", "falsify-check"):
+                rc, out = scall(gate, "--run", str(run), "--spec", "spec.md")
+                self.assertEqual((rc, out.get("quotaStopped")), (1, True), gate)
+
+    def test_codex_blocked_on_quota_counts_and_quota_clear_resumes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run, root = new_run(tmp)
+            full_prepare(run, root)
+            (run / "codex" / "status.tsv").write_text("codex-adversarial\tQUOTA\t0\t1\n")
+            rc, out = scall("synth-prep", "--run", str(run), "--spec", "spec.md")
+            self.assertEqual((rc, out["quotaStopped"], out["codex"]), (1, True, ["codex-adversarial"]))
+            rc, out = scall("quota-clear", "--run", str(run))
+            self.assertEqual(rc, 0)
+            self.assertNotIn("quotaStopped", stage.load_state(run))
+            self.assertIsNone(stage.quota_gate(run, "x", wf_dirs=[]))
+
+    def test_old_limit_message_before_the_clear_is_ignored_and_prose_never_matches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run, root = new_run(tmp)
+            full_prepare(run, root)
+            wf = self.limit_agent(tmp, run, ts="2026-10-25T23:15:43.774Z")
+            scall("quota-clear", "--run", str(run), "--after", "2026-10-26T00:00:00.000Z")
+            self.assertIsNone(stage.quota_gate(run, "x", wf_dirs=[wf]))
+            recs = [{"type": "user", "message": {"role": "user", "content": f"ROLE: x\n{run}"}},
+                    {"type": "assistant", "timestamp": "2026-10-27T00:00:00Z", "message": {"role": "assistant", "model": "claude-opus-5-5",
+                     "content": [{"type": "text", "text": "finding: the retry must handle 'you've hit your session limit' text"}]}}]
+            (wf / "agent-q.jsonl").write_text("\n".join(json.dumps(r) for r in recs))
+            self.assertIsNone(stage.quota_gate(run, "x", wf_dirs=[wf]))
+
+    def test_report_args_carry_the_dead_agent_turn_caps(self):
+        caps = run_dir.load_manifest()["agentTurnCaps"]
+        self.assertEqual(caps, {"synthesis-writer": 40, "context-dossier-miner": 80})
+
+
 class SpendTests(unittest.TestCase):
     def test_run_spend_counts_only_this_runs_agents_and_codex_logs(self):
         with tempfile.TemporaryDirectory() as tmp:

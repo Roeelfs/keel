@@ -239,6 +239,13 @@ class SkillMdTests(unittest.TestCase):
         self.assertIn("CYN-3023", ref)
         self.assertIn("CYN-3160", ref)
 
+    def test_workflow_turn_caps_mirror_lanes_json(self):
+        js = (HERE / "spec-review.workflow.js").read_text(encoding="utf-8")
+        m = re.search(r"A\.turnCaps \|\| (\{[^}]*\})", js)
+        self.assertTrue(m, "workflow TURN_CAPS default missing")
+        self.assertEqual(json.loads(m.group(1).replace("'", '"')), MANIFEST["agentTurnCaps"])
+        self.assertIn("withDeadRetry('synthesis-writer'", js)
+
     def test_skill_byte_ratchet(self):
         size = len(SKILL.encode("utf-8"))
         self.assertLessEqual(size, MAX_SKILL_BYTES, f"SKILL.md grew to {size}B over the {MAX_SKILL_BYTES}B ceiling")
