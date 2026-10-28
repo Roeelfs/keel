@@ -1,6 +1,6 @@
 export const meta = {
   name: 'spec-review',
-  description: 'Spec review agent stages, one per call (args.stage): prepare (Claude miner fallback) -> review -> review2 -> critics -> merge -> falsify -> report. Pure agent work: every command, file check and plan is a Bash gate (scripts/stage.py) the main loop runs between stages. Returns labels only.',
+  description: 'Spec review agent stages, one per call (args.stage): why (pre-flight Why gate) -> prepare (Claude miner fallback) -> review -> review2 -> critics -> merge -> falsify -> report. Pure agent work: every command, file check and plan is a Bash gate (scripts/stage.py) the main loop runs between stages. Returns labels only.',
   whenToUse: 'Launched by the spec-review skill; never call directly with a missing stage.',
   phases: [
     { title: 'Prepare', detail: 'Claude miners, only for a Codex miner that died or failed validation' },
@@ -15,7 +15,7 @@ export const meta = {
 const A = typeof args === 'string' ? (() => { try { return JSON.parse(args) } catch { return {} } })() : (args || {})
 const need = (k) => { if (A[k] === undefined || A[k] === null || A[k] === '') throw new Error(`spec-review: args.${k} is required`); return A[k] }
 const STAGE = need('stage')
-const STAGES = ['prepare', 'review', 'review2', 'critics', 'merge', 'falsify', 'report']
+const STAGES = ['why', 'prepare', 'review', 'review2', 'critics', 'merge', 'falsify', 'report']
 if (!STAGES.includes(STAGE)) throw new Error(`spec-review: unknown stage ${STAGE}`)
 const RUN = need('runDir')
 if (!RUN.startsWith('/')) throw new Error('spec-review: args.runDir must be an absolute path')
@@ -46,6 +46,7 @@ const FALSIFIER_ITEM = {
   required: ['id', 'verdict', 'evidence'],
 }
 const FALSIFIER_BATCH = { type: 'object', properties: { verdicts: { type: 'array', items: FALSIFIER_ITEM } }, required: ['verdicts'] }
+const WHY = { type: 'object', properties: { verdict: { type: 'string', enum: ['PROCEED', 'SIMPLIFY', 'WRONG-ROUTE'] }, answers: { type: 'object' }, whyRecord: { type: 'string' } }, required: ['verdict', 'answers'] }
 const MINER = { type: 'object', properties: { ok: { type: 'boolean' }, questions: { type: 'number' } }, required: ['ok'] }
 const MERGED = { type: 'object', properties: { units: { type: 'number' } }, required: ['units'] }
 const SYNTH = { type: 'object', properties: { report_path: { type: 'string' } }, required: ['report_path'] }
@@ -72,6 +73,16 @@ function laneAgent(e, phaseName) {
 }
 const laneBrief = (file, extra) =>
   `Your complete, already-filled brief is the file ${file}. Read it now and follow it exactly, including its "Run contract": write your findings file and your envelope file first, then reply with the same envelope via StructuredOutput. Do not read other lanes' files.${extra || ''}`
+
+// ---------------------------------------------------------------------------
+// why: the pre-flight Why gate, ONE Opus lane before any review lane. stage.py why-gate --check judges its envelope file.
+// ---------------------------------------------------------------------------
+async function why() {
+  phase('Prepare')
+  const r = await agent(`ROLE: why-gate\n${laneBrief(RUN + '/prompts/why-gate.md')}`, { label: 'why-gate', phase: 'Prepare', agentType: 'general-purpose', model: 'opus', schema: WHY })
+  if (!r) throw new Error('spec-review: the why-gate lane returned nothing')
+  return { stage: 'why', runDir: RUN, ran: ['why-gate'], gateLog }
+}
 
 // ---------------------------------------------------------------------------
 // prepare: a Claude miner runs ONLY when its Codex miner was DEAD / BLOCKED-ON-QUOTA / invalid
@@ -174,5 +185,5 @@ async function report() {
   return { stage: 'report', runDir: RUN, reportPath: RUN + '/report.md', gateLog }
 }
 
-const RUNNERS = { prepare, review, review2, critics, merge, falsify, report }
+const RUNNERS = { why, prepare, review, review2, critics, merge, falsify, report }
 return await RUNNERS[STAGE]()

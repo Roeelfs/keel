@@ -187,6 +187,16 @@ class ManifestTests(unittest.TestCase):
         self.assertIn("lane_spend.STOP_RATIO", stage)
         self.assertEqual(__import__("lane_spend").STOP_RATIO, 1.5)
 
+    def test_why_gate_is_one_support_lane_with_its_own_workflow_stage(self):
+        e = next(x for x in MANIFEST["support"] if x["label"] == "why-gate")
+        self.assertEqual((e["agentType"], e["model"], e["prompt"]), ("general-purpose", "opus", "why-gate.md"))
+        self.assertNotIn("why-gate", [x["label"] for x in MANIFEST["lanes"]], "not a review lane: it runs before the plan's lanes")
+        text = (SKILL_DIR / "prompts" / e["prompt"]).read_text(encoding="utf-8")
+        for needle in ("PROCEED", "SIMPLIFY", "WRONG-ROUTE", "ADR-0036", "q6"):
+            self.assertIn(needle, text)
+        self.assertIn("async function why()", WORKFLOW_JS.read_text())
+        self.assertIn("reference.md#why-gate", SKILL)
+
     def test_lanes_without_prompt_file_have_a_brief(self):
         for e in MANIFEST["lanes"]:
             if not e.get("prompt"):

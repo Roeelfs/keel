@@ -6,6 +6,7 @@ A Workflow script has no shell, so nothing in it can run a command; before this 
 the deterministic work (init, lane prompts, envelope checks, merge validation, falsifier plan, spend
 ceiling, report brief) and prints ONE JSON object with the exact args of the next Workflow stage.
 
+  why-gate       pre-flight Why gate: write the lane prompt (or record a skip); --check judges its envelope
   prepare        init the run dir (+ delta re-review setup when --prior)
   finish-prepare lane prompts for the lanes that run this wave
   post-review    drift briefs, question coverage, spend gate -> review2 args
@@ -319,12 +320,98 @@ def build_delta(run, prior, plan):
 
 
 # ---------------------------------------------------------------------------
+# why-gate: ONE Opus lane before any review lane; SIMPLIFY / WRONG-ROUTE stop the run
+# ---------------------------------------------------------------------------
+WHY_VERDICTS = ("PROCEED", "SIMPLIFY", "WRONG-ROUTE")
+WHY_QUESTIONS = ("q1", "q2", "q3", "q4", "q5", "q6")
+WHY_RECORD_MAX_LINES = 25
+WHY_REQUIRED = "grill the founder with a recommended answer BEFORE any review lane runs, revise the spec or the route, then rerun `stage.py why-gate`"
+
+
+def why_path(run):
+    return Path(run) / "inputs" / "why-gate.json"
+
+
+def why_envelope_errors(env):
+    if not isinstance(env, dict):
+        return ["why-gate.json missing or not a JSON object: the lane wrote no envelope (relaunch Workflow stage why)"]
+    errors = []
+    if env.get("verdict") not in WHY_VERDICTS:
+        errors.append(f"verdict must be one of {list(WHY_VERDICTS)}")
+    answers = env.get("answers") if isinstance(env.get("answers"), dict) else {}
+    errors += [f"answers.{q} is missing or empty" for q in WHY_QUESTIONS if not str(answers.get(q) or "").strip()]
+    record = str(env.get("whyRecord") or "").strip()
+    if env.get("verdict") == "PROCEED" and not record:
+        errors.append("a PROCEED verdict needs a whyRecord (about 10 lines)")
+    if len(record.splitlines()) > WHY_RECORD_MAX_LINES:
+        errors.append(f"whyRecord is over {WHY_RECORD_MAX_LINES} lines")
+    return errors
+
+
+def why_skip_reason(run, a):
+    if load_plan(run)["tier"] == "hotfix":
+        return "tier hotfix (prod down, minutes matter)"
+    if a.docs_only.strip():
+        return f"docs-only spec: {a.docs_only.strip()}"
+    return ""
+
+
+def cmd_why_gate(a):
+    run = Path(a.run)
+    rec = rd.read_json(why_path(run)) or {}
+    if a.check:
+        env = rd.read_json(run / "why-gate.json")
+        errors = why_envelope_errors(env)
+        if errors:
+            return rd.emit({"ok": False, "errors": errors}, False)
+        lines = {q: " ".join(str(env["answers"][q]).split()) for q in WHY_QUESTIONS}
+        if env["verdict"] != "PROCEED":
+            rd.write(why_path(run), json.dumps({"status": "stop", "verdict": env["verdict"], "answers": lines}, indent=1))
+            return rd.emit({"ok": False, "hardStop": True, "hardStopReasons": ["why-gate"], "verdict": env["verdict"],
+                            "required": WHY_REQUIRED, "answers": lines}, False)
+        record = env["whyRecord"].strip()
+        rd.write(run / "inputs" / "why-record.md", "# Why record (pre-flight Why gate: PROCEED)\n\n" + record + "\n")
+        ctx = run / "inputs" / "context.md"
+        text = ctx.read_text(encoding="utf-8") if ctx.is_file() else ""
+        if "## Why record" not in text:
+            rd.write(ctx, text.rstrip() + "\n\n## Why record (Why gate: PROCEED)\n\n" + record + "\n")
+        rd.write(why_path(run), json.dumps({"status": "pass", "verdict": "PROCEED", "answers": lines}, indent=1))
+        return rd.emit({"ok": True, "whyGate": "pass", "verdict": "PROCEED", "answers": lines, "next": "prepare"})
+    reason = why_skip_reason(run, a)
+    if reason:
+        first = rec.get("status") != "skipped"
+        rd.write(why_path(run), json.dumps({"status": "skipped", "reason": reason}))
+        return rd.emit({"ok": True, "whyGate": "skipped", "next": "prepare", **({"skipReason": reason} if first else {})})
+    entry = rd.entry_by_label(rd.read_json(run / "manifest.json") or rd.load_manifest(), "why-gate")
+    body = rd.extract_body((rd.SKILL_DIR / "prompts" / entry["prompt"]).read_text(encoding="utf-8"))
+    values = {"SPEC_PATH": a.spec, "PROJECT_ROOT": a.root, "CONTEXT_BLOCK": (run / "inputs" / "context.md").read_text(encoding="utf-8").strip()}
+    contract = f"""
+
+## Run contract (added by the pipeline script -- binding)
+
+- Run dir: {run}
+- Linear ticket: {a.ticket or "none given: say so under question 1"}
+- Independence: you are a leaf agent -- spawn no sub-agents or Workflows.
+- Delivery: write the envelope JSON above to {run}/why-gate.json, then reply with the same envelope via StructuredOutput.
+"""
+    rd.write(run / "prompts" / "why-gate.md", "ROLE: why-gate\n" + rd.fill(body, values) + contract)
+    rd.write(why_path(run), json.dumps({"status": "pending"}))
+    (run / "why-gate.json").unlink(missing_ok=True)
+    return rd.emit({"ok": True, "whyGate": "pending", "workflow": {"stage": "why", "runDir": str(run), "skillDir": str(rd.SKILL_DIR), "spec": a.spec},
+                    "next": f"run that Workflow stage, then `stage.py why-gate --run {run} --check`"})
+
+
+# ---------------------------------------------------------------------------
 # prepare / finish-prepare
 # ---------------------------------------------------------------------------
 def cmd_prepare(a):
     a.skill_dir = a.skill_dir or str(rd.SKILL_DIR)
     a.runtime = a.runtime or "claude"
     plan = load_plan(a.run)
+    gate = rd.read_json(why_path(a.run)) or {}
+    if gate.get("status") not in ("pass", "skipped") and not a.prior:
+        return rd.emit({"ok": False, "hardStop": True, "hardStopReasons": ["why-gate"], "verdict": gate.get("verdict", ""),
+                        "required": WHY_REQUIRED if gate.get("status") == "stop" else "run `stage.py why-gate` (then its Workflow stage and `--check`) before prepare"}, False)
     rc, init = sub(rd.cmd_init, run=a.run, spec=a.spec, root=a.root, sid=a.sid, runtime=a.runtime, skill_dir=a.skill_dir)
     if rc:
         return rd.emit(init, False)
@@ -743,6 +830,7 @@ def main(argv=None):
             p.add_argument(f"--{b}", action="store_true")
         p.set_defaults(fn=fn)
 
+    add("why-gate", cmd_why_gate, "spec", "root", "ticket", "docs-only", check=True)
     add("prepare", cmd_prepare, "spec", "root", "sid", "runtime", "skill-dir", "prior")
     add("finish-prepare", cmd_finish_prepare, "spec", "wiring-type")
     add("post-review", cmd_post_review, "spec", final=True)

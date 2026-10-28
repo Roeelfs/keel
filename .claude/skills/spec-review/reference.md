@@ -322,6 +322,30 @@ reset. `lanes.json` `agentTurnCaps` (synthesis-writer 40, context-dossier-miner 
 agents: synthesis-writer p95 33, max 42, n=48; dossier-miner p95 67, max 84, n=42) are stated in the agent brief; an
 agent with no result is DEAD, retried once, then the stage fails (the workflow's `withDeadRetry`).
 
+## Why gate
+
+A pre-flight check (CYN-3239) that runs BEFORE `prepare`, so no review token is spent on a spec that should not be
+built as written. One Opus 5.5 lane (`why-gate` in `lanes.json` `support`, brief `prompts/why-gate.md`, no fan-out)
+answers six questions: (1) what real trigger or evidence makes this needed now; (2) can the playground (ADR-0036:
+customer config, flows, MCP) or an existing primitive already do it; (3) the smallest version that delivers the
+outcome and its explicit OUT list; (4) does the scope exceed that version, and why each extra item; (5) size in
+days, and above 5 the hard dependency that forbids a smaller first ship; (6) the cheapest proof it works and what
+would make us delete it. Its envelope (`<runDir>/why-gate.json`): `verdict` PROCEED | SIMPLIFY | WRONG-ROUTE,
+`answers` q1..q6 (one line each), `whyRecord` (about 10 lines, PROCEED only).
+
+Commands (main loop): `stage.py why-gate --run --spec --root --ticket [--docs-only <reason>]` writes the filled
+prompt and prints the Workflow `{stage:"why"}` args; after the lane, `stage.py why-gate --run --check` validates the
+envelope and records the outcome in `inputs/why-gate.json`. PROCEED writes `inputs/why-record.md` and appends the
+record to `inputs/context.md`, so the dossier miners and every lane see it. SIMPLIFY or WRONG-ROUTE exit 1 with
+`hardStop` and `required`: grill the founder with a recommended answer BEFORE any review lane runs, revise, rerun
+`why-gate` (a rerun clears the stale envelope). `stage.py prepare` refuses (hardStop `why-gate`) unless the record
+is `pass` or `skipped`; a `--prior` re-review needs no new gate.
+
+Skips: tier `hotfix`, and a docs-only spec (`--docs-only` with the reason; a docs-only spec that specifies a
+money, security, tenancy or credential change still gets the tier floor, only the Why gate is skipped). The skip
+reason is printed once. Spend: the lane's prompt starts `ROLE: why-gate` and names the run dir, so `lane_spend.py`
+lists it in `lane-spend.json` and counts it in the tier's `tokenCeiling` accounting; the ceilings are unchanged.
+
 ## Run costs (what this skill spends)
 
 The measured study (CYN-3219) found Claude lanes carry 99.6% of spec-review tokens and cache reads dominate, so

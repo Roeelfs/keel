@@ -55,6 +55,7 @@ def new_run(tmp, tier="standard", name="run", spec=SPEC_V1, fired=None, repo="cy
         (run / d).mkdir(parents=True, exist_ok=True)
     (run / "inputs" / "root.txt").write_text(str(root))
     (run / "inputs" / "context.md").write_text("Goal: g\nTrigger: t\nTarget outcome: o\nScope boundaries: s\n")
+    (run / "inputs" / "why-gate.json").write_text(json.dumps({"status": "skipped", "reason": "test fixture: the Why gate has its own tests"}))
     return run, root
 
 
@@ -575,6 +576,120 @@ class SynthesizeTests(unittest.TestCase):
             sp = json.loads((run / "lane-spend.json").read_text())
             self.assertEqual(sp["checkpoints"][-1]["at"], "final")
             self.assertTrue(manifest)
+
+
+
+WHY_ANSWERS = {f"q{i}": f"answer {i}" for i in range(1, 7)}
+WHY_RECORD = "\n".join(f"record line {i}" for i in range(10))
+
+
+def why_run(tmp, tier="standard", **kw):
+    run, root = new_run(tmp, tier=tier, **kw)
+    (run / "inputs" / "why-gate.json").unlink()
+    return run, root
+
+
+def why_envelope(run, verdict="PROCEED", answers=WHY_ANSWERS, record=WHY_RECORD):
+    (run / "why-gate.json").write_text(json.dumps({"verdict": verdict, "answers": answers, "whyRecord": record}))
+
+
+def why(run, *extra):
+    return scall("why-gate", "--run", str(run), "--spec", "spec.md", "--root", str(run.parent / "root"), *extra)
+
+
+class WhyGateTests(unittest.TestCase):
+    def test_prepare_refuses_until_the_gate_passes_and_the_lane_prompt_is_filled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run, root = why_run(tmp)
+            rc, out = prepare(run, root)
+            self.assertEqual((rc, out["hardStop"], out["hardStopReasons"]), (1, True, ["why-gate"]))
+            rc, out = why(run, "--ticket", "CYN-3239")
+            self.assertEqual((rc, out["whyGate"], out["workflow"]["stage"]), (0, "pending", "why"))
+            prompt = (run / "prompts" / "why-gate.md").read_text()
+            self.assertTrue(prompt.startswith("ROLE: why-gate\n"))
+            self.assertIn("CYN-3239", prompt)
+            self.assertIn("Goal: g", prompt)
+            self.assertIn(str(run), prompt, "the run dir must be named so lane_spend counts this lane")
+            self.assertEqual(run_dir.find_placeholders(prompt), [])
+            self.assertEqual(prepare(run, root)[0], 1, "pending still refuses")
+
+    def test_proceed_writes_the_why_record_into_inputs_and_context_and_unblocks_prepare(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run, root = why_run(tmp)
+            why(run)
+            why_envelope(run)
+            rc, out = why(run, "--check")
+            self.assertEqual((rc, out["whyGate"], out["verdict"]), (0, "pass", "PROCEED"))
+            self.assertIn("record line 9", (run / "inputs" / "why-record.md").read_text())
+            self.assertIn("record line 0", (run / "inputs" / "context.md").read_text())
+            why(run, "--check")
+            self.assertEqual((run / "inputs" / "context.md").read_text().count("record line 0"), 1, "idempotent")
+            self.assertEqual(prepare(run, root)[0], 0)
+
+    def test_simplify_and_wrong_route_hard_stop_and_block_prepare(self):
+        for verdict in ("SIMPLIFY", "WRONG-ROUTE"):
+            with tempfile.TemporaryDirectory() as tmp:
+                run, root = why_run(tmp)
+                why(run)
+                why_envelope(run, verdict=verdict, record="")
+                rc, out = why(run, "--check")
+                self.assertEqual((rc, out["hardStop"], out["verdict"]), (1, True, verdict))
+                self.assertIn("grill the founder with a recommended answer BEFORE any review lane runs", out["required"])
+                self.assertFalse((run / "inputs" / "why-record.md").exists())
+                rc, out = prepare(run, root)
+                self.assertEqual((rc, out["hardStopReasons"], out["verdict"]), (1, ["why-gate"], verdict))
+                why(run)
+                self.assertFalse((run / "why-gate.json").exists(), "a rerun clears the stale envelope")
+                self.assertEqual(prepare(run, root)[0], 1)
+
+    def test_malformed_envelopes_are_rejected_not_recorded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run, root = why_run(tmp)
+            why(run)
+            self.assertEqual(why(run, "--check")[0], 1, "no envelope")
+            for env in ({"verdict": "MAYBE", "answers": WHY_ANSWERS},
+                        {"verdict": "PROCEED", "answers": {**WHY_ANSWERS, "q4": " "}, "whyRecord": WHY_RECORD},
+                        {"verdict": "PROCEED", "answers": WHY_ANSWERS, "whyRecord": ""},
+                        {"verdict": "PROCEED", "answers": WHY_ANSWERS, "whyRecord": "x\n" * 40}):
+                (run / "why-gate.json").write_text(json.dumps(env))
+                rc, out = why(run, "--check")
+                self.assertEqual((rc, out["ok"]), (1, False), env)
+                self.assertNotIn("hardStop", out)
+            self.assertEqual(prepare(run, root)[0], 1)
+
+    def test_hotfix_and_docs_only_skip_and_the_reason_prints_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run, root = why_run(tmp, tier="hotfix")
+            rc, out = why(run)
+            self.assertEqual((rc, out["whyGate"], "hotfix" in out["skipReason"]), (0, "skipped", True))
+            self.assertNotIn("skipReason", why(run)[1], "the skip reason is printed once")
+            self.assertEqual(prepare(run, root)[0], 0)
+        with tempfile.TemporaryDirectory() as tmp:
+            run, root = why_run(tmp)
+            rc, out = why(run, "--docs-only", "only edits docs/runbooks")
+            self.assertEqual((rc, out["whyGate"], out["skipReason"]), (0, "skipped", "docs-only spec: only edits docs/runbooks"))
+            self.assertEqual(prepare(run, root)[0], 0)
+
+    def test_rereview_with_prior_needs_no_new_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run, root = why_run(tmp)
+            prior, _ = new_run(tmp, name="prior")
+            full_prepare(prior, root)
+            rc, out = prepare(run, root, "--prior", str(prior))
+            self.assertNotEqual(out.get("hardStopReasons"), ["why-gate"])
+
+    def test_why_gate_spend_is_counted_in_the_run_total_without_raising_the_ceiling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run, _ = why_run(tmp)
+            d = Path(tmp) / "wf"
+            d.mkdir()
+            why(run)
+            brief = f"ROLE: why-gate\nYour complete, already-filled brief is the file {run}/prompts/why-gate.md."
+            rec = [{"type": "user", "message": {"role": "user", "content": brief}},
+                   {"type": "assistant", "message": {"id": "m1", "role": "assistant", "usage": {"output_tokens": 1234}}}]
+            (d / "agent-w.jsonl").write_text("\n".join(json.dumps(r) for r in rec))
+            sp = lane_spend.run_spend(str(run), "sid", stage.load_plan(run)["budget"]["tokenCeiling"], wf_dirs=[d])
+            self.assertEqual((sp["roles"]["why-gate"]["total"], sp["total"], sp["tokenCeiling"]), (1234, 1234, 22_000_000))
 
 
 if __name__ == "__main__":

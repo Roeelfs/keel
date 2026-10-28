@@ -37,6 +37,7 @@
   ],
   "support": [
     {"label": "context-dossier-miner", "agentType": "general-purpose", "model": "opus", "prompt": "context-dossier-miner.md"},
+    {"label": "why-gate", "agentType": "general-purpose", "model": "opus", "prompt": "why-gate.md"},
     {"label": "design-decisions-extractor", "agentType": "general-purpose", "model": "haiku", "prompt": "design-decisions-extractor.md"},
     {"label": "spec-drift-investigator", "agentType": "general-purpose", "model": "opus", "prompt": "spec-drift-investigator.md", "idPrefix": "DI"},
     {"label": "finding-falsifier", "agentType": "general-purpose", "model": "sonnet", "prompt": "finding-falsifier.md"},
