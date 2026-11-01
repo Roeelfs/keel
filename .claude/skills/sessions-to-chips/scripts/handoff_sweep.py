@@ -22,6 +22,18 @@ S2C = os.path.expanduser("~/.claude/sessions-to-chips")
 GUTTED = 100  # tracked deletions above this mean the checkout itself is broken
 
 
+
+def session_files(account):
+    """Session JSONs for ONE account dir prefix, a comma list, or 'all'. A program hops between
+    accounts and its manager ids are split across them (measured 2026-11-01), so a single-account
+    sweep orphans every child whose spawnedFrom parent sits on the other account: use 'all'."""
+    out = []
+    for a in ("*" if account in ("all", "*") else account).split(","):
+        pat = "*" if a == "*" else a.strip() + "*"
+        out += glob.glob(f"{STORE}/{pat}/*/local_*.json")
+    return out
+
+
 def git(cwd, *args):
     r = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True)
     return r.stdout.strip()
@@ -29,7 +41,7 @@ def git(cwd, *args):
 
 def load_sessions(account, since_ms):
     rows = {}
-    for f in glob.glob(f"{STORE}/{account}/*/local_*.json"):
+    for f in session_files(account):
         with open(f) as fh:
             d = json.load(fh)
         if d.get("lastActivityAt", 0) >= since_ms:
@@ -101,7 +113,7 @@ def unreferenced_maps(since_ts, handoff_dir):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--account", required=True, help="the account you are switching AWAY from")
+    ap.add_argument("--account", required=True, help="account dir prefix, comma list, or 'all' (preferred: programs hop accounts)")
     ap.add_argument("--since", required=True, help="ISO time of the last checkpoint, e.g. 2026-10-18T20:00")
     ap.add_argument("--handoff-dir", default=f"{S2C}/handoff")
     args = ap.parse_args()

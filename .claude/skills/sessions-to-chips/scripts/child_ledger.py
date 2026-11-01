@@ -21,6 +21,18 @@ STORE = os.path.expanduser("~/Library/Application Support/Claude/claude-code-ses
 PROJECTS = os.path.expanduser("~/.claude/projects")
 
 
+
+def session_files(account):
+    """Session JSONs for ONE account dir prefix, a comma list, or 'all'. A program hops between
+    accounts and its manager ids are split across them (measured 2026-11-01), so a single-account
+    sweep orphans every child whose spawnedFrom parent sits on the other account: use 'all'."""
+    out = []
+    for a in ("*" if account in ("all", "*") else account).split(","):
+        pat = "*" if a == "*" else a.strip() + "*"
+        out += glob.glob(f"{STORE}/{pat}/*/local_*.json")
+    return out
+
+
 def slug(title):
     return re.sub(r"[^a-z0-9]+", "-", title.lower().replace("[manager]", "")).strip("-")[:60]
 
@@ -40,7 +52,7 @@ def main():
     since_ms = int(since.timestamp() * 1000)
 
     rows = {}
-    for f in glob.glob(f"{STORE}/{args.account}/*/local_*.json"):
+    for f in session_files(args.account):
         with open(f) as fh:
             d = json.load(fh)
         rows[d["sessionId"]] = d

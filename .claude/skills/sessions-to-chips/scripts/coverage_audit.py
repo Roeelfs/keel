@@ -56,7 +56,7 @@ def main():
             ledgered.add(c.get("sessionId"))
 
     holes = [r for r in rows
-             if r["account"].startswith(a.account) and r["lastActivityAt"] >= a.since
+             if (a.account in ("all","*") or any(r["account"].startswith(x) for x in a.account.split(","))) and r["lastActivityAt"] >= a.since
              and r["sessionId"] not in ledgered and not r["title"].startswith("[Manager]")]
     print(f"A. post-checkpoint sessions on {a.account[:8]} outside every ledger: {len(holes)} "
           f"(ledger rows {len(ledgered)})")

@@ -250,6 +250,23 @@ Transcripts (`~/.claude/projects/…`), worktrees, git, the tracker and everythi
 account. The other account's sessions show in `ListAgents` as `Remote Control · offline`, and a
 message to one is queued to nowhere. Never relay to them.
 
+**Five ways this mode missed work (measured 2026-11-01, fixed below).**
+(a) It assumed ONE "other account". The machine has three account dirs and programs hop between
+two; a program carries one manager id per hop (Release 3, Cynap 4) and a child's `spawnedFrom`
+parent often sits on the other account, so a single-account sweep orphans it. Always sweep
+`--account all` and group by PROGRAM (`program_family.py`), never by one manager id.
+(b) A transcript is not the program. The store's `lastActivityAt` can run days ahead of the last
+user/assistant row (Release: row 2026-10-28T12:38Z, store 2026-10-31T11:27Z, rows carry both
+`accountUuid`s). `program_family.py` flags `GAP` / `RESUMED`; for those, state file, map and
+children are the only record, so say the hole in the handoff, never "mined".
+(c) Account attribution comes from the store dir or a row's `accountUuid`, never from a title,
+a handoff header or `--account` substring luck.
+(d) Lineage is not membership. Standing sessions outside `spawnedFrom` (Machine-steward,
+"Harness improvement sweep") and Codex threads with NO Claude session belong to a program by
+ticket and worktree: add them by hand from the no-manager ledger and the Codex checkpoint.
+(e) A state file's mtime is not currency: take the newest of state, events, map comment and
+lineage activity, and print all four in the handoff.
+
 1. **Find which account you are on.** `grep -l <your CLI session id> "<store>"/*/*/local_*.json`
    names your account directory. `list_sessions.py --grep Manager` lists both accounts' managers
    with their `cli` ids and last activity. The account whose managers are newest is the one
@@ -274,7 +291,8 @@ message to one is queued to nowhere. Never relay to them.
    story map, the open wayfinder map PR and an unpushed build-map commit; two more programs had
    unpushed commits nobody had named).
    ```bash
-   python3 -I $SCR/handoff_sweep.py --account <other-account-id> --since <checkpoint ISO time>
+   python3 -I $SCR/program_family.py --since <checkpoint ISO time>   # FIRST: ids, GAP/RESUMED, per program
+   python3 -I $SCR/handoff_sweep.py --account all --since <checkpoint ISO time>
    ```
    It lists each worktree with unpushed commits, no upstream, untracked files or mass deletions
    (a gutted checkout), with its owning manager, plus every map or note written since the
@@ -286,7 +304,7 @@ message to one is queued to nowhere. Never relay to them.
    AT-RISK, including an invoice at 2x its amount, a prod migration with no apply check, and 3
    pushed commits with no PR from a child that hit its weekly limit).
    ```bash
-   python3 -I $SCR/child_ledger.py --account <other-account-id> --since <checkpoint ISO time> --out <dir>
+   python3 -I $SCR/child_ledger.py --account all --since <checkpoint ISO time> --out <dir>
    ```
    It writes one `children-<manager>-<id>.json` per manager (plus one for sessions no manager owns)
    from each child's stored `lastTurnReport`, `postTurnSummary`, PRs and branches. Give each file
@@ -295,7 +313,7 @@ message to one is queued to nowhere. Never relay to them.
    Route the no-manager file's rows to the likeliest program by hand.
 
    **Prove the sweep was complete before sending anything:**
-   `python3 -I $SCR/coverage_audit.py --account <other> --since <checkpoint> --ledger-dir <dir>`.
+   `python3 -I $SCR/coverage_audit.py --account all --since <checkpoint> --ledger-dir <dir>`.
    Test A lists any session active since the checkpoint that no ledger holds (a HOLE is a defect:
    widen the sweep). Test B lists older unmerged descendants of a manager that no handoff names.
    Reconcilers run after the handoff miners finish, or are told to judge against the state file;
