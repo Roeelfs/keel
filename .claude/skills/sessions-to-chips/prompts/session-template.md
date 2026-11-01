@@ -30,6 +30,7 @@ Phase artifact:
 - verify-release: terminal ledger + one project gate result + release/blocker evidence
 
 Constraints:
+- Model policy (manager contract §Model policy): a define or build task runs on opus (or is a Codex lane); verify-release execution may run on sonnet. Managers run on sonnet and never write this task's spec or code themselves.
 - Read durable artifacts, not prior transcripts.
 - Commit with project conventions and a real session/lane identifier.
 - Do not merge/deploy/prod-mutate without the project's explicit authorization.
@@ -45,6 +46,8 @@ After accepting this mission, complete the bounded phase under its continuation 
 Use `prompts/loop-directive.md` §Default continuation (or §Codex variant). Do not add a schedule unless the user explicitly requests one.
 
 ## Filling guide
+
+- Start it with `start_session`: `model: "opus"`, `effort: "medium"` for define/build; `sonnet` for a mechanical verify-release pass (`prompts/model-routing.md` §Start parameters).
 
 - `checklist`: trivial/no meaningful behavior change.
 - `moderate`: normal feature default; compact proof plan.

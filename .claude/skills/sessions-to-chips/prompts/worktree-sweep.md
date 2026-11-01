@@ -1,7 +1,8 @@
-# Worktree sweep (Mode 4 step 3) — one sonnet agent, medium effort
+# Worktree sweep (Resume / mine, plan phase 2) — one sonnet agent, medium effort
 
 Complements `handoff_sweep.py`, which only sees worktrees of sessions it can attribute to a
-manager. This one walks `git worktree list` itself, so work whose session is archived or unowned
+manager. `mine_all.py` fills the inputs in its plan step `worktree-sweep` (`{{KNOWN}}` is the
+`handoff_sweep.py` output it already ran). This one walks `git worktree list` itself, so work whose session is archived or unowned
 shows up. Measured 2026-10-24: 10 at-risk worktrees/branches (a 19-commit unpushed stack, a 59-file
 dirty tree under an open PR) plus 13 local-only branches, none named in any handoff.
 

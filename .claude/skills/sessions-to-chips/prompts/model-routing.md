@@ -4,7 +4,9 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 
 ## Models
 
-**Claude:** Opus 5.5 (alias `opus`) is the Claude ceiling (founder, 2026-10-24: "decrease the use of fable in general. max should be opus 5.5"): architecture, hard RCA, security and final gates; Fable is retired as a dispatch tier and the dispatch hook denies it; Sonnet 5.5 (alias `sonnet`) is the routine-development tier; Haiku 5.5 (alias `haiku`) is the high-volume mining tier.
+**Claude:** Opus 5.5 (alias `opus`) is the Claude ceiling (founder, 2026-10-24: "decrease the use of fable in general. max should be opus 5.5"): architecture, hard RCA, security and final gates; Fable is retired as a dispatch tier and the dispatch hook denies it; Sonnet 5.5 (alias `sonnet`) is the manager and mechanical tier (verification, grading, topical review, diagnosis); Haiku 5.5 (alias `haiku`) is the high-volume mining tier.
+
+**Authorship (founder, 2026-11-01):** specs and ALL implementation are written only by an Opus 5.5 lane or a Codex lane, with implementation run through Codex wherever a lane qualifies; managers run on Sonnet and write neither. The role table, the violation definition and its artifact check are owned by `../references/manager-contract.md` §Model policy; the rows below only carry the parameters.
 
 > Model diversity in the deep-review panel now comes from runtimes: Opus 5.5 beside Codex astra/sol.
 
@@ -29,30 +31,42 @@ The Codex column names the **class** to pass to `codex-headroom.sh --route <clas
 
 | Lane purpose | Claude | Claude effort | Codex class |
 |---|---|---|---|
-| Define: spec + moderate proof ledger | Sonnet | think | standard |
+| Define: spec + moderate proof ledger | Opus | think | standard |
 | Define: one critical coverage review | Sonnet | think | standard |
 | Define: unresolved security/irreversible dispute | Opus + Codex | think harder | security |
-| Build: implementation + targeted tests | Sonnet | think | standard |
+| Build: implementation + targeted tests | Opus (Codex first) | think | standard |
 | Verify-release: finite execution | Sonnet | think | standard |
 | Procedural worker: deterministic command pass | Haiku | (none) | mining |
 | Verify-release: failure-cluster diagnosis | Sonnet | think | standard |
-| Bug fix < 200 LOC | Sonnet | think | standard |
-| Trivial < 50 LOC, docs | Haiku | (none) | mining |
+| Bug fix < 200 LOC | Opus (Codex first) | think | standard |
+| Trivial < 50 LOC, docs | Opus (Codex first) | (none) | mining |
 | Mining / surveys / parsing | Haiku | (none) | mining |
 | Soak observation | Haiku | (none) | mining |
 | Soak ESCALATE investigation | Sonnet | think | standard |
-| PR comment review | Sonnet | think | standard |
-| Refactor (no API change) | Sonnet | think | standard |
-| Refactor (API change) | Sonnet | think | standard |
+| PR comment review (fixes go to the implementer) | Sonnet | think | standard |
+| Refactor (no API change) | Opus (Codex first) | think | standard |
+| Refactor (API change) | Opus (Codex first) | think | standard |
 | Hard RCA / critical-path debugging | Opus | think harder | hard-rca |
 | Security review | Opus 5.5 + Codex astra | think harder | security |
 | Irreversible architecture decision | Opus | think hard | architecture |
-| Migration writing | Sonnet | think | standard |
+| Migration writing | Opus (Codex first) | think | standard |
 | Migration risk review | Sonnet | think | standard |
-| Self-managed interactive | Sonnet | think | standard |
+| Self-managed interactive (writes specs or code) | Opus | think | standard |
 | Wake-driven soak watcher | Haiku | (none) | mining |
-| Manager (Claude `[Manager]` session) | Sonnet | think | n/a |
+| Manager (Claude `[Manager]` session; writes no spec or code) | Sonnet | medium | n/a |
 | Manager (long-lived Codex root) | n/a | n/a | standard |
+
+## Start parameters
+
+| Start | Call | Model / effort |
+|---|---|---|
+| Manager | `start_session` (`use_worktree: true`, `context: "fresh"`) | `model: "sonnet"`, `effort: "medium"` |
+| Spec or implementation child the human steers | `start_session` | `model: "opus"`, `effort: "medium"` (more only with a stated reason) |
+| Unattended spec or implementation lane, Codex (default for implementation) | `spawn-lane.sh --runtime codex --class standard --cwd <worktree>`, or `codex-dispatch.sh <class> …` for a spec document; both ask `~/.claude/scripts/codex-headroom.sh` | the gate's `--route <class>` |
+| Unattended spec or implementation lane, Claude (Codex does not fit) | `spawn-lane.sh --model opus` | opus, medium |
+| Mechanical lane or child (mining, census, verification, grading) | `start_session`, `spawn-lane.sh` or `Agent` | `sonnet`/`haiku`, Codex `mining` |
+
+Grade every lane by its artifact, never its exit code: the spec file or commits exist, answer the mission, and name an opus or Codex author.
 
 ## Subagent dispatch
 
@@ -65,7 +79,7 @@ The Codex column names the **class** to pass to `codex-headroom.sh --route <clas
 | Failure diagnostician | Sonnet | standard |
 | Failure-cluster diagnostician | Sonnet | standard |
 | Procedural worker | Haiku | mining |
-| Doc writer / file search | Haiku | mining |
+| Doc writer / file search | Haiku (notes and summaries only; a repo doc change is a diff) | mining |
 
 ## Rules
 
@@ -75,7 +89,7 @@ The Codex column names the **class** to pass to `codex-headroom.sh --route <clas
 4. An idle lane costs nothing; don't retire one to "save tokens."
 5. Cross-runtime second-opinion (flagship Claude + flagship Codex paired) is the one rational flagship double-up — different bug classes.
 6. Deep-review bucket (security review, adversarial review, final-gate critique) is split **Opus 5.5 (Claude) + Codex astra/sol** — model diversity beats a single-model monoculture; never route all deep-review lanes to one model.
-7. **Ad-hoc delegation defaults to `sonnet`.** Research / investigation / mining / exploration / execution dispatches route to `sonnet` or `haiku`; **`opus` requires a one-line justification in the dispatch**; Codex's `adjudication`/`security` class (Astra at high effort) is reserved for the hardest verify / judge / adversarial reasoning, with `opus` as the Claude side. The NAMED deep agents (critic, security-reviewer, verifier) are pinned to opus. A permissive default silently becomes an opus default — measured: 189 dispatches went opus 59 / sonnet ~80 / haiku 2.
+7. **Ad-hoc mechanical delegation defaults to `sonnet`.** Research / investigation / mining / exploration / verification dispatches route to `sonnet` or `haiku`; **`opus` there requires a one-line justification in the dispatch**. Spec and implementation lanes are the exception by policy: always `opus` or Codex, and the policy is their justification; Codex's `adjudication`/`security` class (Astra at high effort) is reserved for the hardest verify / judge / adversarial reasoning, with `opus` as the Claude side. The NAMED deep agents (critic, security-reviewer, verifier) are pinned to opus. A permissive default silently becomes an opus default — measured: 189 dispatches went opus 59 / sonnet ~80 / haiku 2.
 8. **Bounded Codex children do not inherit the whole parent by default.** Give them a self-contained mission and `fork_turns: "none"` or the smallest positive slice that carries the evidence. Use `"all"` only when the whole conversation is genuinely load-bearing; full-history forks also inherit the parent's model and effort.
 9. **The long-lived Codex manager root is Sol-medium.** Context accumulation is the root's dominant multiplier; do not pay frontier weight on coordination, waiting, integration, or routine execution.
 10. **Judgment uses a fresh bounded escalation, not a phase-spanning root.** Use Astra classes `architecture`, `security`, `hard-rca`, and `adjudication` for the hardest decisions; use Sol-high `falsifier`/`adversarial` for routine falsification. Return one decision artifact to the Sol-medium root, then stop the judgment lane.

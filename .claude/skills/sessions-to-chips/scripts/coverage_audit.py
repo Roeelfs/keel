@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Mode 4 coverage audit: prove the sweeps saw every session, instead of assuming it.
+"""Coverage audit: prove the sweeps saw every session, instead of assuming it. Read-only.
 
-Two tests, both read-only:
+Two tests:
   A. Every session on --account active since --since must sit in some child-ledger file
-     (child_ledger.py output) or be a [Manager] row. Anything else is a hole in the sweep.
-  B. Every older, unarchived-or-unmerged descendant of a [Manager] that no handoff, wrap-up,
-     or state file names (by session id or title prefix) is listed as UNNAMED. Merged-PR
-     sessions are skipped: the PR is the durable record.
+     (children-*.json in --ledger-dir) or be a [Manager] row. Anything else is a HOLE.
+  B. Every older, unmerged descendant of a [Manager] that no handoff, wrap-up or state file names
+     (by session id or title prefix), and that no ledger holds, is UNNAMED. Merged-PR sessions are
+     skipped: the PR is the durable record. mine_all.py widens by ledgering these rows for the
+     old-descendant classifier, so a ledgered row is no longer UNNAMED.
 
 Usage:
-  coverage_audit.py --account <id> --since 2026-10-24T00:46 --ledger-dir <dir>
-Exit 0 always; the report is the artifact. A hole in A is a defect to fix before sending.
+  coverage_audit.py --account all --since 2026-10-24T00:46 --ledger-dir <dir> [--json]
+Exit 0 always; mine_all.py turns the counts into gates.
 """
 import argparse
 import glob
@@ -20,7 +21,7 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.expanduser("~/.claude")
+ROOT = (os.environ.get("S2C_CLAUDE_HOME") or os.path.expanduser("~/.claude"))
 
 
 def load_sessions():
@@ -29,17 +30,61 @@ def load_sessions():
     return json.loads(out)
 
 
-def named_text():
-    paths = (glob.glob(os.path.join(ROOT, "sessions-to-chips/handoff/*.md"))
-             + glob.glob(os.path.join(ROOT, "sessions-to-chips/wrapup/*.md"))
-             + glob.glob(os.path.join(ROOT, "orchestrator/programs/*.state.md")))
+def named_text(root=None):
+    root = root or ROOT
+    paths = (glob.glob(os.path.join(root, "sessions-to-chips/handoff/*.md"))
+             + glob.glob(os.path.join(root, "sessions-to-chips/wrapup/*.md"))
+             + glob.glob(os.path.join(root, "orchestrator/programs/*.state.md")))
     return "".join(open(p, errors="ignore").read() for p in paths)
 
 
-def descendants(kids, sid):
+def ledgered_ids(ledger_dir):
+    ids = set()
+    for f in glob.glob(os.path.join(ledger_dir, "children-*.json")):
+        try:
+            for c in json.load(open(f)).get("children", []):
+                ids.add(c.get("sessionId"))
+        except (OSError, ValueError):
+            continue
+    return ids
+
+
+def descendants(kids, sid, seen=None):
+    seen = seen if seen is not None else set()
     for k in kids.get(sid, []):
+        if k["sessionId"] in seen:
+            continue
+        seen.add(k["sessionId"])
         yield k
-        yield from descendants(kids, k["sessionId"])
+        yield from descendants(kids, k["sessionId"], seen)
+
+
+def in_account(row, account):
+    return account in ("all", "*") or any(row["account"].startswith(x) for x in account.split(","))
+
+
+def audit(rows, account, since, ledger_dir, text):
+    """-> {"holes": [rows], "unnamed": [(manager title, row)], "ledgered": n}. `since` is the ISO
+    string list_sessions.py emits (YYYY-MM-DDTHH:MM:SS), compared as text."""
+    ledgered = ledgered_ids(ledger_dir)
+    holes = [r for r in rows if in_account(r, account) and r["lastActivityAt"] >= since
+             and r["sessionId"] not in ledgered and not r["title"].startswith("[Manager]")]
+    kids = {}
+    for r in rows:
+        kids.setdefault(r.get("parentSessionId") or "", []).append(r)
+    unnamed, seen = [], set()
+    for m in rows:
+        if not m["title"].startswith("[Manager]"):
+            continue
+        for k in descendants(kids, m["sessionId"]):
+            if k["sessionId"] in seen or k["lastActivityAt"] >= since or k.get("prState") == "MERGED":
+                continue
+            if k["title"].startswith("[Manager]") or k["sessionId"] in ledgered:
+                continue
+            if not (k["sessionId"][6:14] in text or k["sessionId"] in text or k["title"][:28] in text):
+                seen.add(k["sessionId"])
+                unnamed.append((m["title"], k))
+    return {"holes": holes, "unnamed": unnamed, "ledgered": len(ledgered)}
 
 
 def main():
@@ -47,37 +92,19 @@ def main():
     ap.add_argument("--account", required=True)
     ap.add_argument("--since", required=True)
     ap.add_argument("--ledger-dir", required=True)
+    ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
-
-    rows = load_sessions()
-    ledgered = set()
-    for f in glob.glob(os.path.join(a.ledger_dir, "children-*.json")):
-        for c in json.load(open(f)).get("children", []):
-            ledgered.add(c.get("sessionId"))
-
-    holes = [r for r in rows
-             if (a.account in ("all","*") or any(r["account"].startswith(x) for x in a.account.split(","))) and r["lastActivityAt"] >= a.since
-             and r["sessionId"] not in ledgered and not r["title"].startswith("[Manager]")]
-    print(f"A. post-checkpoint sessions on {a.account[:8]} outside every ledger: {len(holes)} "
-          f"(ledger rows {len(ledgered)})")
-    for r in sorted(holes, key=lambda r: r["lastActivityAt"]):
+    res = audit(load_sessions(), a.account, a.since, a.ledger_dir, named_text())
+    if a.json:
+        print(json.dumps({"holes": res["holes"], "ledgered": res["ledgered"],
+                          "unnamed": [{"manager": t, **k} for t, k in res["unnamed"]]}, indent=1))
+        return
+    print(f"A. post-checkpoint sessions on {a.account[:8]} outside every ledger: {len(res['holes'])} "
+          f"(ledger rows {res['ledgered']})")
+    for r in sorted(res["holes"], key=lambda r: r["lastActivityAt"]):
         print(f"   HOLE {r['lastActivityAt'][5:16]} {r['sessionId'][6:14]} {r['title'][:70]}")
-
-    kids = {}
-    for r in rows:
-        kids.setdefault(r.get("parentSessionId") or "", []).append(r)
-    text = named_text()
-    unnamed = []
-    for m in rows:
-        if not m["title"].startswith("[Manager]"):
-            continue
-        for k in descendants(kids, m["sessionId"]):
-            if k["lastActivityAt"] >= a.since or k.get("prState") == "MERGED":
-                continue
-            if not (k["sessionId"][6:14] in text or k["sessionId"] in text or k["title"][:28] in text):
-                unnamed.append((m["title"], k))
-    print(f"B. older unmerged descendants named in no handoff/wrap-up/state: {len(unnamed)}")
-    for mt, k in sorted(unnamed, key=lambda x: x[1]["lastActivityAt"]):
+    print(f"B. older unmerged descendants named in no handoff/wrap-up/state/ledger: {len(res['unnamed'])}")
+    for mt, k in sorted(res["unnamed"], key=lambda x: x[1]["lastActivityAt"]):
         print(f"   UNNAMED {k['lastActivityAt'][5:16]} {k['sessionId'][6:14]} <{mt[:24]} {k['title'][:60]}")
 
 

@@ -21,7 +21,7 @@ the sidebar's top-level / sub-level structure (a parent row with its chips neste
 """
 import json, glob, os, sys, argparse, datetime
 
-BASE = os.path.expanduser("~/Library/Application Support/Claude/claude-code-sessions")
+BASE = os.environ.get("S2C_STORE") or os.path.expanduser("~/Library/Application Support/Claude/claude-code-sessions")
 
 def norm_ts(v):
     """Return ISO-ish string for either epoch-ms ints or ISO strings; '' if absent."""
@@ -30,7 +30,7 @@ def norm_ts(v):
     s = str(v)
     if s.isdigit():
         try:
-            return datetime.datetime.utcfromtimestamp(int(s) / 1000).strftime("%Y-%m-%dT%H:%M:%S")
+            return datetime.datetime.fromtimestamp(int(s) / 1000, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         except Exception:
             return s
     return s[:19]

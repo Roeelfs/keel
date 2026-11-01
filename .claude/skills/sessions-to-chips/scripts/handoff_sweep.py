@@ -17,8 +17,8 @@ import json
 import os
 import subprocess
 
-STORE = os.path.expanduser("~/Library/Application Support/Claude/claude-code-sessions")
-S2C = os.path.expanduser("~/.claude/sessions-to-chips")
+STORE = os.environ.get("S2C_STORE") or os.path.expanduser("~/Library/Application Support/Claude/claude-code-sessions")
+S2C = os.path.join((os.environ.get("S2C_CLAUDE_HOME") or os.path.expanduser("~/.claude")), "sessions-to-chips")
 GUTTED = 100  # tracked deletions above this mean the checkout itself is broken
 
 

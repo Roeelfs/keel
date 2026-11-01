@@ -17,8 +17,8 @@ import json
 import os
 import re
 
-STORE = os.path.expanduser("~/Library/Application Support/Claude/claude-code-sessions")
-PROJECTS = os.path.expanduser("~/.claude/projects")
+STORE = os.environ.get("S2C_STORE") or os.path.expanduser("~/Library/Application Support/Claude/claude-code-sessions")
+PROJECTS = os.path.join((os.environ.get("S2C_CLAUDE_HOME") or os.path.expanduser("~/.claude")), "projects")
 
 
 
@@ -37,9 +37,28 @@ def slug(title):
     return re.sub(r"[^a-z0-9]+", "-", title.lower().replace("[manager]", "")).strip("-")[:60]
 
 
-def transcript_for(cli):
-    hits = glob.glob(f"{PROJECTS}/*/{cli}.jsonl") if cli else []
+def transcript_for(cli, projects=None):
+    hits = glob.glob(f"{projects or PROJECTS}/*/{cli}.jsonl") if cli else []
     return max(hits, key=os.path.getmtime) if hits else None
+
+
+def ledger_row(sid, d, projects=None):
+    """One child row: everything stored about the session that a reconciler judges."""
+    summary = d.get("postTurnSummary") or {}
+    return {
+        "title": d.get("title", ""),
+        "sessionId": sid,
+        "archived": bool(d.get("isArchived")),
+        "lastActivity": datetime.datetime.fromtimestamp(d.get("lastActivityAt", 0) / 1000, datetime.timezone.utc).isoformat(timespec="minutes"),
+        "status": summary.get("status_category"),
+        "needsAction": summary.get("needs_action"),
+        "awaitingPerson": d.get("interruptedAwaitingPerson"),
+        "lastReport": d.get("lastTurnReport"),
+        "prs": [f"#{p.get('prNumber')} {p.get('state')}" for p in d.get("prs") or []],
+        "branches": [b.split("\u0000")[-1] for b in d.get("writtenBranches") or []],
+        "worktree": d.get("cwd"),
+        "transcript": transcript_for(d.get("cliSessionId"), projects),
+    }
 
 
 def main():
@@ -53,9 +72,12 @@ def main():
 
     rows = {}
     for f in session_files(args.account):
-        with open(f) as fh:
-            d = json.load(fh)
-        rows[d["sessionId"]] = d
+        try:
+            with open(f) as fh:
+                d = json.load(fh)
+        except (OSError, ValueError):
+            continue  # mine_all.py names unreadable store rows in its receipt
+        rows[d.get("sessionId") or os.path.basename(f)[:-5]] = d
 
     def manager_of(sid):
         cur = (rows[sid].get("spawnedFrom") or {}).get("sessionId")
@@ -72,21 +94,7 @@ def main():
         if d.get("lastActivityAt", 0) < since_ms or d.get("title", "").startswith("[Manager]"):
             continue
         mgr = manager_of(sid) or "(unmanaged)"
-        summary = d.get("postTurnSummary") or {}
-        ledgers.setdefault(mgr, []).append({
-            "title": d.get("title", ""),
-            "sessionId": sid,
-            "archived": bool(d.get("isArchived")),
-            "lastActivity": datetime.datetime.fromtimestamp(d["lastActivityAt"] / 1000, datetime.timezone.utc).isoformat(timespec="minutes"),
-            "status": summary.get("status_category"),
-            "needsAction": summary.get("needs_action"),
-            "awaitingPerson": d.get("interruptedAwaitingPerson"),
-            "lastReport": d.get("lastTurnReport"),
-            "prs": [f"#{p.get('prNumber')} {p.get('state')}" for p in d.get("prs") or []],
-            "branches": [b.split("\u0000")[-1] for b in d.get("writtenBranches") or []],
-            "worktree": d.get("cwd"),
-            "transcript": transcript_for(d.get("cliSessionId")),
-        })
+        ledgers.setdefault(mgr, []).append(ledger_row(sid, d))
 
     os.makedirs(args.out, exist_ok=True)
     index = []

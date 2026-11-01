@@ -1,20 +1,26 @@
-# Handoff miner (Mode 4) — one haiku agent per program
+# Handoff miner (Resume / mine, plan phase 1) — one haiku agent per moved program
 
 Dispatch: `Agent` with `model: "haiku"`, effort default, one per program, all in one message.
 Mining a digest into a fixed template is extraction, not judgment, so haiku is enough; escalate a
 program to sonnet only when its digest is too thin and the agent must read the raw JSONL.
 
-Fill `{{PROGRAM}}`, `{{DIGEST}}` (output of `mine_session.py <transcript>` for that program's
-manager on the other account, saved to a file), `{{TRANSCRIPT}}`, `{{CHECKPOINT_NOTE}}` (this
-account's last wrap-up note for the program, or "none"), `{{OUT}}`.
+`mine_all.py` writes every input into its plan step (`phases[0].steps[]`): `{{PROGRAM}}`,
+`{{DIGEST}}` (one `mine_session.py` digest per transcript of every manager chain of the program:
+a session's chain spans several files when the app resumed, moved or forked it), `{{TRANSCRIPT}}`
+(the same files), `{{CHECKPOINT}}` (this account's manager's last turn), `{{CHECKPOINT_NOTE}}`,
+`{{STATE_FOLD}}` (state, events, manifest and lineage times plus the CURRENT/STALE verdict),
+`{{SWEEP_ROWS}}` (the program's `handoff_sweep.py` worktree rows), `{{REPO}}`, `{{OUT}}`.
 
 ```text
 Read-only except for the one file you write. Program: {{PROGRAM}}.
 The program's manager ran on another Claude account after the last checkpoint. A manager on this
 account will take it back and needs to know what changed.
-Inputs: digest {{DIGEST}} (goal, steering arc, latest compaction summary, last instruction, tail);
-full transcript {{TRANSCRIPT}} (JSONL: extract with python or jq, never draw conclusions from
-grep); checkpoint note {{CHECKPOINT_NOTE}}.
+Inputs: digests {{DIGEST}} (goal, steering arc, latest compaction summary, last instruction, tail;
+read ALL of them, oldest first; the files are segments of one conversation and may repeat rows);
+transcripts {{TRANSCRIPT}} (JSONL: extract with python or jq, never draw conclusions from grep);
+everything after checkpoint {{CHECKPOINT}} is new to the receiving manager; checkpoint note
+{{CHECKPOINT_NOTE}}; state fold {{STATE_FOLD}} (a STALE state file is a lead, not the record);
+worktree rows {{SWEEP_ROWS}} (fold each into item 3 or 4); repo {{REPO}}.
 Write {{OUT}}, at most ~3 KB:
 1. Goal, one line.
 2. Since the checkpoint: what shipped, with PR numbers. Write MERGED only where `gh pr view <n>

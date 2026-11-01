@@ -27,7 +27,7 @@ child, hand your live children over at their next checkpoint, then fold. Close y
 
 A manager owns **ONE PROGRAM**: it tracks its own lanes, catches conflicts before they reach
 main, starts lanes and child sessions, holds every terminal gate, and surfaces decisions. It
-never implements code itself.
+never writes a spec or code itself (§Model policy).
 
 Read the other references when their trigger fires:
 
@@ -40,7 +40,8 @@ Read the other references when their trigger fires:
 ## Root control plane, worker execution plane
 
 The manager root owns the **control plane**: state and ledger decisions, scope and target
-selection, product edits, failure interpretation, human and auth gates, and every production
+selection, accepting or rejecting lane artifacts (it never authors the product edit itself,
+§Model policy), failure interpretation, human and auth gates, and every production
 mutation. It may run small bounded read-only probes that complete in one tool call and
 immediately inform a decision.
 
@@ -54,6 +55,34 @@ Source-mutating formatters, dependency-changing installs, migrations, and produc
 to the build phase, not the procedural worker. Interactive authentication and
 production mutations stay in the root even after authorization; post-mutation verification may
 use a worker.
+
+## Model policy (founder, 2026-11-01)
+
+**Managers coordinate on Sonnet 5.5; specs and all implementation are written only by Opus 5.5
+lanes or Codex lanes; implementation runs through Codex wherever a lane qualifies.** Sonnet and
+haiku keep mechanical work only: mining, census, verification, grading. This section is the one
+owner of who may author what; `../prompts/model-routing.md` carries the per-lane parameters.
+
+| Role | Runs on | May | Never |
+|---|---|---|---|
+| Manager (Claude `[Manager]`) | `start_session` `model: sonnet`, `effort: medium` | read, probe, dispatch, grade, integrate (push a graded lane branch, merge on the go-ahead), state files, tracker | write spec prose or a code diff; run review panels |
+| Manager (Codex root) | gate class `standard` | the same as above | the same as above |
+| Spec author (spec, design, proof ledger, ADR) | Claude `opus` lane, or a Codex lane through the gate | write and revise the spec from review findings | — |
+| Implementer (code, tests, migrations, config, review fixes) | Codex headless lane first (`spawn-lane.sh --runtime codex`, gated by `codex-headroom.sh`); Claude `opus` lane where Codex does not fit (Lane runtimes Q5) | commit diffs in its worktree | push without grading |
+| Mechanical (mining, census, extraction, verification runs, grading against a checklist, procedural worker) | `haiku` / `sonnet`, Codex `mining` | produce reports, verdicts, receipts | author a spec or a diff |
+| Reviewer / judge | `opus` or Codex `astra`/`sol` for deep, security and final-gate review; `sonnet` for topical or coverage review | write a review artifact | edit the spec or diff it reviews (findings go back to the author lane) |
+
+An opus spec or implementation lane needs no further justification: this policy is its
+`Model-why`. Effort stays `medium` unless the mission states a reason for more.
+
+**Violation, and its check (graded by artifact).** A spec or diff authored by the manager, or by
+a sonnet/haiku lane, is a contract violation. For every spec file and every commit the program
+lands, the author recorded in the state file (the lane in `## AT-WAKE` or the Units table, with its
+runtime and model) and the artifact's own session or lane identifier (commit trailer, spec
+front matter) must name an `opus` lane or a Codex lane. The manager's own session id on a commit,
+or a spec written in the manager's transcript, fails the check. A failing artifact is rejected,
+never pushed, merged or forwarded to review: log it in `.events.jsonl`, discard it, and redo the
+same mission through an opus or Codex lane.
 
 ## Model topology — cheap root, intelligent escalations
 
@@ -302,7 +331,8 @@ Never sonnet, haiku, luna or sol for these, and never a cheaper fallback when th
    order yourself), then push once.
 5. **Shippable, but Codex does not fit?** It needs a static-credential MCP, network or push,
    the live test loop inside the lane, repo hooks that write `$HOME`, or a lane came back
-   BLOCKED-ON-QUOTA → **headless Claude lane**: `spawn-lane.sh --model sonnet` (opus only with a one-line reason).
+   BLOCKED-ON-QUOTA → **headless Claude lane**: `spawn-lane.sh --model opus` for a spec or
+   implementation lane (§Model policy); `sonnet` only for a mechanical lane.
    Run `scripts/lane_probe.sh <model>` first: rc 1 (refused/capped) → in-session `Agent` or a desktop
    session instead; a dead lane exits 0 with 0 tokens, so the probe never replaces grading by artifact.
 6. **A handful of reads or one probe** to verify a fact before routing → do it **inline**. That is
@@ -386,7 +416,8 @@ finite review and proof budgets. The manager plans and integrates; it does not r
 **MCP tiers differ by substrate.** A Task subagent inherits the desktop MCP set (interactive OAuth
 included). A headless lane gets only static-credential MCPs that the spawn wrapper attaches;
 interactive-OAuth MCPs do not load in `-p` mode, so a lane that needs a tracker gets it via
-`--mcp-config` with an API-key header. Anything desktop-MCP-only, the manager does itself.
+`--mcp-config` with an API-key header. A desktop-MCP-only operation (a tracker write, a PR or
+session tool) the manager does itself; that never extends to writing a spec or a diff.
 Missions stay self-contained regardless: MCP is for depth, not for the brief.
 
 ## Transport, continuation, and the human
@@ -540,7 +571,7 @@ exception and needs a reason (a true data or ordering dependency).
 - **Caps, not serialization:** Codex fan-out ≤5 (one spec-review wave of 6); one writer per file
   set; a lane that would touch another live lane's files waits or stacks on its branch.
 - **A blocker blocks only its dependents.** Stack on the unmerged branch (§Autonomous stretches),
-  build the next spec while the last one reviews, run research beside implementation, and grill
+  dispatch the next spec lane while the last spec reviews, run research beside implementation, and grill
   open decisions while lanes run.
 - **Not slicing.** Parallelism runs independent pieces side by side; it never splits one change
   into many PRs.
@@ -783,9 +814,11 @@ enum or contract it touches, the seam, and what gets deleted. Run `/improve-code
 scoped to the touched area (an `Agent` lane) to answer it. Every build lane's mission carries the
 build-start owner check and the 3rd-fix trigger from `lifecycle.md` Phase 2.
 
-Per-lane model and effort: `../prompts/model-routing.md`. Every dispatch names its model and
-effort on purpose. Ad-hoc Claude delegation defaults to **sonnet**; `opus` needs a one-line
-justification; the deep verify/judge/adversarial bucket is `opus` (the Claude ceiling) or Codex's bounded
+Who may author what: §Model policy. Per-lane model and effort: `../prompts/model-routing.md`.
+Every dispatch names its model and effort on purpose. Spec and implementation lanes are `opus` or
+Codex by policy; ad-hoc mechanical delegation (mining, census, verification, grading) defaults to
+**sonnet** or haiku, and `opus` there needs a one-line justification; the deep
+verify/judge/adversarial bucket is `opus` (the Claude ceiling) or Codex's bounded
 `adjudication`/`security` class at high effort. `codex-headroom.sh --route` owns the Codex model
 id; never restate it here.
 
@@ -800,7 +833,8 @@ routing: [`docs/skill-memory.md`](../../../../docs/skill-memory.md)): operator-p
 
 ## Anti-patterns
 
-- ❌ Implementing code, running installs, or running review panels in the manager. Push them into a lane.
+- ❌ Writing a spec or code, running installs, or running review panels in the manager, or handing
+  a spec or diff to a sonnet/haiku lane. Push them into an opus or Codex lane (§Model policy).
 - ❌ Reasoning machine-wide: counting foreign programs' sessions, nudging lanes you did not start or
   adopt, or running without a manifest (unregistered claims manufacture the
   collisions the protocol prevents).

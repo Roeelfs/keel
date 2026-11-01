@@ -1,6 +1,8 @@
-# Decisions sweep (Mode 4 step 3) — one sonnet agent, medium effort
+# Decisions sweep (Resume / mine, plan phase 2) — one sonnet agent, medium effort
 
-Runs BEFORE any catch-up is sent, so its findings ride the same single message per manager.
+Runs after the phase-1 handoffs and BEFORE any catch-up is sent, so its findings ride the same
+single message per manager. `mine_all.py` fills `{{DATE}}`, `{{CHECKPOINT}}`, `{{REPO}}` and `{{OUT}}`
+in its plan step `decisions-sweep`.
 Measured 2026-10-24: 48 present / 7 stale / 6 dropped groups; the worst gap was a founder ruling
 (model ceiling) recorded in one state file of eight.
 

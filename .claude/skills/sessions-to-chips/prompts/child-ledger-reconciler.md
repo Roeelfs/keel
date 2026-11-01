@@ -1,7 +1,11 @@
-# Child-ledger reconciler (Mode 4) — one haiku agent per manager
+# Child-ledger reconciler (Resume / mine, plan phase 2) — one haiku agent per ledger file
 
-Dispatch: `Agent` with `model: "haiku"`, one per `children-*.json` from `child_ledger.py`, all in
-one message. Fill `{{LEDGER}}`, `{{HANDOFF}}` (the program's handoff file, or "none"), `{{OUT}}`.
+Dispatch: `Agent` with `model: "haiku"`, one per `phases[1].steps[]` entry of `mine_all.py`'s
+plan whose id starts `reconcile:`, all in one message, only AFTER every phase-1 handoff exists.
+Fill `{{LEDGER}}`, `{{HANDOFF}}`, `{{OUT}}` from the step. The step's `mode` changes one thing:
+`test-b` (old descendants no file names): verdict DONE / AT-RISK / SUPERSEDED, citing `mergedAt`
+or the superseding change; `orphans` (transcripts with no store row) and `unmanaged`: add a
+"likeliest program" column; `children`: the text below as written.
 
 ```text
 Read-only except for the one file you write.

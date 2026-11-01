@@ -1,6 +1,6 @@
 # Codex bounded-phase lane template
 
-Use one fresh task for one phase of **define → build → verify-release**.
+Use one fresh task for one phase of **define → build → verify-release**. Dispatch it through `spawn-lane.sh --runtime codex --class <class>` or `codex-dispatch.sh`, both gated by `~/.claude/scripts/codex-headroom.sh`.
 
 ```text
 NAME: <lane-name>
@@ -18,6 +18,8 @@ Do not touch: <other-lane paths>
 Accepted build task group: <exact tasks; required for BUILD>
 
 The lifecycle is define → build → verify-release. This fresh bounded task owns only PHASE.
+
+Model policy: this Codex lane is an authorized spec and implementation author (manager contract §Model policy); the manager that dispatched it writes no spec or code and grades this lane by its artifact, not its exit code. Review findings come back to a lane, never as a manager edit.
 
 DEFINE: make scope, acceptance criteria, mode, and the proof-obligation ledger durable. The root author writes the moderate plan. At most one fresh Sol-medium critical coverage reviewer; Astra judgment classes for a named security/irreversible/trust-boundary dispute; fresh context, one decision artifact, then stop.
 
