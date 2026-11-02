@@ -107,11 +107,22 @@ The Codex ladder:
   its verification date live in `codex-headroom.sh`, not here. An explicit user model choice that
   the callable surface supports overrides this default.
 
-## Continuation policy — no scheduled polling
+## Continuation policy — event-bound wakes, never polling
 
-Do not create or re-arm a heartbeat, recurring automation, `/loop`, or scheduled wake to keep a
-manager alive (the one-per-event wake in "Every dispatch has a wake" is not that) unless the user explicitly requests that schedule. Ordinary "go", "finish",
-manager, or autonomous-work authorization does not authorize a schedule. This binds every runtime.
+This is the ONE continuation rule; every other section that mentions wakes, gates or scheduling
+defers to it. Two halves, both always true:
+
+- **Never a recurring schedule.** No heartbeat, recurring automation, `/loop`, cron, or wake
+  re-armed on a timer to keep a manager alive, unless the user explicitly requests that schedule.
+  Ordinary "go", "finish", manager, or autonomous-work authorization does not authorize one.
+- **Always one event-bound wake for an untracked external event.** A named event the harness
+  cannot notify you about (CI, a deploy, a Linear 429 or other rate-limit reset, a usage-cap
+  reset, a Codex lane started outside the harness) gets ONE `ScheduleWakeup` sized to that event,
+  pre-approved by the global CLAUDE.md "Autonomous Continuation" ruling (founder 2026-10-20). That
+  is not a schedule; it is the event's stand-in. Rules: §Every dispatch has a wake and
+  §No stop without an armed wake.
+
+This binds every runtime.
 
 On Codex, use a bounded native goal only when explicitly requested, through the next known
 approval or external gate. Consume owned-child results through their event-wait leases. At an
@@ -136,7 +147,7 @@ time, and write it next to the lane in the state file (`## AT-WAKE`: lane, artif
 2. **Self-armed, only where no event can exist.** CI, a deploy, a Codex lane started outside the
    harness, or any process you could not launch tracked: arm ONE event-bound `ScheduleWakeup` sized to
    that event's p90 (CI p50 5 / p90 12 min; deploy p50 14 / p90 27), prompt = the state-file path.
-   This is the standing carve-out to "no scheduled polling" (founder 2026-10-20, repeated 2026-10-24):
+   This is the event-bound half of §Continuation policy (founder 2026-10-20, repeated 2026-10-24):
    one wake per named external event, never a recurring heartbeat. A fired wake takes ONE snapshot and
    grades the lane's ARTIFACT. Re-arm only after an empty snapshot, doubling the delay (start 300–600 s,
    max 2700 s), and stop at the lane's terminal state.
@@ -147,6 +158,61 @@ with neither is a stalled program: arm or relaunch it now, then end the turn. At
 lane in the state file with no live task and no armed wake as already stalled and grade its artifact
 first. A quiet event is not a reason to skip this: no event for longer than twice the lane's expected
 duration means grade the artifact, not wait.
+
+## No stop without an armed wake (founder, 2026-11-02)
+
+Managers ended turns WORKING ("waiting on Linear 429", "cap resets at 19:00", "waiting on X") with
+nothing armed, so no event ever re-invoked them and maps stopped completing until the human typed.
+
+**No `[Manager]` turn may end WORKING unless one of these holds:**
+
+1. **A wake is armed AND recorded** in the state file's last `## AT-WAKE` block: `Status: WORKING`
+   plus a `Wake:` line naming the event, the wake id, its size, and what it does on fire.
+2. **The work is harness-tracked**: a background `Bash` (`run_in_background: true`), an `Agent`, a
+   `Workflow`, or a `start_session` child, still running. Record it on the `Wake:` line too
+   (`bg:<task-id>`, `agent:<id>`, `session:<local_id>`, "on exit").
+
+**Only two states end a turn without one: `Status: DONE`** (Destination verified, §Every manager
+owns one living map) **and `Status: GRILLING`** (a founder decision round, recommended answer
+first; a `wrap_up` with `blocked: true` or an `AskUserQuestion` counts). Write the status line
+before you end.
+
+**These are NOT stops** — each gets ONE event-bound wake, then the turn ends:
+
+| Situation | Wake size |
+|---|---|
+| Linear 429 / any API rate limit | the reset time the response names; else 600 s |
+| Usage cap / weekly limit (spawn-lane 429 `usage_limit_reached`) | the stated reset time |
+| CI on a pushed PR (not Auto-fix-tracked) | p90 ≈ 12 min |
+| Prod deploy | p90 ≈ 27 min |
+| "Waiting on X" — untracked advancing work (a child you cannot get a note from, a preview build) | 300–600 s, doubling after an empty tick, max 2700 s |
+
+One event-bound wake per named event is pre-approved (global CLAUDE.md "Autonomous
+Continuation", founder 2026-10-20); never ask for it, and never arm a second wake for the same
+event. A human-only gate (a prod merge go-ahead, a founder ruling) is never a wake target: that
+is GRILLING.
+
+**Resume tick — what a fired wake does.**
+
+1. Take ONE snapshot of the event the wake names (the PR's checks, the deploy SHA, the reset
+   time, the lane's artifact). One read, never a loop.
+2. Re-read the state file (`<slug>.state.md`, last `## AT-WAKE`) and the map.
+3. Advance the WHOLE independent frontier in parallel (§Parallel by default, §The advance tick
+   steps 5–7), not only the item the wake was for.
+4. Re-arm: for each still-pending untracked event, ONE wake (doubled after an empty snapshot, max
+   2700 s), and write a new `## AT-WAKE` block with `Status:` and `Wake:`. Stop at the event's
+   terminal state.
+
+No polling loops, no `sleep`, no `Monitor` waits, no re-arm on an event that already reached its
+terminal state.
+
+**The guard.** `~/.claude/hooks/manager-arm-guard.sh` (logic `~/.claude/scripts/manager_arm_guard.py`)
+runs on Stop for any session titled `[Manager] …`. It finds the program by `manager_session`, else
+by title, reads the last `## AT-WAKE` block and the transcript, and blocks ONCE per turn when the
+turn would end WORKING with no recorded future/tracked wake, no wake armed in the transcript, and
+no live background task. Its message is the fix: arm one wake and record it, or write
+`Status: GRILLING|DONE`. Decisions log to `~/.claude/analytics/manager-arm-guard.jsonl`; it fails
+open on any error; kill switch `MANAGER_ARM_GUARD=0`.
 
 ## Owned child continuation invariant
 
@@ -255,15 +321,22 @@ Verified: <condition -> evidence path/URL and revision; unknown stays unverified
 Remaining: <unfinished accepted work, or none with supporting evidence>
 
 ## AT-WAKE
+Status: <WORKING | GRILLING | DONE>
+Wake: <ScheduleWakeup <id> | bg:<task-id> | agent:<id> | workflow:<id> | session:<local_id>> fires <ISO-8601 UTC or "on exit"> (<size>s) on <event>; on fire: <the one action it takes>
 Next action: <one executable action, or none when the accepted outcome is verified>
 Owner: <agent/person responsible for that action>
 Prerequisite: <exact external state/approval required, or none>
 Stop condition: <completion, explicit stop, or the named external gate>
 ```
 
+`Status:` and `Wake:` are machine-read by the Stop guard (§No stop without an armed wake): the
+LAST `## AT-WAKE` block in the file wins, and within it the last `Status:` / `Wake:` line. Append
+a new block rather than editing an old one when the state changes.
+
 Update it at a milestone or a legitimate stopping boundary. If the next action is reachable and
-authorized, execute it before ending the turn. At an external gate, leave this pointer and its
-prerequisite; do not schedule a retry. In the final reply, list remaining actions in order, with
+authorized, execute it before ending the turn. At an external gate, arm one event-bound wake for
+it and record it on the `Wake:` line (§No stop without an armed wake); only a human decision ends
+the turn unarmed, as `Status: GRILLING`. In the final reply, list remaining actions in order, with
 owner and prerequisite where needed, or state that no requested work remains.
 
 ## Membership and collisions
@@ -423,12 +496,14 @@ Missions stay self-contained regardless: MCP is for depth, not for the brief.
 ## Transport, continuation, and the human
 
 - **Continuation follows the policy above.** Owned children use event waits. Codex goals keep
-  explicitly authorized, reachable work moving. Scheduling is opt-in only, never the default for
-  CI, deployment, ownership, locks, or human input.
+  explicitly authorized, reachable work moving. A recurring schedule is opt-in only; CI,
+  deployment, locks and rate limits get one event-bound wake (§No stop without an armed wake);
+  human input is a GRILLING stop, never a wake.
 - **Resume state is a POINTER**: persist the state-file path, the next action, and the exact
   prerequisite. Keep facts in the state file, not replayed in injected prompts.
-- **External waits end the bounded task.** Write a blocker or wake artifact keyed by the awaited
-  state; a later fresh task checks it once. An owned in-scope child is internal work governed by
+- **External waits end the bounded task with ONE event-bound wake armed.** Write the wake,
+  keyed by the awaited state, into `## AT-WAKE`; the fired wake checks it once
+  (§No stop without an armed wake, Resume tick). An owned in-scope child is internal work governed by
   the continuation invariant, not an external wait. Foreground sleep and polling loops are forbidden.
 - **`AskUserQuestion`** carries a contested claim, a pre-authorization ask, or a real judgment call
   to the human. **`PushNotification`** tells an away operator something needs them now.
@@ -631,8 +706,8 @@ been violated by the survey.
    before it is replaced — exit 143 with a 0-byte output is SIGTERM, and its
    worktree may hold real uncommitted work; `git -C <worktree> status --porcelain` first.
    The replacement is a **continuation** carrying the last verified fact, never a replay.
-8. **External readiness gets a keyed wake artifact and a later fresh check** — never a wait
-   held open inside this turn.
+8. **External readiness gets ONE armed, recorded event-bound wake and a fresh check when it
+   fires** (§No stop without an armed wake) — never a wait held open inside this turn.
 
 ### The deploy seam
 
@@ -647,13 +722,15 @@ The manager owns **readiness detection**, not the verifying itself: a sleeping r
 verifies nothing, and a wake only triggers an inspection. Confirm the **exact deploy SHA**
 is present in the target environment (§Pre-flight verification); only then dispatch and
 grade a keyed `verify-release`. If the wake fired early and the SHA is absent, no verifier
-runs — retain the keyed wake artifact and end the bounded task.
+runs — retain the keyed wake artifact, re-arm it once at double the delay (max 2700 s) and
+record it, and end the bounded task.
 
 ### Ending at the continuation frontier
 
 Reachable authorized work advances now. Owned children use their declared event-wait lease.
 When only an external prerequisite or human decision remains, persist its normalized semantic
-fingerprint and resume key, then stop.
+fingerprint and resume key, then stop: armed (one event-bound wake for an external
+prerequisite) or `Status: GRILLING` (a human decision). §No stop without an armed wake.
 
 **There is no fixed number of idle wakes that means "stalled."** A wake comes from an event (a
 lane exit, a notification, an operator message), so wake count measures event traffic, not
@@ -665,8 +742,9 @@ identity, child result. Raw output bytes and JSONL or log mtimes do not qualify.
 by another lane never counts against a live lane still inside its lease; a lane that misses its
 own deadline is what escalates or gets interrupted.
 
-Record material transitions in `<slug>.events.jsonl`. An unchanged external check does not
-justify another scheduled check. There is no default wake cadence.
+Record material transitions in `<slug>.events.jsonl`. An unchanged external check earns at
+most one re-arm at double the delay (max 2700 s), and only while the event can still arrive.
+There is no default wake cadence.
 
 ## Grading a lane
 

@@ -270,6 +270,7 @@ Depth and evidence for each rule are in [`references/manager-contract.md`](refer
   a turn (manager-contract.md "Every dispatch has a wake").
 - **No scheduled polling.** No heartbeat, `/loop`, cron or re-armed wake unless the user asks for
   that schedule. An external gate gets a keyed resume artifact and the turn ends.
+- **No stop without an armed wake** — it wins where the bullet above differs: a turn ends WORKING only with ONE event-bound wake armed and recorded in `## AT-WAKE` (429s, caps, CI, "waiting on X" included); only DONE and GRILLING end unarmed (manager-contract.md "No stop without an armed wake"; Stop guard `hooks/manager-arm-guard.sh`).
 - **Overrides first, every tick:** terminal stop (zero further tools), then completion-mode freeze,
   then an owned child still inside its lease. Only then survey, classify, and dispatch every
   independent forcing function at once.
