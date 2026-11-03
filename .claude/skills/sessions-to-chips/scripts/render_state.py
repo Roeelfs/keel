@@ -340,14 +340,23 @@ def proof_owed(view, snap, problems):
     return rows
 
 
+TICKET_ID = re.compile(r"^[A-Z][A-Z0-9]*-\d+$")
+
+
+def flag_rows(snap):
+    """Every engine flag as a row. -> (on tickets, on anything else such as a worker id)."""
+    rows = [{"kind": "flag", "flag": x.get("flag"), "id": x.get("item"), "fix": x.get("fix")}
+            for x in (snap or {}).get("blocking") or []]
+    rows += [{"kind": "flag", "flag": fl, "id": x.get("item"), "fix": x.get("fix")}
+             for fl in ("STALLED", "BAKE_OWED") for x in ((snap or {}).get("flags") or {}).get(fl) or []]
+    on_ticket = [r for r in rows if TICKET_ID.match(str(r["id"] or ""))]
+    return on_ticket, [r for r in rows if r not in on_ticket]
+
+
 def held_by(snap, derived, overlap_rows, view):
-    """Everything stopping progress, named by what holds it."""
-    rows = []
-    for x in (snap or {}).get("blocking") or []:
-        rows.append({"kind": "flag", "flag": x.get("flag"), "id": x.get("item"), "fix": x.get("fix")})
-    for fl in ("STALLED", "BAKE_OWED"):
-        for x in ((snap or {}).get("flags") or {}).get(fl) or []:
-            rows.append({"kind": "flag", "flag": fl, "id": x.get("item"), "fix": x.get("fix")})
+    """Everything stopping progress, named by what holds it. A flag on a worker rather than a ticket belongs to
+    the machinery footer, never here."""
+    rows = list(flag_rows(snap)[0])
     for h in (snap or {}).get("holds") or []:
         rows.append({"kind": "hold", "id": h.get("ticket"), "reason": h.get("reason"), "text": " ".join(h.get("args") or []),
                      "valid": h.get("valid"), "why": h.get("why")})
@@ -554,6 +563,7 @@ def build_payload(slug, now, run=subprocess.run, deadline=None):
                   "baseline": baseline},
         "stale": stale,
         "machinery": {"at_wake": at_wake, "lanes": lane_rows(manifest, snap), "health": health,
+                      "worker_flags": [{"flag": r["flag"], "id": r["id"]} for r in flag_rows(snap)[1]],
                       "awaiting": [{"ticket": a.get("ticket"), "category": a.get("category")}
                                    for a in (snap or {}).get("awaiting_manager") or []],
                       "items": [{"ticket": i["ticket"], "state": i["state"], "title": i.get("title"), "flags": i.get("flags"),

@@ -495,12 +495,13 @@
     return s;
   }
   var TIER = { critical: ['Critical review', 'bad'], standard: ['Standard review', 'run'], light: ['Light review', ''], none: ['No review', 'warn'] };
+  var KIND_WORD = { spec: 'Spec', adr: 'ADR', module: 'Module' };
   function designSection(st) {
     var list = st.design || [];
     if (!list.length) return null;
     var s = section('What changed in the design', String(list.length), rows(list.map(function (d) {
       var t = TIER[d.tier] || (d.review ? ['Reviewed', 'good'] : null);
-      var r = row([words(d.kind || 'change') + ': ', d.what, el('span', { class: 'refs' }, d.ref ? (TICKET_RE.test(d.ref) ? ticket(d.ref) : el('span', { class: 'mono' }, d.ref)) : null, t ? pill(t[0], t[1]) : null)],
+      var r = row([(KIND_WORD[d.kind] || 'Change') + ': ', d.what, el('span', { class: 'refs' }, d.ref ? (TICKET_RE.test(d.ref) ? ticket(d.ref) : el('span', { class: 'mono' }, d.ref)) : null, t ? pill(t[0], t[1]) : null)],
         [d.meaning || null, d.stop ? 'Hard stop: ' + d.stop : null].filter(Boolean).join(' · ') || null);
       r.setAttribute('data-search', (r.textContent || '').toLowerCase());
       return r;
@@ -769,6 +770,7 @@
     pair('Next action', w.next_action); pair('Owner', w.owner); pair('Needs', w.prerequisite); pair('Stops at', w.stop_condition);
     pair('Wake', w.wake); pair('Map', m.map_line); pair('Founder gates', (m.gates || []).join('; '));
     pair('Holds in the state file', (w.holds || []).join('; '));
+    pair('Flags on workers', (m.worker_flags || []).map(function (f) { return (FLAG[f.flag] || words(f.flag)) + ': ' + f.id; }).join('; '));
     pair('Waiting on the manager', (m.awaiting || []).map(function (a) { return a.ticket + ' (' + (AWAIT[a.category] || words(a.category).toLowerCase()) + ')'; }).join('; '));
     return el('footer', { class: 'machinery' }, el('details', { id: 'machinery' }, el('summary', null, summary),
       el('dl', { class: 'kv' }, kv),

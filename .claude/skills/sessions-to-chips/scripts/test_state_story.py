@@ -128,6 +128,13 @@ class Brief(unittest.TestCase):
         self.assertFalse(os.path.exists(page))
 
 
+class WorkerFlags(unittest.TestCase):
+    def test_a_flag_on_a_worker_goes_to_the_footer_not_held_by(self):
+        snap = {"blocking": [{"flag": "UNBOUND", "item": "CYN-1"}, {"flag": "UNBOUND", "item": "codex-dispatch-lane-x"}]}
+        on_ticket, other = rs.flag_rows(snap)
+        self.assertEqual(([r["id"] for r in on_ticket], [r["id"] for r in other]), (["CYN-1"], ["codex-dispatch-lane-x"]))
+
+
 class Index(unittest.TestCase):
     def test_overlap_and_held_blockers_name_programs_by_their_title(self):
         self.assertEqual(si._held_text({"kind": "overlap", "program": "apps", "name": "Apps"}), "overlap:Apps")
