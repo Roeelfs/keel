@@ -399,7 +399,9 @@ def derive(ctx):
                       "publication": (b or {}).get("publication"), "blocked_by": blockers,
                       "ready_since": st.now_iso(new_ready[cid]) if cid in new_ready else None,
                       "fingerprint_age_s": int(now - fpe["since"]) if fpe else None,
-                      "bake_verdict": _verdict(bake), "predecessor_verdicts": preds, "flags": f})
+                      "bake_verdict": _verdict(bake), "predecessor_verdicts": preds, "flags": f,
+                      "ended": stype if state == "closed" else None,
+                      "bake_ended": ((bake or {}).get("state") or {}).get("type") if bake else None})
     for t, b in by_ticket.items():
         if t not in kids and t != map_id:
             items.append({"ticket": t, "kind": None, "kind_inferred": False, "state": "active", "title": None,

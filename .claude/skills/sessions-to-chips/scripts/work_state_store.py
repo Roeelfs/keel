@@ -141,6 +141,75 @@ def validate_bindings(bindings):
             seen_pub[pk] = b["ticket"]
 
 
+REPO_KEYS = {
+    "repo": (str, True), "path": (str, True), "ticket_pattern": (str, True), "main": (str, True),
+    "surfaces": (list, True), "red_main_cmd": (object, False), "red_main_unproven": (str, False),
+    "security_paths": (list, False),
+}
+SURFACE_KEYS = {
+    "name": (str, True), "kind": (str, True), "environment": (str, False), "proof_step": (str, False),
+    "workflow": (str, False), "job": (str, False), "paths": (list, True), "unproven": (str, False),
+}
+
+
+def _str_list(v, where):
+    if not all(isinstance(x, str) and x.strip() for x in v):
+        raise SchemaError(f"{where}: every entry must be a non-empty string")
+    bad = [x for x in v if x != x.strip() or re.search(r"[\s'\"]", x) or x.startswith(("- ", "/", "./"))]
+    if bad:
+        raise SchemaError(f"{where}: {bad[0]!r} is not a repo-relative glob (quotes, spaces or a list marker would match nothing)")
+
+
+def validate_repo(r, where="repos[0]"):
+    """One manifest `repos` entry: the only place a repo, its surfaces and its red-main command are named.
+    Strict like validate_binding. Called by the state renderer only, never inside _Locked.write, so a bad
+    hand edit shows as a Problems row and never blocks bind or retire."""
+    _check_keys(r, REPO_KEYS, where)
+    if "/" not in r["repo"] or r["repo"].count("/") != 1:
+        raise SchemaError(f"{where}.repo: 'owner/name'")
+    try:
+        re.compile(r["ticket_pattern"])
+    except re.error as exc:
+        raise SchemaError(f"{where}.ticket_pattern: not a regex ({exc})") from None
+    cmd = r.get("red_main_cmd")
+    if cmd is not None and not (isinstance(cmd, list) and cmd and all(isinstance(x, str) for x in cmd)):
+        raise SchemaError(f"{where}.red_main_cmd: null or an argv list of strings")
+    _str_list(r.get("security_paths") or [], f"{where}.security_paths")
+    names = set()
+    for i, s in enumerate(r["surfaces"]):
+        sw = f"{where}.surfaces[{i}]"
+        _check_keys(s, SURFACE_KEYS, sw)
+        if s["name"] in names:
+            raise SchemaError(f"{sw}.name: {s['name']!r} is listed twice")
+        names.add(s["name"])
+        _str_list(s["paths"], f"{sw}.paths")
+        if s["kind"] == "deployment":
+            if not s.get("environment"):
+                raise SchemaError(f"{sw}: a deployment surface needs `environment`")
+        elif s["kind"] == "job":
+            if not (s.get("workflow") and s.get("job") and s.get("proof_step")):
+                raise SchemaError(f"{sw}: a job surface needs `workflow`, `job` and `proof_step`")
+        else:
+            raise SchemaError(f"{sw}.kind: 'deployment' or 'job'")
+
+
+def validate_repos(repos):
+    """-> (valid entries, [error text]). Each entry is judged alone, so one bad entry hides only itself."""
+    if not isinstance(repos, list):
+        return [], ["repos: expected a list"]
+    good, errors, seen = [], [], set()
+    for i, r in enumerate(repos):
+        try:
+            validate_repo(r, f"repos[{i}]")
+            if r["repo"] in seen:
+                raise SchemaError(f"repos[{i}]: {r['repo']} is listed twice")
+            seen.add(r["repo"])
+            good.append(r)
+        except SchemaError as exc:
+            errors.append(str(exc))
+    return good, errors
+
+
 def publication_key(p):
     return f"{p['repo']}#{p['pr']}" if "pr" in p else f"{p['repo']}@{p['sha']}"
 
