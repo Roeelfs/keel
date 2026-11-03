@@ -1,0 +1,180 @@
+{
+ "_note": "Recorded from real gh responses on 2026-11-03, de-identified (repo renamed acme/shop) and trimmed to the fields the readers use. Step lists keep only the steps the readers and tests name.",
+ "deployment_skipped": {
+  "id": 7522940338,
+  "sha": "609cf0d4d94339ca8952174a79b0fa7464ba13fd",
+  "environment": "prod",
+  "created_at": "2026-11-03T15:27:48Z"
+ },
+ "deployment_skipped_status": {
+  "state": "success",
+  "log_url": "https://github.com/acme/shop/actions/runs/41663908435/job/126014779654",
+  "created_at": "2026-11-03T15:28:26Z"
+ },
+ "job_deploy_step_skipped": {
+  "id": 126014779654,
+  "run_id": 41663908435,
+  "name": "deploy",
+  "conclusion": "success",
+  "head_sha": "609cf0d4d94339ca8952174a79b0fa7464ba13fd",
+  "steps": [
+   {
+    "name": "Set up job",
+    "conclusion": "success"
+   },
+   {
+    "name": "Skip stale deploy trigger",
+    "conclusion": "success"
+   },
+   {
+    "name": "Deploy stack",
+    "conclusion": "skipped"
+   },
+   {
+    "name": "Smoke test",
+    "conclusion": "skipped"
+   },
+   {
+    "name": "Complete job",
+    "conclusion": "success"
+   }
+  ]
+ },
+ "job_deploy_step_ran": {
+  "id": 126066236198,
+  "run_id": 41669391867,
+  "name": "deploy",
+  "conclusion": "success",
+  "head_sha": "1db4db04f45b4ec8500f3206a3f5a9c54c95b4bc",
+  "steps": [
+   {
+    "name": "Set up job",
+    "conclusion": "success"
+   },
+   {
+    "name": "Skip stale deploy trigger",
+    "conclusion": "success"
+   },
+   {
+    "name": "Deploy stack",
+    "conclusion": "success"
+   },
+   {
+    "name": "Smoke test",
+    "conclusion": "skipped"
+   },
+   {
+    "name": "Complete job",
+    "conclusion": "success"
+   }
+  ]
+ },
+ "run_customers_sync_skipped": {
+  "jobs": [
+   {
+    "name": "deploy",
+    "conclusion": "success",
+    "url": "https://github.com/acme/shop/actions/runs/41683280394/job/126083943171",
+    "steps": [
+     {
+      "name": "Set up job",
+      "conclusion": "success"
+     },
+     {
+      "name": "Skip stale deploy trigger",
+      "conclusion": "success"
+     },
+     {
+      "name": "Deploy stack",
+      "conclusion": "success"
+     },
+     {
+      "name": "Smoke test",
+      "conclusion": "skipped"
+     },
+     {
+      "name": "Complete job",
+      "conclusion": "success"
+     }
+    ]
+   },
+   {
+    "name": "deploy-customers / sync",
+    "conclusion": "success",
+    "url": "https://github.com/acme/shop/actions/runs/41683280394/job/126096914793",
+    "steps": [
+     {
+      "name": "Set up job",
+      "conclusion": "success"
+     },
+     {
+      "name": "Scope customer deploy to changed tree",
+      "conclusion": "success"
+     },
+     {
+      "name": "Sync non-org content to S3 (templates, catalog)",
+      "conclusion": "skipped"
+     },
+     {
+      "name": "Complete job",
+      "conclusion": "success"
+     }
+    ]
+   }
+  ]
+ },
+ "run_customers_sync_ran": {
+  "jobs": [
+   {
+    "name": "deploy",
+    "conclusion": "success",
+    "url": "https://github.com/acme/shop/actions/runs/41666653246/job/126030839618",
+    "steps": [
+     {
+      "name": "Set up job",
+      "conclusion": "success"
+     },
+     {
+      "name": "Skip stale deploy trigger",
+      "conclusion": "skipped"
+     },
+     {
+      "name": "Deploy stack",
+      "conclusion": "success"
+     },
+     {
+      "name": "Smoke test",
+      "conclusion": "skipped"
+     },
+     {
+      "name": "Complete job",
+      "conclusion": "success"
+     }
+    ]
+   },
+   {
+    "name": "deploy-customers / sync",
+    "conclusion": "success",
+    "url": "https://github.com/acme/shop/actions/runs/41666653246/job/126043822559",
+    "steps": [
+     {
+      "name": "Set up job",
+      "conclusion": "success"
+     },
+     {
+      "name": "Scope customer deploy to changed tree",
+      "conclusion": "success"
+     },
+     {
+      "name": "Sync non-org content to S3 (templates, catalog)",
+      "conclusion": "success"
+     },
+     {
+      "name": "Complete job",
+      "conclusion": "success"
+     }
+    ]
+   }
+  ]
+ }
+}
