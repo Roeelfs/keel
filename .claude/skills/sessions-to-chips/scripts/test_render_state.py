@@ -253,7 +253,7 @@ class ViewBlock(unittest.TestCase):
         self.assertEqual({(x["key"], x["home"]) for x in legacy},
                          {("explanation", "destination"), ("proven", "the derived Production truth")})
         self.assertEqual(legacy[0]["text"] if legacy[0]["key"] == "explanation" else legacy[1]["text"], ["Builds it."])
-        self.assertTrue(any("v1 key; move it to destination" in p for p in problems))
+        self.assertTrue(any("retired key; move it to destination" in p for p in problems))
 
 
 class Grills(unittest.TestCase):
@@ -301,7 +301,8 @@ class EndToEnd(unittest.TestCase):
         main = [h for h in data["now"]["held_by"] if h["kind"] == "main"][0]
         self.assertEqual(main["state"], "unavailable")
         self.assertIn("main-health", main["why"])
-        self.assertEqual(line["author"][0], "exposure: #7 deployed, no row")
+        self.assertEqual(line["author"][:2], ["done: summarize #7 (what changed for the product, and why)",
+                                              "exposure: #7 deployed, no row"])
         self.assertTrue(line["stale"], "the merge at 11:30 is newer than updated_at 11:00")
         with open(base + ".state.json") as fh:
             side = json.load(fh)

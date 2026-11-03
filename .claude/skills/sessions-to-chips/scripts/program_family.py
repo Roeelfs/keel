@@ -211,6 +211,30 @@ def load_manifests(programs_dir=None):
     return out
 
 
+def display_title(title):
+    """A manager's session title as people read it: "[Manager] CAYP cutover (Access v2)" -> "CAYP cutover (Access v2)"."""
+    t = re.sub(r"^\[Manager\]\s*[-:]?\s*", "", title or "")
+    return re.sub(r"\s*\((?:fork|copy)\)\s*$", "", t, flags=re.I).strip()
+
+
+def program_titles(programs_dir=None, rows=None):
+    """-> {slug: display title} from each program's newest manager session, resolved by exact id (resolve_program),
+    never by title. A program whose manager session is not in the index has no entry."""
+    rows = session_index(write=False) if rows is None else rows
+    manifests = load_manifests(programs_dir)
+    best = {}
+    for row in rows.values():
+        if not is_manager(row) or not display_title(row.get("title")):
+            continue
+        m = resolve_program(row, manifests)
+        if not m:
+            continue
+        last = parse_last(row)
+        if m["slug"] not in best or last > best[m["slug"]][0]:
+            best[m["slug"]] = (last, display_title(row["title"]))
+    return {slug: title for slug, (_, title) in best.items()}
+
+
 def root_manager(sid, rows):
     cur, seen = sid, set()
     while cur in rows and cur not in seen:

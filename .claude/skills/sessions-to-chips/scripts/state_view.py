@@ -17,17 +17,22 @@ LISTS = {
     "exposure": ("ref", {"ref", "state", "evidence"}, {"state": ("dark", "live", "n/a")}, ()),
     "proof_owed": ("claim", {"claim", "proof", "org", "runner", "verdict", "ticket"},
                    {"verdict": ("owed", "pass", "fail")}, ()),
-    "design": ("what", {"what", "kind", "ref", "tier", "review", "stop"},
-               {"kind": ("spec", "adr", "module"), "tier": ("critical", "standard", "light", "none")}, ()),
-    "workstreams": ("outcome", {"outcome", "building", "found", "artifact", "carrier"}, {}, ()),
+    "done": ("what", {"date", "what", "why", "refs"}, {}, ("date",)),
+    "architecture": ("what", {"date", "what", "refs"}, {}, ("date",)),
+    "design": ("what", {"what", "meaning", "kind", "ref", "tier", "review", "stop", "date"},
+               {"kind": ("spec", "adr", "module"), "tier": ("critical", "standard", "light", "none")}, ("date",)),
+    "findings": ("found", {"date", "outcome", "found", "refs"}, {}, ("date",)),
     "decisions": ("decision", {"date", "decision", "why", "by", "supersedes"}, {}, ("date",)),
     "dead_ends": ("what", {"date", "what", "why"}, {}, ("date",)),
     "incidents": ("what", {"date", "what", "cause", "fix", "rca"}, {}, ("date",)),
     "skills_done": ("skill", {"skill", "ref", "date"}, {}, ("date",)),
 }
+LIST_FIELDS = ("tickets", "refs")  # lists of ids; every other field is text
 TEXT = ("updated_at", "destination")
+# Retired keys stay visible under "not migrated" with their new home until the manager converts them.
 V1_HOME = {"explanation": "destination", "next_steps": "outcomes", "upcoming": "outcomes",
-           "proven": "the derived Production truth", "unproven": "proof_owed"}
+           "proven": "the derived Production truth", "unproven": "proof_owed",
+           "workstreams": "done (what was delivered) and findings (what was learned)"}
 
 
 def problem(source, detail, fix=None):
@@ -60,9 +65,9 @@ def _row(key, n, row, now, problems):
         v = row[k]
         if v is None:
             continue
-        if key == "outcomes" and k == "tickets":
+        if k in LIST_FIELDS:
             if not isinstance(v, list) or not all(isinstance(t, str) for t in v):
-                problems.append(problem("VIEW", f"{where}.tickets must be a list of ticket ids"))
+                problems.append(problem("VIEW", f"{where}.{k} must be a list of ids like \"#5073\" or \"CYN-3256\""))
                 continue
             out[k] = v
             continue
@@ -111,7 +116,7 @@ def read_view(text, now, problems):
     for key in sorted(raw):
         if key in V1_HOME:
             legacy.append({"key": key, "home": V1_HOME[key], "text": _legacy_text(raw[key])})
-            problems.append(problem("VIEW", f"`{key}` is a v1 key; move it to {V1_HOME[key]}",
+            problems.append(problem("VIEW", f"`{key}` is a retired key; move it to {V1_HOME[key]}",
                                     "edit the ## VIEW block in place"))
         elif key not in LISTS and key not in TEXT:
             problems.append(problem("VIEW", f"unknown key `{key}` was not shown"))

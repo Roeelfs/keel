@@ -7,6 +7,7 @@ import glob
 import json
 import os
 
+import program_family as pf
 import work_state_store as st
 
 SCHEMA = "state-view/2"
@@ -74,7 +75,8 @@ def compact_holdings(h):
 
 
 def sidecar(payload, hold):
-    s = {"schema": SIDECAR_SCHEMA, "program": payload["program"], "generated_at": payload["generated_at"],
+    s = {"schema": SIDECAR_SCHEMA, "program": payload["program"], "name": payload.get("name") or payload["program"],
+         "map": {k: (payload.get("map") or {}).get(k) for k in ("issue", "url")}, "generated_at": payload["generated_at"],
          "goal": payload.get("goal"), "next_landing": (payload["now"]["outcomes"] or [{}])[0].get("outcome"),
          "needs_you": len(payload["now"]["needs_you"]), "counts": payload["now"]["production"]["counts"],
          "problems": len(payload["problems"]), "held_by": [_held_text(h) for h in payload["now"]["held_by"]
@@ -99,7 +101,7 @@ def _held_text(h):
     if h["kind"] == "flag":
         return f"{h['flag']}:{h['id']}"
     if h["kind"] == "overlap":
-        return f"overlap:{h['program']}"
+        return f"overlap:{h.get('name') or h['program']}"
     return f"{h['kind']}:{h.get('id') or h.get('what') or ''}"
 
 
@@ -108,9 +110,14 @@ def _held_ids(h):
     return [x for x in ids if isinstance(x, str) and x]
 
 
-def build_index(now):
-    """Every sidecar, no network. One row per live program; stale and unrendered ones collapse."""
-    rows, quiet, blockers = [], [], []
+def build_index(now, titles=None):
+    """Every sidecar, no network. One row per live program, named as its manager session is; stale and unrendered
+    ones collapse. A program whose name cannot be read keeps its slug and is counted in `problems`."""
+    try:
+        titles = pf.program_titles(st.PROGRAMS) if titles is None else titles
+    except OSError:
+        titles = {}
+    rows, quiet, blockers, problems, unnamed = [], [], [], [], []
     sidecars = {}
     for path in sorted(glob.glob(os.path.join(st.PROGRAMS, "*.state.json"))):
         try:
@@ -138,26 +145,34 @@ def build_index(now):
         if not isinstance(manifest, dict) or "goal" not in manifest or not live_program(manifest):
             continue
         s = sidecars.get(name)
+        label = (s or {}).get("name") or titles.get(name) or (manifest.get("title") if isinstance(manifest.get("title"), str) else None)
+        if not label:
+            label = name
+            unnamed.append(name)
         if not s:
-            quiet.append({"program": name, "why": "never rendered"})
+            quiet.append({"program": name, "name": label, "why": "never rendered"})
             continue
         age = now.timestamp() - (ts(s["generated_at"]) or 0)
         busy = s.get("needs_you") or s.get("open_prs")
         if age > STALE_SIDECAR_S and not busy:
-            quiet.append({"program": name, "why": "not rendered in 24 h", "age_s": int(age)})
+            quiet.append({"program": name, "name": label, "why": "not rendered in 24 h", "age_s": int(age)})
             continue
         failed = [h["name"] for h in s.get("health") or [] if not h.get("ok")]
-        rows.append({"program": name, "page": f"{name}.state.html", "age_s": int(age), "goal": s.get("goal"),
+        rows.append({"program": name, "name": label, "map": s.get("map") or {}, "page": f"{name}.state.html",
+                     "age_s": int(age), "goal": s.get("goal"),
                      "next_landing": s.get("next_landing"), "needs_you": s.get("needs_you"), "counts": s.get("counts"),
                      "held_by": s.get("held_by") or [], "problems": s.get("problems"), "failed_sources": failed,
                      "stale": s.get("stale"), "aged": age > STALE_SIDECAR_S})
         for o in s.get("overlap") or []:
             if o["program"] in sidecars and s["program"] < o["program"]:
-                blockers.append({"kind": "overlap", "a": s["program"], "b": o["program"], "repo": o["repo"],
+                blockers.append({"kind": "overlap", "a": label, "b": sidecars[o["program"]].get("name") or o["program"], "repo": o["repo"],
                                  "paths": o["paths"][:5], "path_count": o["path_count"]})
         for x in s.get("held_ids") or []:
             other = owners.get(x)
             if other and other != name:
-                blockers.append({"kind": "held", "a": name, "b": other, "id": x})
+                blockers.append({"kind": "held", "a": label, "b": sidecars[other].get("name") or other, "id": x})
+    if unnamed:
+        problems.append({"source": "Name", "detail": f"{len(unnamed)} program(s) have no readable manager session title, "
+                         f"so they are listed by slug: {', '.join(unnamed[:8])}", "fix": "add a `title` to each manifest"})
     return {"schema": SCHEMA, "kind": "index", "generated_at": utc(now), "rows": rows, "quiet": quiet,
-            "blockers": blockers, "problems": []}
+            "blockers": blockers, "problems": problems}

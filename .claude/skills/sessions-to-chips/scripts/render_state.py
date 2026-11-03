@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """render_state.py - write a program's state page, its sidecar and the cross-program index.
 
-Usage: render_state.py --program <slug> [--out <path>]
+Usage: render_state.py --program <slug> [--out <path>] [--context]
 Reads every owner (manifest, work-state snapshot, AT-WAKE through the Stop guard, grills, events, the
 `## VIEW` block, `<slug>.arch.json`) and the derived sources in state_sources.py, then injects one JSON
 payload into the one template. Never writes a source. Prints one compact JSON line for the manager.
+--context prints the same payload as a short plain-text brief instead (state_brief.py) and writes no page: the
+manager reads it at every wake and session start, works the map from it, updates `## VIEW` and re-renders.
 Exit 0 = page written; 1 = unknown program or failed write. RENDER_STATE_NO_OPEN=1 skips Chrome; otherwise the one
 Chrome tab on the state pages shows the index.
 Owners and rules: ../specs/2026-11-03-manager-state-viewer.md
@@ -21,9 +23,12 @@ import sys
 import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import program_family as pf  # noqa: E402
 import state_arch  # noqa: E402
+import state_brief  # noqa: E402
 import state_index as si  # noqa: E402
 import state_sources as ss  # noqa: E402
+import state_story  # noqa: E402
 import state_view as sv  # noqa: E402
 import work_state_sources as wsrc  # noqa: E402
 import work_state_store as st  # noqa: E402
@@ -198,6 +203,23 @@ def publications(events):
 
 # ---------- derived facts for the page ----------
 
+def program_name(slug, manifest, problems, titles=None):
+    """The program as people call it: its manager's session title without "[Manager] ". Without a readable
+    session, the manifest's own `title`, else the slug, plus one Problems row."""
+    try:
+        titles = pf.program_titles(st.PROGRAMS) if titles is None else titles
+    except OSError as exc:
+        titles, why = {}, f"the session index could not be read ({exc})"
+    else:
+        why = "no manager session for this program is in the session index"
+    if titles.get(slug):
+        return titles[slug]
+    fallback = manifest.get("title") if isinstance(manifest.get("title"), str) and manifest["title"].strip() else slug
+    problems.append(problem("Name", f"{why}, so the page is named {fallback!r}",
+                            None if fallback != slug else "add a `title` to the manifest, as its manager session is titled"))
+    return fallback
+
+
 def read_repos(manifest, problems):
     if "repos" not in manifest:
         problems.append(problem("Repos", "the manifest names no repos, so PRs, deploys and main health are not read",
@@ -333,8 +355,6 @@ def held_by(snap, derived, overlap_rows, view):
         if i.get("state") == "blocked":
             rows.append({"kind": "blocked", "id": i["ticket"], "by": [b.get("ticket") if isinstance(b, dict) else b
                                                                        for b in i.get("blocked_by") or []]})
-    for a in (snap or {}).get("awaiting_manager") or []:
-        rows.append({"kind": "awaiting", "id": a.get("ticket"), "category": a.get("category")})
     for r in derived["repos"]:
         red = r["red_main"]
         rows.append({"kind": "main", "repo": r["repo"], "state": red["state"], "why": red.get("why"), "fix": red.get("fix"),
@@ -432,9 +452,14 @@ def staleness(view, events):
     return {"stale": bool(newer), "since": view["updated_at"], "counts": counts, "ids": [e["id"] for e in newer]}
 
 
-def author_line(view, legacy, prod_rows, outcome_rows, stale, problems_rows):
+def author_line(view, legacy, prod_rows, outcome_rows, stale, problems_rows, told=None):
     """At most 5 exact keys to edit, drawn only from what is unresolved on Now."""
     out = []
+    pending = [u for u in ((told or {}).get("unsummarized") or [])]
+    if pending:
+        refs = [f"#{u['pr']}" if u.get("pr") else str(u.get("sha") or "")[:10] for u in pending]
+        out.append(f"done: summarize {', '.join(refs[:3])}{f' and {len(refs) - 3} more' if len(refs) > 3 else ''}"
+                   " (what changed for the product, and why)")
     unstated = [r for r in prod_rows if (r["ladder"]["steps"].get("exposure") or {}).get("state") == "unstated"]
     if unstated:
         refs = [f"#{r['pr']}" for r in unstated if r.get("pr")]
@@ -448,6 +473,8 @@ def author_line(view, legacy, prod_rows, outcome_rows, stale, problems_rows):
         out.append("destination: not written")
     if not view.get("outcomes"):
         out.append("outcomes: none written")
+    if not view.get("decisions"):
+        out.append("decisions: none written")
     for leg in legacy:
         out.append(f"{leg['key']}: move to {leg['home']}")
     if any(p["source"] == "VIEW" and "proof_owed for" in p["detail"] for p in problems_rows):
@@ -483,9 +510,16 @@ def build_payload(slug, now, run=subprocess.run, deadline=None):
     derived = derive(slug, manifest, snap, events, deadline, now, problems, run)
     prod_rows, shipped, counts = production(derived, view, snap, manifest)
     out_now, out_done = outcomes(view, snap, problems)
-    overlap_rows = ss.overlap(si.holdings(manifest, derived), si.other_sidecars(slug, now))
+    others = si.other_sidecars(slug, now)
+    names = {o["program"]: o.get("name") or o["program"] for o in others}
+    overlap_rows = [dict(o, name=names.get(o["program"], o["program"]))
+                    for o in ss.overlap(si.holdings(manifest, derived), others)]
     arch = state_arch.page_section(slug)
     problems += [problem("System diagram", p) for p in arch["problems"]]
+    name = program_name(slug, manifest, problems)
+    decisions = (view.get("decisions") or []) + [
+        {"decision": q["question"], "why": q["answer"], "by": "founder", "grill": q["file"]} for q in grills["answered"]]
+    told = state_story.story(view, prod_rows + shipped, publications(events), decisions, now)
     evts, baseline = derived_events(slug, prod_rows, shipped, snap, grills, out_now + out_done, derived["cache"], now)
     wsrc.write_cache(viewer_cache_key(slug), derived["cache"])
     stale = staleness(view, evts)
@@ -497,7 +531,7 @@ def build_payload(slug, now, run=subprocess.run, deadline=None):
     health.append({"name": "Map snapshot", "ok": snap is not None and not snap.get("cached"),
                    "age_s": ((snap or {}).get("remote_age_s") or {}).get("tracker")})
     payload = {
-        "schema": SCHEMA, "kind": "program", "program": slug, "generated_at": utc(now), "goal": manifest.get("goal"),
+        "schema": SCHEMA, "kind": "program", "program": slug, "name": name, "generated_at": utc(now), "goal": manifest.get("goal"),
         "map": manifest.get("map"), "destination": view.get("destination"), "updated_at": view.get("updated_at"),
         "status": at_wake.get("status"),
         "now": {"outcomes": out_now, "needs_you": needs_you(view, grills, snap),
@@ -508,13 +542,11 @@ def build_payload(slug, now, run=subprocess.run, deadline=None):
                                                    for s in r["surfaces"]], "has_surfaces": r["has_surfaces"]}
                                                    for r in derived["repos"]],
                                                "configured": bool(derived["repos_cfg"])},
-                "proof_owed": proof_owed(view, snap, problems), "design": view.get("design") or [],
-                "codebase": codebase(derived), "workstreams": view.get("workstreams") or [], "skills": skill_rows,
-                "legacy": parsed["legacy"]},
+                "proof_owed": proof_owed(view, snap, problems),
+                "codebase": codebase(derived), "skills": skill_rows, "legacy": parsed["legacy"]},
+        "story": told,
         "history": {"shipped": shipped, "publications": publications(events), "outcomes": out_done,
-                    "decisions": (view.get("decisions") or []) + [
-                        {"decision": q["question"], "why": q["answer"], "by": "founder", "grill": q["file"]}
-                        for q in grills["answered"]],
+                    "decisions": decisions,
                     "dead_ends": view.get("dead_ends") or [], "incidents": view.get("incidents") or [],
                     "events": [e for e in events if e.get("event") not in ("binding-retired",)][-300:],
                     "architecture": arch["archived"], "dropped": 0},
@@ -522,6 +554,8 @@ def build_payload(slug, now, run=subprocess.run, deadline=None):
                   "baseline": baseline},
         "stale": stale,
         "machinery": {"at_wake": at_wake, "lanes": lane_rows(manifest, snap), "health": health,
+                      "awaiting": [{"ticket": a.get("ticket"), "category": a.get("category")}
+                                   for a in (snap or {}).get("awaiting_manager") or []],
                       "items": [{"ticket": i["ticket"], "state": i["state"], "title": i.get("title"), "flags": i.get("flags"),
                                  "ended": i.get("ended")} for i in (snap or {}).get("items") or []],
                       "map_line": (snap or {}).get("map_line"), "gates": manifest.get("gates_held_by_manager") or [],
@@ -529,7 +563,7 @@ def build_payload(slug, now, run=subprocess.run, deadline=None):
                                   _source("Events", base + ".events.jsonl"), _source("System diagram", base + ".arch.json")]},
         "problems": problems,
     }
-    payload["author"] = author_line(view, parsed["legacy"], prod_rows, out_now, stale, problems)
+    payload["author"] = author_line(view, parsed["legacy"], prod_rows, out_now, stale, problems, told["history"])
     return payload, si.holdings(manifest, derived)
 
 
@@ -554,15 +588,17 @@ def _source(name, path):
 
 def fit_budget(payload):
     """Past the page budget, drop the oldest History rows and say how many."""
-    order = ("events", "publications", "shipped", "decisions", "dead_ends", "incidents")
+    order = (("history", "events"), ("history", "publications"), ("history", "shipped"), ("story", "unsummarized"),
+             ("history", "decisions"), ("history", "dead_ends"), ("history", "incidents"), ("story", "done"))
     dropped = 0
     room = PAGE_BUDGET - os.path.getsize(TEMPLATE) - 2_000
     while len(json.dumps(payload, ensure_ascii=False, default=str).encode()) > room:
-        key = next((k for k in order if payload["history"][k]), None)
-        if not key:
+        where = next(((a, k) for a, k in order if (payload["story"]["history"] if a == "story" else payload["history"])[k]), None)
+        if not where:
             break
-        cut = max(1, len(payload["history"][key]) // 4)
-        payload["history"][key] = payload["history"][key][cut:] if key == "events" else payload["history"][key][:-cut]
+        box = payload["story"]["history"] if where[0] == "story" else payload["history"]
+        cut = max(1, len(box[where[1]]) // 4)
+        box[where[1]] = box[where[1]][cut:] if where[1] == "events" else box[where[1]][:-cut]
         dropped += cut
     payload["history"]["dropped"] = dropped
     return payload
@@ -702,6 +738,7 @@ def main(argv=None, run=subprocess.run):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--program", required=True)
     ap.add_argument("--out", help="page path; default <programs>/<slug>.state.html (sidecar and index stay in programs)")
+    ap.add_argument("--context", action="store_true", help="print the plain-text state brief; write no page")
     args = ap.parse_args(argv)
     now = dt.datetime.now(dt.timezone.utc)
     try:
@@ -709,6 +746,9 @@ def main(argv=None, run=subprocess.run):
     except (OSError, ValueError) as exc:
         print(f"render_state: cannot read program {args.program!r}: {exc}", file=sys.stderr)
         return 1
+    if args.context:
+        print(state_brief.brief(payload))
+        return 0
     base = st.manifest_path(args.program)[:-5]
     out = os.path.abspath(args.out or base + ".state.html")
     payload = fit_budget(relocate_diagrams(payload, out))
