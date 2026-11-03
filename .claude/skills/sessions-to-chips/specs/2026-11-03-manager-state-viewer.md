@@ -17,11 +17,12 @@ table on the main view are deleted in the same change.
 | `scripts/render_state.py` | `--program <slug> [--out]`. Reads owners, writes the page, its sidecar and the index. |
 | `scripts/state_sources.py` | New. The derived readers below (gh, deploys, red main, overlap, skills rules). Pure functions plus one runner. |
 | `scripts/state_arch.py` | New. Validates `<slug>.arch.json`, runs Archify only when its hash changes, archives versions. |
-| `scripts/test_render_state.py` | Hermetic tests with recorded `gh` fixtures; real-Archify tests skip when absent. |
+| `scripts/work_state_store.py` | Gains `validate_repos`, called by the renderer only, never inside `_Locked.write`. |
+| `scripts/test_render_state.py` | Hermetic tests with recorded `gh` fixtures; real-Archify tests skip when absent. The graph import, `GraphSpec`, `RealArchify`, degraded-graph cases and v1 VIEW fixtures go; the no-network template test allows only a relative sibling `<iframe src>`. |
 
 Outputs, all in `~/.claude/orchestrator/programs/`: `<slug>.state.html` (page), `<slug>.state.json`
 (sidecar: the payload minus diagrams, read by the index and by other programs' overlap check),
-`<slug>.arch.html` (diagram, sibling file), `index.state.html`. All are derived and deletable, except
+`<slug>.arch/<sha12>/<view-id>.html` (diagrams), `index.state.html`. All are derived and deletable, except
 `<slug>.arch/`, which is the one owner of "architecture over time" (see below).
 
 ## One owner per fact
@@ -35,8 +36,9 @@ The manager authors only judgment. Everything else is derived on every render, s
 | Status, wake, armed, holds | last `## AT-WAKE`, read through the guard's `state_facts` / `at_wake_tail` | Derived |
 | Open and answered founder questions | `~/.claude/orchestrator/grills/<slug>-*.md` | Derived |
 | PRs per ticket, merge SHA, files, diff size | `gh`, matched by ticket id | Derived |
-| Deployed per surface | the surface's deploy record vs the merge SHA | Derived |
-| Red main and its owner | the repo's `red_main_cmd`, else its main-health workflow | Derived |
+| Deployed per surface | the surface's proof step vs the merge SHA | Derived |
+| Red main and its owner | the repo's `red_main_cmd`; without one, "unavailable" | Derived |
+| Publications in History | `binding-retired` events in `<slug>.events.jsonl` | Derived |
 | File overlap with other programs | other programs' sidecars | Derived |
 | Skills worth running | the rules table over the facts above | Derived |
 | Since you last looked | payload timestamps vs `localStorage` last-seen | Derived, client side |
@@ -52,25 +54,28 @@ gains a `flag_cmd`, that field moves to Derived and the VIEW key for it is delet
 
 A new top-level manifest key. It is the only place a repo, a surface or a red-main mechanism is named, so
 no global rule or script hardcodes one. `work_state_store.validate_repos` owns it, strict like
-`validate_binding`.
+`validate_binding`. The renderer catches its error per repo as a Problems row and still writes the page, so
+a bad hand edit never blocks `bind` or `retire`.
 
 ```json
 "repos": [{ "repo": "Cynap-ai/cynap-monorepo-next", "path": "~/code/cynap-monorepo-next",
   "ticket_pattern": "CYN-\\d+", "main": "main",
   "surfaces": [
-    { "name": "backend",   "kind": "deployment", "environment": "prod" },
+    { "name": "backend",   "kind": "deployment", "environment": "prod", "proof_step": "Deploy stack",
+      "paths": ["…the backend filter of tooling/workflow/deploy-backend-paths.yml…"] },
     { "name": "portal",    "kind": "deployment", "environment": "Production", "paths": ["apps/portal/**"] },
-    { "name": "customers", "kind": "job", "workflow": "deploy-backend.yml", "job": "deploy-customers",
-      "paths": ["apps/customers/**"] } ],
-  "red_main_cmd": ["node", "tooling/sandbox/main-health-relay.mjs", "--status", "--json"],
-  "main_health_workflow": "main-health.yml",
+    { "name": "customers", "kind": "job", "workflow": "deploy-backend.yml", "job": "deploy-customers / sync",
+      "proof_step": "Sync non-org content to S3 (templates, catalog)", "paths": ["apps/customers/**"],
+      "unproven": "org changes go live by activation, which has no read source" } ],
+  "red_main_cmd": null,
   "security_paths": ["**/auth/**", "**/security/**"] }]
 ```
 
-Values above are checked against the cynap repo on 2026-11-03: `deploy-backend.yml:274` deploys to GitHub
-environment `prod`; Vercel records portal deploys as environment `Production` (creator `vercel[bot]`);
-customers ships as the `deploy-customers` job of Deploy Backend (`deploy-backend.yml:895`), with no
-deployment record of its own. A program with no `repos` key gets one Problems row carrying a stub to paste.
+Checked against the cynap repo on 2026-11-03: the `prod` job (`deploy-backend.yml:274`) records a `success`
+deployment even when its freshness step skips every deploy step; the real deploy is `Deploy stack`
+(`:494`). A Vercel `Production` record is the deploy itself, so portal needs no `proof_step`. Customers is
+the `sync` job of `deploy-customers.yml`, called from `deploy-backend.yml:895`; its `unproven` text shows
+beside its row. No `repos` key: one plain Problems row; the paste-ready stub goes to stdout, never the page.
 `surfaces: []` means "no deploy step": the ladder ends at merged, and merged reads as final.
 
 ## Derived reads
@@ -78,34 +83,42 @@ deployment record of its own. A program with no `repos` key gets one Problems ro
 **PRs by ticket.** Tickets = snapshot items ∪ binding tickets. Per repo, batch 6 tickets per query
 (GitHub's search caps a query at 5 `OR`s):
 `gh pr list --repo R --state all --search "T1 OR … OR T6" --limit 100 --json number,title,headRefName,state,isDraft,mergedAt,mergeCommit,additions,deletions,updatedAt`.
-Keep a row only when `\bT\b` matches its title or head branch. Measured: the bare search for five cayp
-tickets returned 30 PRs, including #3155 and #3256, which matched on PR number alone. Files: one
+Keep a row only when `\bT\b` matches its title or head branch, and always keep a binding's own
+`publication.pr`. A batch that returns 100 rows is split and re-run, never read as complete. A PR under two
+tickets counts once; a ticket's step is its least-advanced PR's. Measured: a bare search for five cayp
+tickets returned 30 PRs, some matching on PR number alone. Files: one
 `gh pr list --repo R --state open --limit 100 --json number,files,additions,deletions` per repo (measured
 2.8 s, 23 PRs, 64.7 KB), and `gh pr view N --json files` once per merged PR, cached forever because a
 merged PR never changes. A binding `publication: {sha}` (direct-push repos) stands in for a PR.
 
-**Deployed per surface.** `deployment` kind: `gh api "repos/R/deployments?environment=E&per_page=10"`,
-then `gh api repos/R/deployments/<id>/statuses --jq '.[0].state'` down the list until the first `success`.
-A newer `in_progress` deployment is shown as **deploying** with its log URL. `job` kind:
-`gh run list --repo R --workflow W --branch <main> --status success --limit 5 --json databaseId,headSha`,
-then `gh run view <id> --repo R --json jobs` and keep a run whose job `J` concluded `success`. Deployed iff
-the merge SHA is an ancestor of the deployed SHA: `git -C <path> merge-base --is-ancestor M D`, falling back
-to `gh api repos/R/compare/M...D --jq .status` ∈ {`identical`,`ahead`} when the clone lacks either object.
-A surface with `paths` that the PR's files miss shows **n/a**. Never read a green workflow run as a deploy
-for a `deployment` surface: Deploy Backend's freshness step can pass while deploying nothing. Measured:
-#5073 (CYN-3256) merged 15:58:43Z as `1db4db04f`; `prod` deployment 7525062765 for that SHA was
-`in_progress` (run 41669391867), so the row reads "deploying", which matches the brief.
+**Deployed per surface.** A surface counts as deployed at SHA D only when its proof step ran and
+concluded `success` at D; a green record or a green job whose proof step skipped is walked past.
+`deployment` kind: `gh api "repos/R/deployments?environment=E&per_page=10"`, then
+`gh api repos/R/deployments/<id>/statuses --jq '.[0]'` down the list; for a `success` with a `proof_step`,
+read its `log_url` run's jobs (`gh run view <id> --repo R --json jobs`) and require that step's
+`conclusion: success`. `job` kind: `gh run list --repo R --workflow W --limit 20 --json
+databaseId,headSha,headBranch,conclusion`, filtered locally to main and success (a filtered search has
+returned stale pages before), then the same step check on job `J`. Deployed iff M is an ancestor of D:
+`git -C <path> merge-base --is-ancestor M D` (exit 1 = not deployed; exit 128 = fall back to
+`gh api repos/R/compare/M...D --jq .status` ∈ {`identical`,`ahead`}). A newer `in_progress` deployment
+reads **deploying** only when M is an ancestor of its SHA; a newest `failure` reads **deploy failed** with
+its log URL. A list exhausted with no proven deploy reads **not established**, with "check this surface's
+config" as the fix, never "not deployed". **n/a** needs the PR's complete, non-empty file list missing every
+`paths` glob; unread files read **cannot tell**. Measured: `prod` deployments 7522907025 and 7522940338
+were `success` with 25 of 30 steps skipped; the proof-step rule walks past both.
 
-**Red main.** `red_main_cmd` must print `{state, sha, owners: [{id,title,runtime}], claim}`. The cynap
-repo holds this data (`<git-common-dir>/cynap/main-health-state.json` `lastRed.owners`, `main-red-claim.json`,
-formatted by `tooling/sandbox/lib/main-owner.mjs`), but `main-health-relay.mjs` has no read-only status
-mode today (its verbs are `--refresh`, `--claim`, `--release`, `--nudge`). Owed in that repo: a
-`--status --json` verb that reuses `main-owner.mjs`. Until then the page falls back to
-`gh run list --repo R --workflow <main_health_workflow> --branch <main> --limit 1 --json conclusion,headSha`
-and shows "red, owner unknown" with the fix. No command and no workflow: a Problems row.
+**Red main.** `red_main_cmd` runs with cwd = the repo's `path` and prints
+`{schema: 1, state: green|red|outage|pending, sha, owners: [{id,title,runtime}], claim}`. The cynap data
+exists (`main-health-state.json`: top-level `owners` is the current episode, `lastRed` the previous), but no
+read-only verb exposes it; an unknown relay verb exits 0 with empty output. CYN-3398 (#5083, open) owes it.
+Until then `red_main_cmd` is `null` and the page shows **main health unavailable**, naming that ticket;
+empty or non-contract stdout reads the same, plus a Problems row. The main-health workflow's conclusion is
+never read: it succeeds after posting red. Red with `owners: []` reads "red, no owner".
 
-**File overlap.** Intersect this program's open-PR files and binding `paths` with every other live
-program's sidecar `open_prs[].files`. Exact paths; no extra gh call. Shown under Held by and on the index.
+**File overlap.** Repo plus normalized path; this program's open-PR files and binding `paths` against every
+other live program's, from sidecars, with one glob matcher (`**` crosses directories), never the prefix
+check `paths_intersect`. Same-PR pairs and generated files are dropped. Shown as advisory under Held by and
+on the index: manifest ownership stays the authority, and missing files read "unknown", never "no holder".
 
 ## Cost and failure
 
@@ -116,19 +129,22 @@ Renders run at every wake across ~10 managers. v1 measured 8.8 s (cayp-cutover) 
   non-blocking-flock rules of `work_state_sources.write_cache`. Ten managers on one repo pay once per TTL.
   Ticket searches stay in the program's own cache, also TTL 120 s. Merged-PR files never expire.
 - **Rate.** A cold render costs, per repo, 1 open list, ⌈T/6⌉ searches, 2–3 calls per surface, and one
-  call per newly merged PR. That is about 12 calls; warm renders cost 0. At 10 managers × 12 renders/h the
-  ceiling is ~1,400 calls/h against 5,000 core plus 5,000 GraphQL (measured 4,578 core left mid-day). On a
-  403 or 429, keep the stale tier, show its age, and do not retry within the render.
-- **Timeouts.** 20 s per subprocess, 45 s for the whole render. A timed-out source keeps its last tier and
-  shows "as of <age>". The snapshot keeps its own 90 s limit.
-- **Size budget.** Page ≤ 200 KB, sidecar ≤ 64 KB, enforced by a test that renders cayp-cutover and apps.
-  v1 pages measured 813–871 KB, almost all of it the embedded graph. Diagrams are never inlined.
-  `archify compare architecture` measured 2,124,003 bytes in 3.9 s, and a single `render` of the same
-  example 758,005 bytes, so diagrams live in the sibling `<slug>.arch.html`, shown in an `<iframe src>` with
-  an "open" link. They are rebuilt only when the sha256 of `<slug>.arch.json` changes.
-- **A missing source never reads as nothing.** Every zone whose source failed shows the exact reason and
-  the fix in place (for example, "no `repos` in the manifest: paste this stub"), and the Problems count stays
-  visible on Now. `render_state.py` exits 0 when the page was written, and 1 only for an unknown program or a
+  call per newly merged PR: about 12, plus the snapshot's own `load_gh`, which no viewer tier saves. At 10
+  managers × 12 renders/h the ceiling is ~1,400 calls/h against 5,000 core plus 5,000 GraphQL. Cold managers
+  on one repo may each fetch once (see Later). A rate-limit 403 or 429 keeps the stale tier with its age
+  and no retry before the stored reset; a 401, 404 or permission 403 is a Problems row with its fix.
+- **Timeouts.** 20 s per subprocess, 45 s for the whole render, and the snapshot gets the remaining
+  deadline. A timed-out source reads its cached tier through the no-network `mode="guard"` path, labelled
+  "as of <age>". Each tier is written to cache as it completes, so a killed render still advances it. Page
+  and sidecar are written by the deadline; Archify and the Chrome reload run after the write.
+- **Size budget.** Page ≤ 200 KB, sidecar ≤ 64 KB. The sidecar is a projection (open PRs and their files,
+  counts, source health), never the page payload; past the page budget the renderer drops the oldest
+  History rows and says how many. A test renders cayp-cutover and apps against both budgets. Diagrams are
+  never inlined (`archify compare architecture` measured 2,124,003 bytes): they are sibling files, shown in
+  an `<iframe src>` with an "open" link.
+- **A missing source never reads as nothing.** Every zone whose source failed shows the reason and the fix
+  in plain words, and the Problems count stays visible on Now. The sidecar carries each source's health, so
+  the index shows "unknown", never zero, for a failed source. `render_state.py` exits 0 when the page was written, and 1 only for an unknown program or a
   failed write.
 
 ## `## VIEW`, schema `state-view/2`
@@ -151,8 +167,13 @@ is closed; every key is optional; an unknown key, a wrong type or bad JSON goes 
   "skills_done":[{ "skill": "/spec-review", "ref": "#5085", "date": "..." }] }
 ```
 
-`outcomes` is in dependency order; an outcome whose tickets are all closed moves to History on its own.
-`kind` ∈ `spec|adr|module`; `tier` ∈ `critical|standard|light|none`; `exposure.state` ∈ `dark|live|n/a`.
+`outcomes` is in dependency order. An outcome moves to History only when its tickets are all closed and no
+bake is open, showing how each ended (done, canceled, duplicate); empty or unknown `tickets` is a Problems
+row and stays on Now. A `proof_owed` row names its ticket; the derived bake verdict wins, a conflict is a
+Problems row, and a pass reads "ticket records pass", never "proven", since no bake artifact is read.
+`date` and `updated_at` are RFC3339; a date-only or future value is a Problems row. `kind` ∈
+`spec|adr|module`; `tier` ∈ `critical|standard|light|none`; `exposure.state` ∈ `dark|live|n/a`; `verdict` ∈
+`owed|pass|fail`.
 `needs_you` holds asks not yet in a grill file; once a grill file carries one, the manager deletes it here.
 Stop-guard safety is unchanged: a JSON line never starts with `Status:` or `Wake:`, pinned by the
 real-guard test.
@@ -170,11 +191,13 @@ real-guard test.
 It draws the product, never tickets or sessions. An `architecture` view with `base` renders via
 `archify compare architecture base.json head.json <out> --receipt <r> --json`; its receipt's
 `.summary.components` (`added`, `changed`, `removed`) becomes the "3 new, 1 changed" line on Now. Any other
-view renders via `deliver <type>`. `--repo-root` and `meta.repository` are never set, and neither is
-`ARCHIFY_BRAND_ALLOW_PRIVATE`. When the program's change is live, the manager promotes `head` to `base`.
-On every hash change, `state_arch.py` copies the file to `<slug>.arch/<sha12>.json` with its first-seen
-time; History lists those versions and renders one on demand. Absent file: the zone says "No system
-diagram yet" plus the authoring pointer.
+view renders via `deliver <type>`. `--repo-root` is never set; `state_arch.py` strips
+`ARCHIFY_BRAND_ALLOW_PRIVATE` from Archify's environment and rejects any input carrying `meta.repository`.
+When the change is live, the manager promotes `head` to `base`. A valid file whose hash changed is copied
+to `<slug>.arch/<sha12>.json` and each view rendered to `<slug>.arch/<sha12>/<view-id>.html`, listed in
+`<slug>.arch/index.json`; History loads older ones lazily. A build reruns when the hash changed, an output
+is missing or the last build failed, and records the hash only on success. Absent file: "No system diagram
+yet" plus the authoring pointer.
 
 ## Skills worth running
 
@@ -191,27 +214,28 @@ A rule fires at most once per `ref`, and a matching `skills_done` row silences i
 
 ## Staleness and authoring
 
-The narrative is **stale** when any derived event is newer than VIEW `updated_at`: a merge, a deploy, a
-new blocker, a new grill question, or a ticket in `outcomes` that closed. The page shows one banner:
-"Narrative stale: 2 merges and 1 deploy since 15:00Z". Each render prints one compact JSON line on stdout,
-which the manager reads at wake instead of opening the page:
+The narrative is **stale** when any derived event is newer than VIEW `updated_at`: a merge, a deploy that
+first carries one of this program's PRs to a surface, a new blocker, a new grill question, or a ticket in
+`outcomes` that closed. Each event has a stable identity (kind plus PR, surface or ticket) and a first-seen
+time in the program cache; after cache loss the page says "baseline unavailable", never "new". One banner
+reads "Narrative stale: 2 merges and 1 deploy since 15:00Z". Each render prints one compact JSON line on
+stdout, which the manager reads at wake instead of opening the page:
 `{"out":…, "problems":2, "stale":true, "author":["exposure: #5073 deployed, no row", "outcomes: CYN-3256 closed"]}`.
-`author` names the exact keys to edit, at most 5 items. The manager edits only those keys, so keeping the
-page current costs one small Edit, not a re-read of the program.
+`author` names the exact keys to edit, at most 5, drawn only from what is unresolved on Now. The manager
+edits only those keys: one small Edit, not a re-read of the program.
 
 ## Since you last looked
 
 The template stores `last_seen` per program in `localStorage` (inside try/catch; with no storage the strip
-reads "first visit"). Rows with timestamps after it get a marker: merges (`mergedAt`), deploys (deployment
-`created_at`), blockers and design rows (first-seen time, kept in the program cache; a lost cache marks
-them new once), and decisions (`date`). Clicking "mark seen", or 10 s of visible focus, advances `last_seen`.
+reads "first visit"). Rows whose event is newer than it get a marker, using the event times above, and
+decisions by `date`. Only "mark seen", or leaving the page, advances `last_seen`; a reload never does.
 
 ## The index page
 
-`index.state.html` is built from every sidecar in the programs directory. No network, so it costs
-milliseconds. Every program render rebuilds it, which keeps it current with no extra job. A program is live
-when its manifest has no `absorbed_by`, its `status` is not `done` or `closed`, and its sidecar is younger
-than 24 h; older sidecars appear in a collapsed "not rendered in 24 h" list. One row per live program:
+`index.state.html` is built from every sidecar, with no network, by every program render. A program is live
+when its manifest has no `absorbed_by` and its `status` is not `done` or `closed`. A sidecar older than 24 h
+keeps its row, marked with its age, if it has open asks or PRs; otherwise it goes to a collapsed "not
+rendered in 24 h" list. One row per live program:
 next landing (first open outcome), needs-you count, top held-by, prod-truth counts per ladder step, the
 problems count and the render age. Below the rows: cross-program blockers, meaning file overlap pairs and
 held-by rows that name another program's ticket or PR.
@@ -221,22 +245,24 @@ held-by rows that name another program's ticket or PR.
 - Delete `scripts/state_graph.py`, its tests, `graph_section`, and the v1 VIEW keys (`explanation`,
   `next_steps`, `upcoming`, `proven`, `unproven`). A v1 key reads as a Problems row naming its v2 home:
   `explanation` → `destination`, `next_steps` and `upcoming` → `outcomes`, `proven` → derived Production
-  truth, `unproven` → `proof_owed`. There is nothing to convert: cayp-cutover and apps hold 0 VIEW blocks
-  (`grep -c '^## VIEW'`, 2026-11-03).
+  truth, `unproven` → `proof_owed`. Until converted, its text stays visible under "not migrated", and old
+  `proven` text reads as the manager's claim. harness and marketing hold one v1 block each (`grep -c
+  '^## VIEW'`, 2026-11-03; harness also has `claims` and `lanes`); their managers convert them key by key
+  on the next wake. Sidecars and the repo tier carry `schema`; a mismatch reads as a cold cache.
+- History's publications are rebuilt from `binding-retired` events, deduplicated by repo plus PR or push
+  SHA, with no newest-40 cut, so retiring a binding never erases its publication.
 - The lane table and wake, armed and carrier facts move to the collapsed machinery footer. The events
   timeline moves to History.
 - Re-render the 10 existing pages once: apps, cayp-cutover, cayp-data-invoice, cynap-manager-2026-10,
-  harness, marketing, paddle-cayp-legal, repo-hygiene, security-hardening, synthetic-customers. Each
-  program without `repos` shows its stub in Problems; its manager adds the key on its next wake.
+  harness, marketing, paddle-cayp-legal, repo-hygiene, security-hardening, synthetic-customers. A program
+  without `repos` shows its Problems row; its manager adds the key next wake, or records why it cannot.
 - Update `references/manager-contract.md` (state viewer paragraph) and `SKILL.md` to the v2 keys, the
   `author` line and `<slug>.arch.json`.
 
-## For the founder
+## Chrome tabs
 
-1. **Which pages auto-open in Chrome?** Recommended: only `index.state.html` keeps a live tab (opened
-   unfocused once, reloaded on every render). Program tabs are reloaded when already open and never newly
-   opened, so ten managers do not produce ten tabs. The alternative is v1's behaviour: each manager keeps
-   its own tab.
+Founder ruling, 2026-11-03: every render keeps a live Chrome tab. The index and each program page reload
+their tab, or open one unfocused (`open -g`) when none exists. `RENDER_STATE_NO_OPEN=1` skips this.
 
 ## Done means
 
@@ -248,3 +274,14 @@ held-by rows that name another program's ticket or PR.
 - Driven in Chrome through `chrome.sh`, on each page: the History tab opens and its search filters; the
   machinery footer expands; after a re-render with a new merge row, the since-you-last-looked strip counts
   it and marks it; "mark seen" clears it; and the diagram iframe displays from `file://`.
+- Recorded-fixture tests pass locally (keel has no CI): a skipped-proof-step `success` deployment, a red
+  main under a green health run, a skipped customers sync, an exhausted deploy search, a retired direct push
+  still in History after derived outputs are deleted, a canceled bake, and archived diagrams after cache loss.
+
+## Later
+
+- A per-repo refresh lease, so simultaneous cold renders fetch once, and one shared PR read with `load_gh`.
+- An activation-evidence source for customer org state; until then customers reads its `unproven` text.
+- A bake-evidence link in the snapshot, so a verdict can read "proven" with its artifact.
+- A **reverted** ladder state, read from a revert PR naming the merge SHA.
+- The review's remaining minor boundary rows (the edge-case table in the `.review.md`).
