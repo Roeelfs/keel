@@ -228,7 +228,8 @@ edits only those keys: one small Edit, not a re-read of the program.
 
 The template stores `last_seen` per program in `localStorage` (inside try/catch; with no storage the strip
 reads "first visit"). Rows whose event is newer than it get a marker, using the event times above, and
-decisions by `date`. Only "mark seen", or leaving the page, advances `last_seen`; a reload never does.
+decisions by `date`. Only "mark seen", or leaving the page, advances `last_seen`; a reload never does,
+including the index's reload of a page shown inside it (see Chrome tabs).
 
 ## The index page
 
@@ -261,8 +262,31 @@ held-by rows that name another program's ticket or PR.
 
 ## Chrome tabs
 
-Founder ruling, 2026-11-03: every render keeps a live Chrome tab. The index and each program page reload
-their tab, or open one unfocused (`open -g`) when none exists. `RENDER_STATE_NO_OPEN=1` skips this.
+Founder ruling, 2026-11-04: every state page converges into ONE Chrome tab, showing `index.state.html`,
+with no local server. One tab per page flooded the founder's Chrome with about 15 tabs; the one tab lives
+in their "Managers" tab group.
+
+- **The index is the dashboard.** A left switcher lists every live program with its next landing,
+  needs-you count and first held-by row. Choosing one shows its `<slug>.state.html` in an iframe, and
+  the choice lives in the hash (`#program=<slug>`), so a reload keeps it. With no hash, the index shows
+  its overview. Each program page still opens on its own.
+- **One reload loop.** The index reloads itself every 60 s while Live is on and no one is selecting,
+  typing, exploring a diagram or reading an open fold. A program page shown inside the index (`?embed=1`)
+  runs no timer. It reports its scroll, tab and busy state to the index by `postMessage`, and the index
+  passes them back on the next load (`y`, `tab`). The page scrolls before first paint, so it does not
+  flash. Live and the theme inside the iframe drive the index's own Live and theme.
+- **Since you last looked, inside the index.** The index passes `auto=1` when it was reloaded. The
+  embedded page treats that as a reload, so its last-seen time stays put. Switching programs, or
+  leaving and coming back, advances it.
+- **`render_state.py` makes one Chrome call per render, for the index only,** and only when the index
+  is directly under the real `~/.claude/orchestrator/programs`. Tests and scratch renders never reach
+  Chrome, and `RENDER_STATE_NO_OPEN=1` skips the call. One AppleScript lists every tab. The decision
+  (`tab_plan`) is pure and covers only tabs whose URL is a `.state.html` directly in that dir. If the
+  index is among them, its tab reloads. Otherwise the first match is pointed at the index, with
+  `#program=<its slug>`, which keeps the tab in its tab group. Every other match closes. With no match,
+  `open -g` opens one. Nothing activates Chrome, selects a tab or touches any other tab. When Chrome is
+  not running, nothing opens. The stdout `chrome` field reports what happened: `reloaded`, `repointed`,
+  `opened`, `chrome closed`, `skipped` or `error`, plus how many tabs closed.
 
 ## Done means
 

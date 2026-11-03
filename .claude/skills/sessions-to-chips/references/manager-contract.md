@@ -382,9 +382,12 @@ owner and prerequisite where needed, or state that no requested work remains.
 
 **State page (founder, 2026-11-03).** `scripts/render_state.py --program <slug>` writes
 `<slug>.state.html` (Now looks forward, History keeps shipped work and decisions), its sidecar
-`<slug>.state.json` and the cross-program `index.state.html`. Run it on every state change and at every wake: it
-also reloads each page's Chrome tab, or opens one unfocused (`open -g`); `RENDER_STATE_NO_OPEN=1` skips that.
-Read its one stdout line instead of opening the page: `{"out", "problems", "stale", "author": [...]}`. `author`
+`<slug>.state.json` and the cross-program `index.state.html`. Run it on every state change and at every wake.
+Every state page lives in ONE Chrome tab, showing the index, which embeds the chosen program (founder,
+2026-11-04). Each render reloads that tab, or points the first state tab at the index and closes the other
+state tabs, or opens one unfocused (`open -g`); `RENDER_STATE_NO_OPEN=1` skips that. Never open a state page
+in its own tab. Read the one stdout line instead of opening the page:
+`{"out", "problems", "stale", "author": [...], "chrome": {...}}`. `author`
 names the exact VIEW keys to edit (at most 5); make that one small edit and nothing else.
 
 You author only judgment. PRs, merges, deploys per surface, main health, bakes, blockers and file overlap are

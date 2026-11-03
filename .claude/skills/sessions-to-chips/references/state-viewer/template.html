@@ -178,6 +178,24 @@
   .num { font-family: var(--mono); }
   .unknown-num { color: var(--warn); }
 
+  .shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); height: 100dvh; }
+  .shell[hidden], .bar[hidden], main[hidden] { display: none; }
+  .rail { overflow-y: auto; padding: 16px 10px 24px; border-right: 1px solid var(--line); background: var(--surface); }
+  .rail h1 { font: 600 15px/1.3 var(--display); padding: 0 10px 10px; }
+  .rail a.pick { display: block; padding: 8px 10px; border-radius: var(--radius-small); color: var(--text); text-decoration: none; }
+  .rail a.pick:hover { background: var(--raised); }
+  .rail a.pick[aria-current="page"] { background: var(--accent-soft); }
+  .rail .pick-name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .rail .pick-name .pill { margin-left: auto; }
+  .rail .pick-line { display: block; color: var(--muted); font-size: 12.5px; line-height: 1.4; margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rail .pick-line.held { color: var(--faint); }
+  .shell iframe.program { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
+  .index-pick { cursor: pointer; }
+  .index-pick:hover td { background: var(--raised); }
+
+  @media (max-width: 900px) { .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 32vh) minmax(0, 1fr); }
+    .rail { border-right: 0; border-bottom: 1px solid var(--line); } }
   @media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } .bar { padding: 10px 18px; } main { padding: 22px 18px 56px; } }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -190,6 +208,10 @@
 (function () {
   'use strict';
   var data = JSON.parse(document.getElementById('state-payload').textContent);
+  /* Shown inside the index: the index owns the reload, Live and the theme; this page reports its place to it. */
+  var params = new URLSearchParams(location.search);
+  var EMBED = data.kind !== 'index' && window.parent !== window && params.get('embed') === '1';
+  function toIndex(msg) { if (EMBED) { msg.program = data.program; window.parent.postMessage(msg, '*'); } }
 
   /* Every value reaches the page through a text node, never through markup. */
   function el(tag, attrs) {
@@ -269,7 +291,8 @@
   if (store) {
     try {
       var pending = store.getItem(PENDING_KEY);
-      if (pending && navType() !== 'reload') store.setItem(SEEN_KEY, pending);
+      var refreshed = EMBED ? params.get('auto') === '1' : navType() === 'reload';
+      if (pending && !refreshed) store.setItem(SEEN_KEY, pending);
       store.removeItem(PENDING_KEY);
     } catch (_) {}
     window.addEventListener('pagehide', function () { try { store.setItem(PENDING_KEY, new Date().toISOString()); } catch (_) {} });
@@ -754,8 +777,8 @@
         el('tbody', null, list.map(function (r) {
           var unknown = (r.failed_sources || []).some(function (n) { return /Pull requests|Deploys/.test(n); });
           function num(k) { var c = (r.counts || {})[k]; return el('td', { class: 'num' + (unknown ? ' unknown-num' : '') }, unknown && !c ? 'unknown' : String(c || 0)); }
-          return el('tr', { class: 'index-row' },
-            el('td', null, el('a', { href: r.page, class: 'np' }, r.program), r.stale ? el('span', { class: 'ids', style: 'display:block' }, 'narrative stale') : null),
+          return el('tr', { class: 'index-row index-pick', onclick: function (e) { if (!e.target.closest('a')) location.hash = pickHash(r.program); } },
+            el('td', null, el('a', { href: pickHash(r.program), class: 'np' }, r.program), r.stale ? el('span', { class: 'ids', style: 'display:block' }, 'narrative stale') : null),
             el('td', null, r.next_landing || el('span', { class: 'empty' }, 'not written')),
             el('td', { class: 'num' }, r.needs_you ? pill(String(r.needs_you), 'warn') : '0'),
             el('td', null, (r.held_by || []).slice(0, 2).map(function (h) { return el('span', { class: 'ids', style: 'display:block' }, heldIndex(h)); })),
@@ -782,6 +805,73 @@
     return h;
   }
 
+
+  /* ---------- the index is the one tab: a program switcher, the chosen program's page inside it ---------- */
+  var shell = null, rail = null, frame = null, shown = null, innerBusy = false;
+  function pickHash(slug) { return '#program=' + encodeURIComponent(slug); }
+  function chosen() {
+    var m = /^#program=(.+)$/.exec(location.hash || ''), slug = null;
+    try { slug = m ? decodeURIComponent(m[1]) : null; } catch (_) {}
+    return slug && (data.rows || []).some(function (r) { return r.program === slug; }) ? slug : null;
+  }
+  function placeKey(slug) { return 'state-index-place:' + slug; }
+  function readPlace(slug) { try { return JSON.parse(sessionStorage.getItem(placeKey(slug)) || '{}') || {}; } catch (_) { return {}; } }
+  function pickRow(r) {
+    var held = (r.held_by || [])[0];
+    return el('a', { class: 'pick', href: pickHash(r.program), 'data-program': r.program },
+      el('span', { class: 'pick-name' }, r.program, r.needs_you ? pill(String(r.needs_you), 'warn', 'Needs you') : null),
+      el('span', { class: 'pick-line', title: r.next_landing || null }, r.next_landing || 'Next landing not written'),
+      held ? el('span', { class: 'pick-line held' }, heldIndex(held)) : null);
+  }
+  function startIndex() {
+    var list = data.rows || [];
+    rail = el('nav', { class: 'rail', 'aria-label': 'Programs' }, el('h1', null, 'Programs'),
+      el('a', { class: 'pick', href: '#', 'data-program': '' }, el('span', { class: 'pick-name' }, 'All programs'),
+        el('span', { class: 'pick-line' }, plural(list.length, 'live program'))),
+      list.map(pickRow));
+    shell = el('div', { class: 'shell', hidden: 'hidden' }, rail);
+    document.body.appendChild(shell);
+    var first = true;
+    function show() {
+      var slug = chosen();
+      document.getElementById('bar').hidden = !!slug;
+      document.getElementById('page').hidden = !!slug;
+      shell.hidden = !slug;
+      Array.prototype.forEach.call(rail.querySelectorAll('a.pick'), function (a) {
+        if ((a.getAttribute('data-program') || null) === slug) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+      });
+      var auto = first && navType() === 'reload';
+      first = false;
+      if (!slug) { if (frame) frame.remove(); frame = null; shown = null; document.title = 'Programs state'; return; }
+      if (slug === shown) return;
+      var place = readPlace(slug);
+      var q = new URLSearchParams({ embed: '1', theme: currentMode(), live: live ? '1' : '0' });
+      if (place.y) q.set('y', String(place.y));
+      if (place.tab) q.set('tab', place.tab);
+      if (auto) q.set('auto', '1');
+      var next = el('iframe', { class: 'program', title: slug + ' state', src: encodeURIComponent(slug) + '.state.html?' + q.toString() });
+      if (frame) frame.replaceWith(next); else shell.appendChild(next);
+      frame = next; shown = slug; innerBusy = false;
+      document.title = slug + ' state';
+    }
+    window.addEventListener('message', function (e) {
+      if (!frame || e.source !== frame.contentWindow || !e.data || e.data.program !== shown) return;
+      if (e.data.type === 'place') {
+        innerBusy = !!e.data.busy;
+        try { sessionStorage.setItem(placeKey(shown), JSON.stringify({ y: e.data.y, tab: e.data.tab })); } catch (_) {}
+      }
+      if (e.data.type === 'live') { live = !!e.data.on; try { localStorage.setItem('state-viewer-live', live ? 'on' : 'off'); } catch (_) {} showLive(); }
+      if (e.data.type === 'theme') setTheme(e.data.mode, true);
+    });
+    window.addEventListener('hashchange', show);
+    show();
+    /* The one reload loop: the index reloads itself; the program inside it comes back at its saved place. */
+    setInterval(function () {
+      if (!live || document.hidden || (shown ? innerBusy : busy())) return;
+      location.reload();
+    }, RELOAD_MS);
+  }
+
   /* ---------- page ---------- */
   var panels = {};
   var currentTab = 'Now';
@@ -790,6 +880,7 @@
     Object.keys(panels).forEach(function (k) { panels[k].hidden = k !== name; if (tabButtons[k]) tabButtons[k].setAttribute('aria-selected', String(k === name)); });
     if (persist) { try { sessionStorage.setItem('state-viewer-tab', name); } catch (_) {} }
     wakeFrames();
+    if (persist) report();
   }
   function rerender() {
     var page = document.getElementById('page');
@@ -817,24 +908,46 @@
   }
   var RELOAD_MS = 60000;
   var live = true;
-  function readLive() { try { live = localStorage.getItem('state-viewer-live') !== 'off'; } catch (_) {} liveBtn.setAttribute('aria-pressed', String(live)); liveBtn.textContent = live ? 'Live' : 'Paused'; }
-  function toggleLive() { live = !live; try { localStorage.setItem('state-viewer-live', live ? 'on' : 'off'); } catch (_) {} readLive(); }
+  function showLive() { liveBtn.setAttribute('aria-pressed', String(live)); liveBtn.textContent = live ? 'Live' : 'Paused'; }
+  function readLive() {
+    if (EMBED) live = params.get('live') !== '0';
+    else { try { live = localStorage.getItem('state-viewer-live') !== 'off'; } catch (_) {} }
+    showLive();
+  }
+  function toggleLive() {
+    live = !live;
+    if (EMBED) toIndex({ type: 'live', on: live });
+    else { try { localStorage.setItem('state-viewer-live', live ? 'on' : 'off'); } catch (_) {} }
+    showLive();
+  }
+  /* Someone is reading, selecting or typing: a reload now would lose their place. */
+  function busy() {
+    if (String(window.getSelection && window.getSelection()).length) return true;
+    if (document.querySelector('.diagram.explore')) return true;
+    if (document.activeElement && (document.activeElement.tagName === 'IFRAME' || document.activeElement.tagName === 'INPUT')) return true;
+    return !!document.querySelector('main details[open]');
+  }
   /* A file:// page cannot ask whether it changed, so it reloads while someone is looking at it. */
   function maybeReload() {
-    if (!live || document.hidden) return;
-    if (String(window.getSelection && window.getSelection()).length) return;
-    if (document.querySelector('.diagram.explore')) return;
-    if (document.activeElement && (document.activeElement.tagName === 'IFRAME' || document.activeElement.tagName === 'INPUT')) return;
-    if (document.querySelector('main details[open]')) return;
+    if (!live || document.hidden || busy()) return;
     location.reload();
   }
+  var reportQueued = false;
+  function report() {
+    if (!EMBED || reportQueued) return;
+    reportQueued = true;
+    requestAnimationFrame(function () { reportQueued = false; toIndex({ type: 'place', y: Math.round(window.scrollY), tab: currentTab, busy: busy() }); });
+  }
+  var embedTheme = params.get('theme') || 'auto';
   function setTheme(mode, persist) {
-    if (persist) { try { localStorage.setItem('state-viewer-theme', mode); } catch (_) {} }
+    if (EMBED) { embedTheme = mode; if (persist) toIndex({ type: 'theme', mode: mode }); }
+    else if (persist) { try { localStorage.setItem('state-viewer-theme', mode); } catch (_) {} }
     var dark = mode === 'dark' || (mode !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
     Object.keys(themeButtons).forEach(function (m) { themeButtons[m].setAttribute('aria-pressed', String(m === mode)); });
   }
   function currentMode() {
+    if (EMBED) return embedTheme;
     var saved = null;
     try { saved = localStorage.getItem('state-viewer-theme'); } catch (_) {}
     return new URLSearchParams(location.search).get('theme') || saved || 'auto';
@@ -845,13 +958,30 @@
   var savedTab = null;
   try { savedTab = sessionStorage.getItem('state-viewer-tab'); } catch (_) {}
   var asked = (location.hash || '').replace('#', '');
+  if (EMBED && params.get('tab')) savedTab = params.get('tab');
   showTab(data.kind === 'index' ? 'Index' : (asked === 'history' ? 'History' : (savedTab === 'History' ? 'History' : 'Now')), false);
   readLive();
   setTheme(currentMode(), false);
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { setTheme(currentMode(), false); });
   tick();
   setInterval(tick, 1000);
-  setInterval(maybeReload, RELOAD_MS);
+  if (EMBED) {
+    /* Restore the place before first paint, then keep the index told where it is. Exactly one reload loop: the index's. */
+    var y = parseInt(params.get('y'), 10);
+    if (y > 0) window.scrollTo(0, y);
+    ['scroll', 'click', 'keyup', 'focusin', 'focusout', 'selectionchange', 'toggle'].forEach(function (ev) { document.addEventListener(ev, report, true); });
+    window.addEventListener('message', function (e) {
+      if (e.source !== window.parent || !e.data) return;
+      if (e.data.type === 'live') { live = !!e.data.on; showLive(); }
+      if (e.data.type === 'theme') { embedTheme = e.data.mode; setTheme(embedTheme, false); }
+    });
+    setInterval(report, 5000);
+    report();
+  } else if (data.kind === 'index') {
+    startIndex();
+  } else {
+    setInterval(maybeReload, RELOAD_MS);
+  }
 })();
 </script>
 </body>

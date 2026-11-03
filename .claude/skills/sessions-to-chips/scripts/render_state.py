@@ -5,7 +5,8 @@ Usage: render_state.py --program <slug> [--out <path>]
 Reads every owner (manifest, work-state snapshot, AT-WAKE through the Stop guard, grills, events, the
 `## VIEW` block, `<slug>.arch.json`) and the derived sources in state_sources.py, then injects one JSON
 payload into the one template. Never writes a source. Prints one compact JSON line for the manager.
-Exit 0 = page written; 1 = unknown program or failed write. RENDER_STATE_NO_OPEN=1 skips Chrome.
+Exit 0 = page written; 1 = unknown program or failed write. RENDER_STATE_NO_OPEN=1 skips Chrome; otherwise the one
+Chrome tab on the state pages shows the index.
 Owners and rules: ../specs/2026-11-03-manager-state-viewer.md
 """
 import argparse
@@ -605,23 +606,96 @@ def relocate_diagrams(payload, out):
     return payload
 
 
-def show_in_chrome(path):
-    """Keep one viewable Chrome tab on the page: reload it if open, else open it unfocused. Never raises."""
+REAL_PROGRAMS = os.path.expanduser("~/.claude/orchestrator/programs")
+TAB_SEP = "\t"
+LIST_TABS = ('if application "Google Chrome" is not running then return "closed"\n'
+             'tell application "Google Chrome"\n  set out to ""\n  repeat with w in windows\n'
+             '    repeat with t in tabs of w\n'
+             '      set out to out & (id of w) & (ASCII character 9) & (id of t) & (ASCII character 9) & (URL of t) & linefeed\n'
+             '    end repeat\n  end repeat\n  return out\nend tell')
+
+
+def file_url(path, program=None):
+    return "file://" + urllib.parse.quote(path) + (f"#program={urllib.parse.quote(program)}" if program else "")
+
+
+def state_page(url, programs_dir):
+    """The page name when a tab shows a `.state.html` directly under the programs dir, else None."""
+    parts = urllib.parse.urlsplit(url or "")
+    if parts.scheme != "file":
+        return None
+    path = urllib.parse.unquote(parts.path)
+    name = os.path.basename(path)
+    return name if os.path.dirname(path) == programs_dir.rstrip(os.sep) and name.endswith(".state.html") else None
+
+
+def parse_tabs(text):
+    rows = []
+    for line in (text or "").splitlines():
+        bits = line.split(TAB_SEP, 2)
+        if len(bits) == 3 and bits[0].strip().isdigit() and bits[1].strip().isdigit():
+            rows.append((int(bits[0]), int(bits[1]), bits[2]))
+    return rows
+
+
+def tab_plan(tabs, programs_dir, index_path):
+    """One tab for every state page: reload the index if open, else repoint the first state tab to it, close the rest.
+    `tabs` is [(window id, tab id, url)] in Chrome's order. Tabs that are not state pages are never named."""
+    index_name = os.path.basename(index_path)
+    matches = [(w, t, state_page(u, programs_dir)) for w, t, u in tabs]
+    matches = [m for m in matches if m[2]]
+    if not matches:
+        return {"action": "open", "url": file_url(index_path), "close": []}
+    keep = next((m for m in matches if m[2] == index_name), None)
+    if keep:
+        plan = {"action": "reload", "tab": keep[:2]}
+    else:
+        keep = matches[0]
+        program = keep[2][:-len(".state.html")]
+        plan = {"action": "repoint", "tab": keep[:2], "url": file_url(index_path, program)}
+    plan["close"] = [m[:2] for m in matches if m is not keep]
+    return plan
+
+
+def _as_string(s):
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def plan_script(plan):
+    """The AppleScript for a reload or repoint plan. It never activates Chrome or selects a tab."""
+    ref = lambda wt: f"tab id {wt[1]} of window id {wt[0]}"  # noqa: E731
+    lines = ['tell application "Google Chrome"']
+    if plan["action"] == "reload":
+        lines.append(f"  tell {ref(plan['tab'])} to reload")
+    else:
+        lines.append(f"  set URL of {ref(plan['tab'])} to {_as_string(plan['url'])}")
+    lines += [f"  close {ref(wt)}" for wt in plan["close"]]
+    return "\n".join(lines + ["end tell"])
+
+
+def show_in_chrome(path, run=subprocess.run):
+    """Keep exactly one Chrome tab on the state pages, showing the index. Returns what it did. Never raises."""
     if sys.platform != "darwin" or os.environ.get("RENDER_STATE_NO_OPEN"):
-        return "skipped"
-    if not os.path.abspath(path).startswith(os.path.expanduser("~/.claude/orchestrator/programs") + os.sep):
-        return "skipped"
-    url = "file://" + urllib.parse.quote(path)
-    script = ('tell application "Google Chrome"\n  if it is not running then return "closed"\n'
-              '  repeat with w in windows\n    repeat with t in tabs of w\n'
-              f'      if URL of t starts with "{url}" then\n        tell t to reload\n        return "reloaded"\n'
-              '      end if\n    end repeat\n  end repeat\n  return "none"\nend tell')
+        return {"action": "skipped"}
+    if os.path.dirname(os.path.abspath(path)) != REAL_PROGRAMS:
+        return {"action": "skipped"}
     try:
-        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=15)
-        state = res.stdout.strip() or "error"
-        return state
-    except (OSError, subprocess.SubprocessError):
-        return "error"
+        res = run(["osascript", "-e", LIST_TABS], capture_output=True, text=True, timeout=15)
+        if res.returncode != 0:
+            return {"action": "error", "detail": (res.stderr or "").strip()[:200]}
+        if res.stdout.strip() == "closed":
+            return {"action": "chrome closed"}
+        plan = tab_plan(parse_tabs(res.stdout), REAL_PROGRAMS, os.path.abspath(path))
+        if plan["action"] == "open":
+            res = run(["open", "-g", "-a", "Google Chrome", plan["url"]], capture_output=True, text=True, timeout=15)
+        else:
+            res = run(["osascript", "-e", plan_script(plan)], capture_output=True, text=True, timeout=15)
+        if res.returncode != 0:
+            return {"action": "error", "detail": (res.stderr or "").strip()[:200]}
+        return {"action": {"open": "opened", "reload": "reloaded", "repoint": "repointed"}[plan["action"]],
+                "closed": len(plan["close"])}
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"action": "error", "detail": str(exc)[:200]}
 
 
 def main(argv=None, run=subprocess.run):
@@ -660,7 +734,7 @@ def main(argv=None, run=subprocess.run):
             print(f"render_state: cannot rewrite {out} with its diagram: {exc}", file=sys.stderr)
     print(json.dumps({"out": out, "problems": len(payload["problems"]), "stale": payload["stale"]["stale"],
                       "author": payload["author"], "index": index_note,
-                      "chrome": [show_in_chrome(out), show_in_chrome(index_path)]}))
+                      "chrome": show_in_chrome(index_path)}))
     return 0
 
 
