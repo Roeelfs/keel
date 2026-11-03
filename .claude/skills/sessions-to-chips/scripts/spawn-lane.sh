@@ -39,6 +39,7 @@
 # sourced below; it may export LANE_MCP_CONFIG=<path to an mcp-config json>.
 # Interactive-OAuth MCPs do not load in -p mode — only static-credential ones work.
 set -euo pipefail
+LANE_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 
 MISSION_SRC="" ; WORKTREE="" ; MODEL="" ; MODE="bypassPermissions" ; LANE_CWD="" ; MCP_CFG="" ; LANE_EFFORT="medium"
 RUNTIME="claude" ; ALLOW_NETWORK=0 ; CLASS="standard" ; CLASS_SET=0
@@ -67,6 +68,18 @@ case "$RUNTIME" in
   *) echo "spawn-lane.sh: --runtime must be claude|codex (got '$RUNTIME')" >&2; exit 2 ;;
 esac
 [ -n "$LANE_CWD" ] && cd "$LANE_CWD"
+
+# ---- lane row (one writer: work_state.py lane-row) --------------------------------------
+# A full row (lane id, parent manager, runtime, model, pid + start time, outfile, worktree) lets
+# the work-state engine prove a lane live by pid identity and bind it, for both runtimes. The pid
+# is this launcher's: it either execs the runtime or waits on it, so it lives exactly as long as
+# the lane. Best-effort: a write failure never blocks the lane.
+record_lane_row() {
+  [ -n "${CLAUDE_SESSION_ID:-}" ] || return 0
+  python3 -I "$LANE_SCRIPT_DIR/work_state.py" lane-row --lane "$1" --parent "$CLAUDE_SESSION_ID" \
+    --runtime "$2" --model "$MODEL" --pid "$$" --outfile "${3:-}" --worktree "${WORKTREE:-$(pwd -P)}" \
+    >/dev/null 2>&1 || true
+}
 
 if [ "$MISSION_SRC" = "-" ]; then MISSION="$(cat)"; else MISSION="$(cat "$MISSION_SRC")"; fi
 [ -n "$MISSION" ] || { echo "spawn-lane.sh: empty mission" >&2; exit 2; }
@@ -186,11 +199,7 @@ print(json.dumps(roots))')" || exit 2
   # lane -> parent session BEFORE the identity scrub below, so a PR whose commits carry only lane
   # keys still resolves to a session a peer can message. Best-effort: a write failure never
   # blocks the lane.
-  if [ -n "${CLAUDE_SESSION_ID:-}" ]; then
-    mkdir -p "$HOME/.claude/state" 2>/dev/null &&
-      printf '{"lane":"%s","parent":"%s","ts":"%s"}\n' "$LANE_KEY" "$CLAUDE_SESSION_ID" \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$HOME/.claude/state/lane-parents.jsonl" 2>/dev/null || true
-  fi
+  record_lane_row "$LANE_KEY" codex "$LANE_OUT"
   MISSION="$MISSION
 
 --- appended by spawn-lane.sh (non-negotiable) ---
@@ -235,7 +244,8 @@ the manager pushes after grading. If you find yourself wanting to push, you are 
 fi
 
 case "$LANE_EFFORT" in low|medium|high|xhigh|max) ;; *) echo "spawn-lane.sh: --effort must be low|medium|high|xhigh|max (got '$LANE_EFFORT')" >&2; exit 2 ;; esac
-ARGS=( --permission-mode "$MODE" --session-id "$(uuidgen | tr 'A-Z' 'a-z')" --model "$MODEL" --effort "$LANE_EFFORT" )
+LANE_SESSION="$(uuidgen | tr 'A-Z' 'a-z')"
+ARGS=( --permission-mode "$MODE" --session-id "$LANE_SESSION" --model "$MODEL" --effort "$LANE_EFFORT" )
 [ -n "$WORKTREE" ] && ARGS+=( --worktree "$WORKTREE" )
 [ -n "$MCP_CFG" ] && ARGS+=( --mcp-config "$MCP_CFG" )
 ARGS+=( -p --output-format json --permission-prompts none )
@@ -257,6 +267,7 @@ ARGS+=( -p --output-format json --permission-prompts none )
 # is_error:true and rc=1: indistinguishable from a work failure unless the result text is read.
 LANE_OUT="$(mktemp "${TMPDIR:-/tmp}/spawn-lane-out.XXXXXX")"
 trap 'rm -f "$LANE_OUT"' EXIT
+record_lane_row "$LANE_SESSION" claude "${LANE_RECORD_OUTFILE:-}"
 # Run claude as a child we can signal: with `exec` a kill of this pid killed claude, and
 # capturing the envelope must not turn a lane cancel into an orphaned, still-working lane.
 if [ "$MISSION_SRC" = "-" ]; then

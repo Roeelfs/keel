@@ -60,6 +60,8 @@ class RuntimeTests(unittest.TestCase):
                    HOME=str(self.home), CODEX_HEADROOM_LOG="/dev/null",
                    STUB_GATE_ARGS=str(self.root / "gate-args.txt"),
                    STUB_ENV=str(self.root / "env.txt"), **self.gate_env, **self.run_env)
+        for k in ("WORK_STATE_LANE_ROWS", "S2C_CLAUDE_HOME"):  # the lane row must land under this HOME
+            env.pop(k, None)
         r = subprocess.run([str(SCRIPT), "--mission", str(self.mission), "--cwd", str(cwd), *extra],
                            capture_output=True, text=True, env=env)
         argv = self.out.read_text().splitlines() if self.out.exists() else []
@@ -86,6 +88,23 @@ class RuntimeTests(unittest.TestCase):
         seen = dict(l.split("=", 1) for l in (self.root / "env.txt").read_text().splitlines())
         self.assertEqual(seen["FORK"], "0")
         self.assertEqual(seen["HEADLESS"], "1")
+
+    def test_both_runtimes_record_a_full_lane_row(self):
+        # The work-state engine proves a lane live by pid + start time and binds it by lane id; a
+        # row with only lane/parent/ts (the legacy shape) is unevaluable.
+        rows_path = self.home / ".claude/state/lane-parents.jsonl"
+        self.run_env = {"CLAUDE_SESSION_ID": "mgr-cli-1", "LANE_RECORD_OUTFILE": str(self.root / "lane.out")}
+        self.spawn(self.base)
+        self.spawn(self.base, "--runtime", "codex")
+        rows = [json.loads(x) for x in rows_path.read_text().splitlines()]
+        self.assertEqual([r["runtime"] for r in rows], ["claude", "codex"])
+        for r in rows:
+            self.assertEqual(r["parent"], "mgr-cli-1")
+            self.assertIsInstance(r["pid"], int)
+            self.assertTrue(r["pid_start"])
+            self.assertTrue(r["lane"])
+        self.assertEqual(rows[0]["outfile"], str(self.root / "lane.out"))
+        self.assertTrue(rows[1]["outfile"])
 
     def test_auth_death_exits_3_with_the_one_human_step(self):
         # Probed: an empty CLAUDE_CONFIG_DIR run answers envelope subtype:success,
