@@ -23,6 +23,15 @@ GUARD_SCRIPT = os.environ.get("WORK_STATE_GUARD_SCRIPT") or os.path.join(st.HOME
 TTL = {"tracker": 300, "gh": 120}
 GH_FIELDS = "number,state,mergedAt,headRefName,headRefOid,statusCheckRollup,reviewDecision"
 DEFAULT_RESET_S = 600
+RATE_LIMITED_RC = 4  # the tracker adapter's documented rate-limit exit code
+
+
+def _json_obj(text):
+    try:
+        v = json.loads(text or "{}")
+    except ValueError:
+        return {}
+    return v if isinstance(v, dict) else {}
 
 
 def telemetry(row):
@@ -99,26 +108,26 @@ def load_tracker(slug, manifest, cache, now, *, refresh=False, offline=False, ru
         return data, age, notes, events
     try:
         r = runner(argv, cwd=cwd, capture_output=True, text=True, timeout=90)
-        rc, out = r.returncode, r.stdout
+        rc, out, err = r.returncode, r.stdout, r.stderr
     except (OSError, subprocess.TimeoutExpired) as e:
         notes.append(f"tracker_error:{type(e).__name__}")
         return data, age, notes, events
-    try:
-        body = json.loads(out or "{}")
-    except ValueError:
-        body = {}
     if rc != 0:
-        if isinstance(body, dict) and body.get("error") == "rate_limited":
-            wait = body.get("retry_after_s")
-            reset = st.parse_iso(body["reset_at"]) if body.get("reset_at") else None
-            until = now + float(wait) if wait else (reset or now + DEFAULT_RESET_S)
+        # Producer contract: exit 4 = rate limited; with --json, stderr carries {error, code, type[, status,
+        # rate_limited_until]} (rate_limited_until: ISO-8601 or null).
+        rec = _json_obj((err or "").strip().splitlines()[-1] if (err or "").strip() else "")
+        if rc == RATE_LIMITED_RC or rec.get("type") == "rate_limited":
+            reset = rec.get("rate_limited_until")
+            until = (st.parse_iso(reset) if reset else None) or now + DEFAULT_RESET_S
             cache["rate_limited_until"] = until
             events.append({"event": "linear-reset", "at": st.now_iso(until)})
             notes.append("tracker_rate_limited")
-            telemetry({"program": slug, "source": "tracker", "event": "rate_limited", "until": st.now_iso(until)})
+            telemetry({"program": slug, "source": "tracker", "event": "rate_limited", "until": st.now_iso(until),
+                       "status": rec.get("status")})
         else:
-            notes.append(f"tracker_error:rc={rc}")
+            notes.append(f"tracker_error:rc={rc}" + (f":{rec['type']}" if rec.get("type") else ""))
         return data, age, notes, events
+    body = _json_obj(out)
     if check:
         check(body)
     cache["tracker"] = {"data": body, "fetched_at": now}

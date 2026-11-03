@@ -38,6 +38,7 @@ CLOSED = frozenset({"completed", "canceled", "duplicate"})
 STARTED = "started"
 LEASE = {"lane": 5400, "session": 14400, "pr_pending": 1500, "launch": 600, "card": 86400}
 TRACKER_STALE_S = 7200
+TRUNCATED_BLOCKER = "relations_truncated"
 WAKE_GRACE_S = 600
 CONTRACT = os.path.join(HERE, "..", "references", "manager-contract.md")
 LANE_UNBOUND_AGE_S = 7 * 86400
@@ -178,34 +179,38 @@ def carrier_state(c, ctx):
 # ---------- derive (pure) ----------
 
 def _child_map(tracker):
-    return {c["id"]: c for c in (tracker or {}).get("children") or []}
+    return {c["ticket"]: c for c in (tracker or {}).get("children") or []}
 
 
 def _blocking_blockers(child, kids):
     out = []
     for b in child.get("blocked_by") or []:
-        stype = ((b.get("state") or {}).get("type")) or ((kids.get(b.get("id")) or {}).get("state") or {}).get("type")
+        # Relation {ticket, state|null}: a null state is unreadable and counts open unless the blocker is
+        # in the map, whose own row then decides. Relations carry no kind: an outside-map blocker is never
+        # a ship -> ship stack.
+        rid = b["ticket"]
+        stype = ((b.get("state") or {}).get("type")) or ((kids.get(rid) or {}).get("state") or {}).get("type")
         if stype in CLOSED:
             continue
-        bkind = (kids.get(b.get("id")) or {}).get("kind") or b.get("kind")
-        if bkind == "ship" and child.get("kind") == "ship":
+        if (kids.get(rid) or {}).get("kind") == "ship" and child.get("kind") == "ship":
             continue  # R6: ship -> ship stacks; merge order stays at the merge gate
-        out.append(b.get("id"))
+        out.append(rid)
+    if "relations_truncated" in (child.get("errors") or []):
+        out.append(TRUNCATED_BLOCKER)  # the blocker list is incomplete: never ready (fail closed)
     return out
 
 
 def _bake_child(ship_id, kids):
     hits = [c for c in kids.values() if c.get("kind") == "bake"
-            and any(b.get("id") == ship_id for b in c.get("blocked_by") or [])]
+            and any(b["ticket"] == ship_id for b in c.get("blocked_by") or [])]
     hits.sort(key=lambda c: ((c.get("state") or {}).get("type") in CLOSED, c.get("order", 0)))
     return hits[0] if hits else None
 
 
 def _verdict(bake):
+    """R17: the bake ticket's state is the verdict (Done = pass, canceled/duplicate = fail)."""
     if not bake:
         return None
-    if bake.get("bake_verdict"):
-        return bake["bake_verdict"]
     stype = (bake.get("state") or {}).get("type")
     return {"completed": "pass", "canceled": "fail", "duplicate": "fail"}.get(stype, "pending")
 
@@ -248,7 +253,7 @@ def derive(ctx):
     now, slug, map_id = ctx["now"], ctx["slug"], ctx.get("map_id")
     tracker, bindings = ctx.get("tracker"), ctx["bindings"]
     kids = _child_map(tracker)
-    order = [c["id"] for c in (tracker or {}).get("children") or []]
+    order = [c["ticket"] for c in (tracker or {}).get("children") or []]
     by_ticket = {b["ticket"]: b for b in bindings}
     notes, awaiting, flags = list(ctx.get("notes") or []), [], {k: [] for k in
                                                                  ("UNBOUND", "READY_NOT_DISPATCHED", "STALLED", "BAKE_OWED")}
@@ -358,8 +363,11 @@ def derive(ctx):
         else:
             counts["open"] += 1
             counts["blocked"] += state == "blocked"
-        if c.get("kind") is None and state not in ("closed",):
-            notes.append(f"kind_conflict:{cid}" if c.get("kind_error") else f"kind_missing:{cid}")
+        errs = c.get("errors") or []
+        if state != "closed":
+            if c.get("kind") is None:
+                notes.append(f"kind_conflict:{cid}" if "kind_conflict" in errs else f"kind_missing:{cid}")
+            notes += [f"{e}:{cid}" for e in errs if e.endswith("_truncated")]
         if state == "ready" and not b:
             if stype == STARTED:
                 f.append("UNBOUND")
@@ -377,9 +385,11 @@ def derive(ctx):
             if any(x["item"] == cid for x in flags[fl]):
                 f.append(fl)
         bake = _bake_child(cid, kids) if c.get("kind") == "ship" else None
-        preds = [{"ticket": x.get("id"), "bake_verdict": _verdict(_bake_child(x.get("id"), kids)),
-                  "verdict_url": (_bake_child(x.get("id"), kids) or {}).get("verdict_url")}
-                 for x in c.get("blocked_by") or [] if (kids.get(x.get("id")) or {}).get("kind") == "ship"] \
+        # R18: tracker contract /1 carries no verdict-comment link, so each predecessor names its bake
+        # ticket, whose verdict comment the manager reads at the merge gate.
+        preds = [{"ticket": x["ticket"], "bake_verdict": _verdict(_bake_child(x["ticket"], kids)),
+                  "bake_ticket": (_bake_child(x["ticket"], kids) or {}).get("ticket")}
+                 for x in c.get("blocked_by") or [] if (kids.get(x["ticket"]) or {}).get("kind") == "ship"] \
             if c.get("kind") == "ship" and b and b.get("carve_out") else []
         fpe = new_fp.get(cid)
         items.append({"ticket": cid, "kind": c.get("kind"), "kind_inferred": bool(c.get("kind_inferred")),
@@ -507,7 +517,7 @@ def _children(slug, programs=None, refresh=False):
     data, _, _, _ = src.load_tracker(slug, manifest, cache, time.time(), refresh=refresh, check=check_tracker_schema)
     if data is not None:
         src.write_cache(slug, cache)
-    return manifest, cache, ({c["id"] for c in data.get("children") or []} if data else None), data
+    return manifest, cache, ({c["ticket"] for c in data.get("children") or []} if data else None), data
 
 
 def changed_paths(repo=None, pr=None, repo_dir=None, sha=None, runner=subprocess.run):
@@ -528,7 +538,7 @@ def bake_for(paths, deny=()):
 
 def bake_body(slug, ship, programs=None):
     manifest, cache, _, data = _children(slug, programs)
-    kid = {c["id"]: c for c in (data or {}).get("children") or []}.get(ship) or {}
+    kid = _child_map(data).get(ship) or {}
     b = next((x for x in manifest.get("bindings") or [] if x["ticket"] == ship), {})
     pub = b.get("publication") or {}
     values = {"obligation": f"Bake: {kid.get('title') or ship} (changed runtime seam of {ship})",
@@ -548,7 +558,7 @@ def bake_body(slug, ship, programs=None):
 
 def _retire_allow(slug, programs=None):
     _, _, _, data = _children(slug, programs)
-    kids = {c["id"]: c for c in (data or {}).get("children") or []}
+    kids = _child_map(data)
     bound = {b["ticket"] for b in st.read_manifest(slug, programs).get("bindings") or []}
 
     def allow(b):

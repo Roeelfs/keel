@@ -28,7 +28,47 @@ import work_state_sources as src  # noqa: E402
 import work_state_store as st  # noqa: E402
 
 FIX = os.path.join(HERE, "fixtures", "work_state")
-TRACKER = json.load(open(os.path.join(FIX, "tracker.provisional.json")))
+# The producer's own de-identified `linear-map.mjs snapshot --fixture` output (contract work-state-tracker/1),
+# copied verbatim, never hand-edited (R19). Scenario rows below are cloned from its child row shape.
+REAL = json.load(open(os.path.join(FIX, "linear-map-snapshot.fixture.json")))
+STATE_NAMES = {"backlog": "Backlog", "unstarted": "Todo", "started": "In Progress", "completed": "Done",
+               "canceled": "Canceled", "duplicate": "Duplicate"}
+
+
+def tstate(stype):
+    return {"type": stype, "name": STATE_NAMES[stype]}
+
+
+def child(ticket, order, title, stype, kind, blocked_by=(), errors=(), inferred=False):
+    """One child in the real producer row shape: blocked_by = [(ticket, state type|None)]."""
+    c = copy.deepcopy(REAL["children"][0])
+    c.update(ticket=ticket, order=order, title=title, state=tstate(stype), kind=kind, kind_inferred=inferred,
+             blocked_by=[{"ticket": t, "state": None if s is None else tstate(s)} for t, s in blocked_by],
+             blocks=[], errors=list(errors))
+    return c
+
+
+def tracker_of(children):
+    kids = {c["ticket"]: c for c in children}
+    for c in children:  # the inverse relation, as the producer emits it
+        for b in c["blocked_by"]:
+            if b["ticket"] in kids:
+                kids[b["ticket"]]["blocks"].append({"ticket": c["ticket"], "state": copy.deepcopy(c["state"])})
+    return dict(copy.deepcopy(REAL), map=dict(REAL["map"], ticket="M-1"), children=children,
+                children_count=len(children))
+
+
+TRACKER = tracker_of([
+    child("T-1", 0, "Ship A", "completed", "ship"),
+    child("T-2", 1, "Bake: Ship A", "unstarted", "bake", [("T-1", "completed")]),
+    child("T-3", 2, "Ship B (stacked on C)", "backlog", "ship", [("T-4", "started")]),
+    child("T-4", 3, "Ship C", "started", "ship"),
+    child("T-5", 4, "Research", "unstarted", "task", [("X-99", None)], inferred=True),
+    child("T-6", 5, "Grill: a founder ruling", "unstarted", "grill"),
+    child("T-7", 6, "Two work labels", "unstarted", None, errors=["kind_conflict"]),
+    child("T-8", 7, "Duplicate", "duplicate", "task"),
+    child("T-9", 8, "Task after research", "backlog", "task", [("T-5", "unstarted")]),
+])
 GH_ROWS = json.load(open(os.path.join(FIX, "gh_pr_list.provisional.json")))["rows"]
 SESSION_ROWS = json.load(open(os.path.join(FIX, "session_index_rows.json")))["rows"]
 NOW = st.parse_iso("2026-11-03T12:00:00Z")
@@ -106,6 +146,31 @@ class DerivedStates(unittest.TestCase):
         s = snap()
         self.assertEqual(s["frontier"], ["T-2", "T-3", "T-4", "T-6", "T-7"])
         self.assertTrue(s["map_line"].startswith("Map M-1: done 2 / open 7 / blocked 2; frontier now: T-2"))
+
+    def test_relations_truncated_is_never_ready(self):  # R20: never truncate silently
+        t = copy.deepcopy(TRACKER)
+        next(c for c in t["children"] if c["ticket"] == "T-6")["errors"] = ["relations_truncated"]
+        s = snap(tracker=t)
+        self.assertEqual(items(s)["T-6"]["state"], "blocked")
+        self.assertNotIn("T-6", flagged(s, "READY_NOT_DISPATCHED"))
+        self.assertIn("relations_truncated:T-6", s["notes"])
+
+
+class RealProducerFixture(unittest.TestCase):  # R19: the producer's own output, not a hand-written shape
+    def test_scenario_rows_have_exactly_the_producer_keys(self):
+        for c in TRACKER["children"]:
+            self.assertEqual(set(c), set(REAL["children"][0]))
+        self.assertEqual(set(TRACKER), set(REAL))
+
+    def test_the_real_snapshot_derives(self):
+        ws.check_tracker_schema(REAL)
+        s = snap(tracker=copy.deepcopy(REAL), map_id=REAL["map"]["ticket"])
+        self.assertEqual(s["children_count"], 21)
+        self.assertTrue(s["map_line"].startswith("Map TKT-1: done 9 / open 12 / blocked 0"))
+        self.assertEqual(flagged(s, "UNBOUND"), ["TKT-22"])  # started, unbound
+        self.assertEqual(len(flagged(s, "READY_NOT_DISPATCHED")), 11)
+        self.assertTrue(all(i["kind_inferred"] for i in s["items"]))
+        self.assertEqual([n for n in s["notes"] if n.startswith(("kind_", "relations_", "labels_"))], [])
 
 
 class Flags(unittest.TestCase):
@@ -185,7 +250,7 @@ class Flags(unittest.TestCase):
 
     def test_bake_owed_once_per_publication_then_cleared(self):  # R12
         t = copy.deepcopy(TRACKER)
-        t["children"] = [c for c in t["children"] if c["id"] != "T-2"]
+        t["children"] = [c for c in t["children"] if c["ticket"] != "T-2"]
         ship = binding("T-1", publication={"repo": "owner/repo", "pr": 101})
         prs = {"owner/repo#101": GH_ROWS[0]}
         s = snap(tracker=t, bindings=[ship], prs=prs)
@@ -199,16 +264,15 @@ class Flags(unittest.TestCase):
 
     def test_bake_verdict_from_the_bake_ticket(self):  # R17, R18
         t = copy.deepcopy(TRACKER)
-        bake = next(c for c in t["children"] if c["id"] == "T-2")
-        bake["state"] = {"type": "completed"}
+        bake = next(c for c in t["children"] if c["ticket"] == "T-2")
+        bake["state"] = tstate("completed")
         self.assertEqual(items(snap(tracker=t))["T-1"]["bake_verdict"], "pass")
-        bake["state"] = {"type": "canceled"}
+        bake["state"] = tstate("canceled")
         self.assertEqual(items(snap(tracker=t))["T-1"]["bake_verdict"], "fail")
-        t["children"].append({"id": "T-10", "order": 10, "title": "Ship D", "kind": "ship", "state": {"type": "unstarted"},
-                              "blocked_by": [{"id": "T-1", "state": {"type": "completed"}}]})
+        t["children"].append(child("T-10", 9, "Ship D", "unstarted", "ship", [("T-1", "completed")]))
         it = items(snap(tracker=t, bindings=[binding("T-10", [carrier("founder", iso(-1))], carve_out=True)]))
         self.assertEqual(it["T-10"]["predecessor_verdicts"][0], {"ticket": "T-1", "bake_verdict": "fail",
-                                                                  "verdict_url": None})
+                                                                  "bake_ticket": "T-2"})
 
 
 class Holds(unittest.TestCase):
@@ -264,7 +328,7 @@ class Exemptions(unittest.TestCase):  # R29
         self.assertTrue(snap(state={"status": "DONE"})["blocking"])
         t = copy.deepcopy(TRACKER)
         for c in t["children"]:
-            c["state"] = {"type": "completed"}
+            c["state"] = tstate("completed")
         self.assertEqual(snap(tracker=t, state={"status": "DONE"})["blocking"], [])
 
     def test_grilling_unheld_ready_still_blocks(self):
@@ -339,15 +403,15 @@ def write_manifest(slug, **kw):
 
 
 class FakeRunner:
-    def __init__(self, tracker=None, rc=0, out=None):
-        self.calls, self.tracker, self.rc, self.out = [], tracker, rc, out
+    def __init__(self, tracker=None, rc=0, out=None, err=""):
+        self.calls, self.tracker, self.rc, self.out, self.err = [], tracker, rc, out, err
 
     def __call__(self, argv, **kw):
         self.calls.append(argv)
         res = type("R", (), {})()
-        res.returncode, res.stdout = 0, ""
+        res.returncode, res.stdout, res.stderr = 0, "", ""
         if argv[0] == "fake-tracker":
-            res.returncode = self.rc
+            res.returncode, res.stderr = self.rc, self.err
             res.stdout = self.out if self.out is not None else json.dumps(self.tracker or TRACKER)
         elif argv[0] == "gh":
             res.stdout = json.dumps(GH_ROWS)
@@ -367,25 +431,42 @@ class CacheAndCommands(unittest.TestCase):
         s1, rc = ws.run_snapshot(self.slug, runner=r)
         self.assertEqual((r.tracker_calls(), rc), (1, 4))
         self.assertIn("T-6", flagged(s1, "READY_NOT_DISPATCHED"))
-        st.bind(self.slug, "T-6", children={c["id"] for c in TRACKER["children"]}, map_id="M-1")
+        st.bind(self.slug, "T-6", children={c["ticket"] for c in TRACKER["children"]}, map_id="M-1")
         s2, _ = ws.run_snapshot(self.slug, runner=r)
         self.assertEqual(r.tracker_calls(), 1)  # TTL hit: no adapter call
         self.assertNotIn("T-6", flagged(s2, "READY_NOT_DISPATCHED"))
         with open(src.ANALYTICS) as fh:
             rows = [json.loads(x) for x in fh]
-        self.assertTrue(any(x.get("source") == "tracker" and x.get("x_complexity") == [228] for x in rows))
+        self.assertTrue(any(x.get("source") == "tracker" and x.get("x_complexity") == [238] for x in rows))
 
     def test_rate_limit_keeps_stale_and_emits_linear_reset(self):  # R25
         ws.run_snapshot(self.slug, runner=FakeRunner())
         cache = src.read_cache(self.slug)
         cache["tracker"]["fetched_at"] -= 1000
         src.write_cache(self.slug, cache)
-        r = FakeRunner(rc=5, out=json.dumps({"error": "rate_limited", "retry_after_s": 120}))
+        until = st.now_iso(time.time() + 120)
+        r = FakeRunner(rc=4, out="", err=json.dumps({"error": "Linear rate limited (HTTP 429)", "code": 4,
+                                                     "type": "rate_limited", "status": 429,
+                                                     "rate_limited_until": until}) + "\n")
         s, _ = ws.run_snapshot(self.slug, runner=r)
-        self.assertEqual(s["pending_events"][0]["event"], "linear-reset")
+        self.assertEqual(s["pending_events"][0], {"event": "linear-reset", "at": until})
         self.assertIn("T-6", flagged(s, "READY_NOT_DISPATCHED"))  # stale data kept
         s, _ = ws.run_snapshot(self.slug, runner=r)  # inside the window: no retry
         self.assertEqual(r.tracker_calls(), 1)
+
+    def test_rate_limit_without_a_reset_header_waits_the_default(self):  # R25: else now + 600 s
+        err = json.dumps({"error": "429", "code": 4, "type": "rate_limited", "status": 429, "rate_limited_until": None})
+        before = time.time()
+        s, _ = ws.run_snapshot(self.slug, runner=FakeRunner(rc=4, out="", err=err))
+        at = st.parse_iso(s["pending_events"][0]["at"])
+        self.assertGreaterEqual(at, before + src.DEFAULT_RESET_S - 2)
+        self.assertIn("tracker_rate_limited", s["notes"])
+
+    def test_other_adapter_errors_name_their_type_and_emit_no_reset(self):
+        err = json.dumps({"error": "org urlKey is not cynap", "code": 3, "type": "refused"})
+        s, _ = ws.run_snapshot(self.slug, runner=FakeRunner(rc=3, out="", err=err))
+        self.assertIn("tracker_error:rc=3:refused", s["notes"])
+        self.assertEqual(s["pending_events"], [])
 
     def test_schema_mismatch_fails_closed(self):  # R19
         bad = dict(TRACKER, schema="work-state-tracker/2")
@@ -401,7 +482,7 @@ class CacheAndCommands(unittest.TestCase):
         self.assertFalse(any(c[0] in ("gh", "git") for c in r.calls))
 
     def test_bind_refusals_and_carrier_idempotence(self):  # R2
-        kids = {c["id"] for c in TRACKER["children"]}
+        kids = {c["ticket"] for c in TRACKER["children"]}
         with self.assertRaises(st.SchemaError):
             st.bind(self.slug, "Z-1", children=kids, map_id="M-1")
         with self.assertRaises(st.SchemaError):

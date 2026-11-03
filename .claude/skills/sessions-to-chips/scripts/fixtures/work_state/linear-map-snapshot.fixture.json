@@ -1,0 +1,363 @@
+{
+  "schema": "work-state-tracker/1",
+  "map": {
+    "ticket": "TKT-1",
+    "title": "Map",
+    "state": {
+      "type": "backlog",
+      "name": "Backlog"
+    }
+  },
+  "taken_at": "2026-11-03T00:30:06.310Z",
+  "children_count": 21,
+  "page_size": 50,
+  "truncated": false,
+  "requests": [
+    {
+      "op": "SnapshotFirst",
+      "status": 200,
+      "x_complexity": 238,
+      "requests_remaining": 2499,
+      "complexity_remaining": 2999762
+    }
+  ],
+  "children": [
+    {
+      "ticket": "TKT-2",
+      "title": "Ticket 1",
+      "order": 0,
+      "created_at": "2026-10-26T22:09:35.806Z",
+      "updated_at": "2026-10-26T22:36:02.606Z",
+      "state": {
+        "type": "completed",
+        "name": "Done"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-3",
+      "title": "Ticket 2",
+      "order": 1,
+      "created_at": "2026-10-26T22:09:38.110Z",
+      "updated_at": "2026-10-27T15:59:57.007Z",
+      "state": {
+        "type": "completed",
+        "name": "Done"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-4",
+      "title": "Ticket 3",
+      "order": 2,
+      "created_at": "2026-10-26T22:09:40.267Z",
+      "updated_at": "2026-10-27T11:18:33.883Z",
+      "state": {
+        "type": "completed",
+        "name": "Done"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-5",
+      "title": "Ticket 4",
+      "order": 3,
+      "created_at": "2026-10-26T22:09:41.289Z",
+      "updated_at": "2026-10-27T13:23:53.507Z",
+      "state": {
+        "type": "backlog",
+        "name": "Backlog"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-6",
+      "title": "Ticket 5",
+      "order": 4,
+      "created_at": "2026-10-26T22:09:42.449Z",
+      "updated_at": "2026-10-26T22:36:01.724Z",
+      "state": {
+        "type": "completed",
+        "name": "Done"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-7",
+      "title": "Ticket 6",
+      "order": 5,
+      "created_at": "2026-10-26T22:09:43.468Z",
+      "updated_at": "2026-10-26T22:09:43.468Z",
+      "state": {
+        "type": "backlog",
+        "name": "Backlog"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-8",
+      "title": "Ticket 7",
+      "order": 6,
+      "created_at": "2026-10-26T22:09:44.346Z",
+      "updated_at": "2026-10-27T11:18:12.135Z",
+      "state": {
+        "type": "completed",
+        "name": "Done"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-9",
+      "title": "Ticket 8",
+      "order": 7,
+      "created_at": "2026-10-26T22:09:45.979Z",
+      "updated_at": "2026-10-27T11:18:35.847Z",
+      "state": {
+        "type": "completed",
+        "name": "Done"
+      },
+      "kind": "grill",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-10",
+      "title": "Ticket 9",
+      "order": 8,
+      "created_at": "2026-10-26T22:09:56.792Z",
+      "updated_at": "2026-10-27T11:18:34.829Z",
+      "state": {
+        "type": "completed",
+        "name": "Done"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-11",
+      "title": "Ticket 10",
+      "order": 9,
+      "created_at": "2026-10-26T22:14:41.167Z",
+      "updated_at": "2026-10-26T22:36:01.005Z",
+      "state": {
+        "type": "completed",
+        "name": "Done"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-12",
+      "title": "Ticket 11",
+      "order": 10,
+      "created_at": "2026-10-27T16:38:19.909Z",
+      "updated_at": "2026-10-27T21:40:20.984Z",
+      "state": {
+        "type": "backlog",
+        "name": "Backlog"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-13",
+      "title": "Ticket 12",
+      "order": 11,
+      "created_at": "2026-10-27T19:41:41.361Z",
+      "updated_at": "2026-10-27T21:40:21.525Z",
+      "state": {
+        "type": "backlog",
+        "name": "Backlog"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-14",
+      "title": "Ticket 13",
+      "order": 12,
+      "created_at": "2026-10-27T21:42:08.887Z",
+      "updated_at": "2026-10-27T21:46:44.412Z",
+      "state": {
+        "type": "completed",
+        "name": "Done"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-15",
+      "title": "Ticket 14",
+      "order": 13,
+      "created_at": "2026-10-28T07:42:54.066Z",
+      "updated_at": "2026-10-28T07:59:10.353Z",
+      "state": {
+        "type": "backlog",
+        "name": "Backlog"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-16",
+      "title": "Ticket 15",
+      "order": 14,
+      "created_at": "2026-10-28T12:29:37.369Z",
+      "updated_at": "2026-10-28T12:29:37.369Z",
+      "state": {
+        "type": "backlog",
+        "name": "Backlog"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-17",
+      "title": "Ticket 16",
+      "order": 15,
+      "created_at": "2026-10-28T14:53:02.091Z",
+      "updated_at": "2026-10-28T15:00:12.942Z",
+      "state": {
+        "type": "backlog",
+        "name": "Backlog"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-18",
+      "title": "Ticket 17",
+      "order": 16,
+      "created_at": "2026-11-01T08:13:04.234Z",
+      "updated_at": "2026-11-01T08:13:04.234Z",
+      "state": {
+        "type": "backlog",
+        "name": "Backlog"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-19",
+      "title": "Ticket 18",
+      "order": 17,
+      "created_at": "2026-11-01T08:13:04.968Z",
+      "updated_at": "2026-11-01T08:13:04.968Z",
+      "state": {
+        "type": "backlog",
+        "name": "Backlog"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-20",
+      "title": "Ticket 19",
+      "order": 18,
+      "created_at": "2026-11-01T08:13:12.800Z",
+      "updated_at": "2026-11-01T08:13:12.800Z",
+      "state": {
+        "type": "backlog",
+        "name": "Backlog"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-21",
+      "title": "Ticket 20",
+      "order": 19,
+      "created_at": "2026-11-01T16:59:31.830Z",
+      "updated_at": "2026-11-01T16:59:31.830Z",
+      "state": {
+        "type": "backlog",
+        "name": "Backlog"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    },
+    {
+      "ticket": "TKT-22",
+      "title": "Ticket 21",
+      "order": 20,
+      "created_at": "2026-11-02T23:26:01.500Z",
+      "updated_at": "2026-11-03T00:20:04.913Z",
+      "state": {
+        "type": "started",
+        "name": "In Progress"
+      },
+      "kind": "task",
+      "kind_inferred": true,
+      "blocked_by": [],
+      "blocks": [],
+      "errors": []
+    }
+  ],
+  "deidentified": true
+}

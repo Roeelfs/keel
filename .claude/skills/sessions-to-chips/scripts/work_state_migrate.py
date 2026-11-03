@@ -74,7 +74,7 @@ def _owed_tickets(state_text, children):
 
 def _children_from_cache(slug):
     data = (src.read_cache(slug).get("tracker") or {}).get("data")
-    return ({c["id"] for c in data.get("children") or []}, data) if data else (None, None)
+    return ({c["ticket"] for c in data.get("children") or []}, data) if data else (None, None)
 
 
 def plan(slug, manifest, *, state_text="", children=None, tracker=None, live_manager=False, now=None,
@@ -142,8 +142,8 @@ def plan(slug, manifest, *, state_text="", children=None, tracker=None, live_man
             todo.append({"key": f"bake:{t}", "do": f"R12 step 1 for merged ship {t}: adopt or ticket-add --kind bake "
                          f"--blocked-by {t} (verify it merged first), then re-run with --resolved bake:{t}"})
     for c in (tracker or {}).get("children") or []:
-        if c.get("kind_inferred") and c.get("kind") == "ship" and f"label:{c['id']}" not in resolved:
-            todo.append({"key": f"label:{c['id']}", "do": f"ticket-adopt --kind ship on {c['id']}"})
+        if c.get("kind_inferred") and c.get("kind") == "ship" and f"label:{c['ticket']}" not in resolved:
+            todo.append({"key": f"label:{c['ticket']}", "do": f"ticket-adopt --kind ship on {c['ticket']}"})
     out = {k: v for k, v in manifest.items() if k not in ("lanes", "claims")}
     out["bindings"] = bindings
     size = len((json.dumps(out, indent=2) + "\n").encode())
