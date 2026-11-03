@@ -51,3 +51,10 @@ P9, P10, P12 (probes above). Model-why regex-salvage (2 denials after `dca5ebf`)
 - 11-01 manager-sonnet policy: grade 2026-11-10+ with >=7 post days (3 days so far, main ctx sonnet share 77% vs 45.5%).
 - Lane E metrics vs 10-19: ctx/day +17% main, +29% all-Claude; per-turn flat (avg 240.9k); compaction null control 417k held (416.2k, n=209); max session turns 2,529 vs <=1,200 target FAILED; Desktop floor 126-132k vs <=118k FAILED.
 - Lane G: gate-carrier 92%, relay_when 2.8% (target <=2%), unblock-card shadow criterion 1 met (4.3% would-fire), criterion 2 owed.
+
+## Applied 2026-11-03 (founder: "Safe-auto only")
+- P4: `AGENTS.md` "1 PR in its lifetime" → "a handful of docs/tooling PRs (#1-#4)".
+- P17: lane G and lane E rows appended to `~/.claude/analytics/{harness-adoption,context-economy}/TRENDS.md` with the dead reply-shape columns marked n/a/retired.
+- P18: KILLED as unshipped per the 10-19 rule: `analytics/plugin-drift.jsonl` item (file absent). `bashOutputMaxChars` is a real key; dropped from the plan as a prioritisation, not falsified.
+- Backup before mutation: `~/.keel/backups/harness-sweep-pre-2026-11-03.tgz` (analytics dirs + keel AGENTS.md and docs).
+- Not applied (need go): P1, P2, P3, P5, P6, P7, P8, P11, P13 probe, P14, P15, P16.
