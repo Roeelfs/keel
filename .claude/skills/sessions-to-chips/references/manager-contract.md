@@ -567,7 +567,7 @@ A program is not a to-do list in a state file. Each manager owns exactly ONE **m
 labelled `wayfinder:map`, filed in the right Project with its Function label (repo law:
 `docs/agents/issue-tracker.md` §Wayfinding operations; the `/wayfinder` skill owns the shape:
 Destination, Notes, Decisions-so-far, Not-yet-specified, Out-of-scope). Declare it in the manifest as
-`map: {issue, url, project, snapshot_cmd}` when the program is declared (`snapshot_cmd` is the tracker adapter argv `work_state.py` runs; without it READY is logged `no_tracker`). A program that already has a map (e.g.
+`map: {issue, url, project, snapshot_cmd}` when the program is declared (`snapshot_cmd` is the tracker adapter argv `work_state.py` runs; without it READY is logged `no_tracker`). **Map census and status come only from that adapter (`linear-map.mjs snapshot --map <issue> --json`, real GraphQL: children, `blocked_by`, comments). Never count a map from `mcp__linear-cynap` `search_issues` or text search: it cannot read parent/child links or comments, so children go missing and the counts are not the map.** A program that already has a map (e.g.
 CYN-2724, CYN-2162, CYN-2198, CYN-2765) adopts it; one that has none creates it before dispatching
 anything. Use every wayfinder primitive: child tickets as native sub-issues labelled
 `wayfinder:<research|prototype|grilling|task>`, `blockedBy` edges, resolve = comment + Done + a line in
