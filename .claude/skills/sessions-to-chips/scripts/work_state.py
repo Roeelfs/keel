@@ -569,7 +569,7 @@ def _retire_allow(slug, programs=None):
             return False, f"{b['ticket']} is not closed in the tracker"
         if kid.get("kind") == "ship" and b.get("publication") and b["bake"] == "required":
             bake = _bake_child(b["ticket"], kids)
-            if not bake or (bake["id"] not in bound and (bake.get("state") or {}).get("type") not in CLOSED):
+            if not bake or (bake["ticket"] not in bound and (bake.get("state") or {}).get("type") not in CLOSED):
                 return False, f"merged ship {b['ticket']} retires only once its bake ticket's binding exists (R5)"
         return True, ""
     return allow

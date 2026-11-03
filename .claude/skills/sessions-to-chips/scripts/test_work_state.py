@@ -508,6 +508,15 @@ class CacheAndCommands(unittest.TestCase):
         with self.assertRaises(st.SchemaError):
             st.retire(self.slug, "T-6", allow=lambda b: (False, "not closed"))
 
+    def test_retire_allow_keys_the_bake_child_by_ticket(self):  # R5: tracker children carry `ticket`, never `id`
+        ws.run_snapshot(self.slug, runner=FakeRunner())  # warm the tracker cache: _retire_allow reads it (TTL hit)
+        ship = {"ticket": "T-1", "publication": {"sha": "a" * 40}, "bake": "required", "carriers": []}
+        ok, why = ws._retire_allow(self.slug)(ship)  # bake T-2 open and unbound
+        self.assertFalse(ok)
+        self.assertIn("bake ticket's binding", why)
+        st.bind(self.slug, "T-2", children={c["ticket"] for c in TRACKER["children"]}, map_id="M-1")
+        self.assertEqual(ws._retire_allow(self.slug)(ship), (True, ""))
+
     def test_unmigrated_manifest_fails(self):
         write_manifest(self.slug, lanes=[])
         with self.assertRaises(st.SchemaError):
