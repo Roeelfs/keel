@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import state_graph  # noqa: E402
@@ -333,6 +334,36 @@ def write_atomic(path, text):
             os.unlink(tmp)
 
 
+def show_in_chrome(path):
+    """Keep one viewable Chrome tab on the page: reload it if open, else open it unfocused. Never raises."""
+    if sys.platform != "darwin" or os.environ.get("RENDER_STATE_NO_OPEN"):
+        return "skipped"
+    url = "file://" + urllib.parse.quote(path)
+    script = (
+        'tell application "Google Chrome"\n'
+        '  if it is not running then return "closed"\n'
+        '  repeat with w in windows\n'
+        '    repeat with t in tabs of w\n'
+        f'      if URL of t starts with "{url}" then\n'
+        '        tell t to reload\n'
+        '        return "reloaded"\n'
+        '      end if\n'
+        '    end repeat\n'
+        '  end repeat\n'
+        '  return "none"\n'
+        'end tell'
+    )
+    try:
+        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=15)
+        state = res.stdout.strip() or "error"
+        if state in ("none", "closed"):
+            subprocess.run(["open", "-g", "-a", "Google Chrome", path], timeout=15, check=False)
+            return "opened"
+        return state
+    except (OSError, subprocess.SubprocessError):
+        return "error"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--program", required=True)
@@ -352,7 +383,7 @@ def main(argv=None):
         print(f"render_state: cannot write {out}: {exc}", file=sys.stderr)
         return 1
     print(json.dumps({"out": out, "problems": len(payload["problems"]),
-                      "graph": bool(payload["graph"]["html"])}))
+                      "graph": bool(payload["graph"]["html"]), "chrome": show_in_chrome(out)}))
     return 0
 
 

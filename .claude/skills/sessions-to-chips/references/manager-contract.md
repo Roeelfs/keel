@@ -382,7 +382,8 @@ owner and prerequisite where needed, or state that no requested work remains.
 
 **State viewer (founder, 2026-11-03).** `scripts/render_state.py --program <slug>` writes
 `<slug>.state.html`, the page the founder opens instead of reading a transcript. Run it on every state
-change and at every wake. Keep one fenced JSON `## VIEW` block above the AT-WAKE blocks in `<slug>.state.md`
+change and at every wake: it also reloads the page's Chrome tab, or opens one unfocused (`open -g`), so the
+founder always has a live viewable instance in Chrome (`RENDER_STATE_NO_OPEN=1` skips that). Keep one fenced JSON `## VIEW` block above the AT-WAKE blocks in `<slug>.state.md`
 and edit it in place each turn: `explanation`, `next_steps`, `upcoming`, `needs_you`, `decisions`, `proven`,
 `unproven`. Everything else on the page comes from its existing owner, so never copy it into VIEW. The page
 is derived: never hand-edit it or vary the template per program, and fix what its Problems panel reports.
