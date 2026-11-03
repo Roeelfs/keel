@@ -58,3 +58,9 @@ P9, P10, P12 (probes above). Model-why regex-salvage (2 denials after `dca5ebf`)
 - P18: KILLED as unshipped per the 10-19 rule: `analytics/plugin-drift.jsonl` item (file absent). `bashOutputMaxChars` is a real key; dropped from the plan as a prioritisation, not falsified.
 - Backup before mutation: `~/.keel/backups/harness-sweep-pre-2026-11-03.tgz` (analytics dirs + keel AGENTS.md and docs).
 - Not applied (need go): P1, P2, P3, P5, P6, P7, P8, P11, P13 probe, P14, P15, P16.
+
+## Applied 2026-11-03, round 2 (founder grill answers)
+- P15: `launchctl bootout` found the job already not loaded (it had exited 1 after the restart); `launchctl disable gui/$(id -u)/ai.local.workflow-wake` set, confirmed by `launchctl print-disabled`. The plist stays in `~/Library/LaunchAgents/` (re-enable with `launchctl enable`). Re-enrollment for the `musing-montalcini` staging owner is left to the monorepo.
+- P7: Codex CLI 0.166.0 (`codex --version`). Gates: `test_codex_dispatch.py` 17/17 OK; `~/.codex/config.toml` mtime unchanged (Nov 1 09:55), so `trusted_hash` rows are untouched; a throwaway luna lane via `codex-dispatch.sh` answered `OK` and exited 6 only on the 400-byte artifact floor (guard working, not a fault). Memory-v2 startup-token check not measured. P8: xhigh kept per founder.
+- P14: `copywriting` and `copy-editing` removed from keel (`d477dea`), links removed from `~/.claude/skills`, `~/.codex/skills`, `~/.agents/skills`; dangling-link sweep returns 0. Rest of the P14 list kept.
+- P1: NOT applied by this session. `hooks/capture-session-id.sh` and `hooks/bash-advisories.py` in `~/.claude` already carry uncommitted edits (literal-id worktree hint, advisory text) from another session; I left them untouched. The CLAUDE.md reword is still open.
