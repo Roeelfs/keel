@@ -28,7 +28,7 @@ install step.
   artifact the caller will check — a completion envelope reading `success` over an
   empty artifact is a dead lane. Applies to Codex lanes too: `codex exec` can exit 0
   having answered a different question.
-- **This repo has no CI and no PR gate** — 1 PR in its lifetime, 0 GitHub Actions runs,
+- **This repo has no CI and no PR gate** — a handful of docs/tooling PRs (#1-#4), 0 GitHub Actions runs,
   `.github/workflows/` absent; commits land direct to `master`. Do not propose
   CI-shaped guards here; a `gh pr merge` hook would have no call sites. Merge/CI
   friction observed in *product* repos belongs in those repos' own layer.
