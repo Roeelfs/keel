@@ -463,13 +463,25 @@
     if (!out.length) return null;
     return card('Held by', String(out.length), null, rows(out));
   }
+  /* A diagram drawn inside a hidden panel lays out at zero size, so a frame loads only once it is visible. */
+  var pendingFrames = [];
+  function loadFrame(frame, file) {
+    if (DIAGRAM_SRC.test(file)) frame.setAttribute('src', file); /* relative sibling only, never a remote URL */
+  }
+  function wakeFrames() {
+    pendingFrames = pendingFrames.filter(function (p) {
+      if (!p.frame.isConnected || p.frame.offsetParent === null) return true;
+      loadFrame(p.frame, p.file);
+      return false;
+    });
+  }
   var DIAGRAM_SRC = /^[A-Za-z0-9._-]+\.arch\/[0-9a-f]{12}\/[a-z0-9-]+\.html$/;
   function diagramFrame(file, title, lazy) {
     var box = el('div', { class: 'diagram' });
     var btn = el('button', { type: 'button' }, 'Full screen');
     var frame = el('iframe', { title: title, loading: lazy ? 'lazy' : null });
     frame.addEventListener('load', function () { frame.setAttribute('data-loaded', 'true'); });
-    if (DIAGRAM_SRC.test(file)) frame.setAttribute('src', file); /* relative sibling only, never a remote URL */
+    pendingFrames.push({ frame: frame, file: file });
     btn.addEventListener('click', function () { var on = box.classList.toggle('explore'); btn.textContent = on ? 'Close (Esc)' : 'Full screen'; });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && box.classList.contains('explore')) { box.classList.remove('explore'); btn.textContent = 'Full screen'; } });
     add(box, [el('div', { class: 'diagram-tools' }, el('span', { class: 'grow' }, title), el('a', { href: file, target: '_blank', rel: 'noreferrer' }, 'Open'), btn), frame]);
@@ -497,6 +509,7 @@
       add(holder, [el('p', { style: 'margin-bottom:10px' }, el('b', null, v.title), v.summary ? [' · ', changeLine(v.summary)] : null,
         v.note ? el('span', { class: 'under', style: 'display:block;color:var(--muted)' }, v.note) : null), diagramFrame(v.file, v.title)]);
       Array.prototype.forEach.call(tabsEl.children, function (b, j) { b.setAttribute('aria-pressed', String(i === j)); });
+      wakeFrames();
     }
     var tabsEl = el('div', { class: 'view-tabs' }, views.length > 1 ? views.map(function (v, i) { return el('button', { type: 'button', onclick: function () { show(i); } }, v.title); }) : null);
     var s = section('The system, changing', views[0] && views[0].summary ? changeLine(views[0].summary) : null, tabsEl, holder);
@@ -702,6 +715,7 @@
       var det = el('details', null, el('summary', null, 'Version from ' + clock(v.updated_at || v.archived_at) + ' · ' + plural((v.views || []).length, 'view')), holder);
       det.addEventListener('toggle', function () {
         if (det.open && !holder.children.length) (v.views || []).forEach(function (x) { add(holder, [el('p', { class: 'goal-under' }, x.title + (x.summary ? ' · ' + changeLine(x.summary) : '')), diagramFrame(x.file, x.title, true)]); });
+        if (det.open) wakeFrames();
       });
       var r = el('div', { class: 'row' }, det);
       r.setAttribute('data-search', ('architecture ' + (v.views || []).map(function (x) { return x.title; }).join(' ')).toLowerCase());
@@ -775,11 +789,13 @@
     currentTab = name;
     Object.keys(panels).forEach(function (k) { panels[k].hidden = k !== name; if (tabButtons[k]) tabButtons[k].setAttribute('aria-selected', String(k === name)); });
     if (persist) { try { sessionStorage.setItem('state-viewer-tab', name); } catch (_) {} }
+    wakeFrames();
   }
   function rerender() {
     var page = document.getElementById('page');
     var y = window.scrollY;
     page.textContent = '';
+    pendingFrames = [];
     build(page);
     showTab(currentTab, false);
     window.scrollTo(0, y);
