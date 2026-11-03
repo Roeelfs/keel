@@ -116,3 +116,13 @@ plugin is a local-directory marketplace, not compared.
 | 4 | `git -C ~/.claude commit -- skills/orchestrator` | `1c1a24d`, one deletion; reaper and LEARNINGS diffs untouched |
 
 Re-inventory (`claude plugin list`, post-refresh): chrome-devtools-mcp 1.9.0, code-review / context7 / linear f359d43b4060, telegram 0.0.7, vercel 0.50.0, codex 1.0.6, cynap-operator 0.19.197. Versions are recorded but **not compared to upstream**: a loop of `claude plugin update` over those six was outside the approved scope and was denied by the classifier, so it was not run. Most of these plugins are disabled. Not run (not approved): Codex CLI, MCP config, Matt Pocock/archify resync, workflow-wake restart.
+
+## Addendum 2: D2 restart (founder "yes restart", 2026-11-03)
+
+Result: **restarted, but the service exits 1 and stays down.** The Oct 18 forwarder timeout was only the first failure; the standing blocker is staging ownership.
+
+- Command: `launchctl kickstart -k gui/$(id -u)/ai.local.workflow-wake` (rc 0); then `launchctl list | grep workflow-wake` → `- 1 ai.local.workflow-wake`. `service.log` was backed up to the session scratchpad first.
+- `~/.claude/workflow-wake/service.err` (written at restart, not stale): `ValueError: worktree does not own staging` at `cynap-monorepo-next/tooling/sandbox/staging-wake-policy.py:36`, reached from `workflow-wake.py:71`.
+- Why: `cat cynap-monorepo-next/.git/staging-sync-owner` → `.../worktrees/musing-montalcini-59f011`. The enrollment's `cwd` is `.../worktrees/staging-lane` (locked, detached at 595362d7af, 2026-10-22). Staging ownership moved to another worktree, so the policy correctly refuses to wake.
+- Not done: editing `staging-sync-owner` or re-enrolling would take staging from the current owner. That is a decision for whoever owns the staging loop, in the monorepo.
+- Options: (a) re-enroll the wake service for the current owner worktree, (b) disable and unload `ai.local.workflow-wake` if the staging-lane loop is retired (`launchctl bootout`), (c) leave as is (harmless: exits, `KeepAlive false`).
