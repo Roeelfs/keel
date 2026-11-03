@@ -20,8 +20,8 @@ the catch-up lists in your state file and repoint anything that contradicts them
 ceiling is cross-cutting: it belongs in every program's state), (4) fix each numbered sweep gap,
 (5) only then new children. Own your program's absorbed scope: if you absorbed another manager
 (`absorbs` in your manifest), its live children and decisions are yours; acknowledge its
-`Taking over from ...` message by session id, put each child in your Units table, and confirm its
-handover sections are in your state file. If you ARE the absorbed manager and are still live, start no further
+`Taking over from ...` message by session id, bind each child to its map ticket (`work_state.py bind`,
+then `carrier --type session`; never a Units table), and confirm its handover sections are in your state file. If you ARE the absorbed manager and are still live, start no further
 child, hand your live children over at their next checkpoint, then fold. Close your turn with
 `updated_at` fresh in your state file: a state file older than your events is a stale handoff.
 
@@ -77,8 +77,8 @@ An opus spec or implementation lane needs no further justification: this policy 
 
 **Violation, and its check (graded by artifact).** A spec or diff authored by the manager, or by
 a sonnet/haiku lane, is a contract violation. For every spec file and every commit the program
-lands, the author recorded in the state file (the lane in `## AT-WAKE` or the Units table, with its
-runtime and model) and the artifact's own session or lane identifier (commit trailer, spec
+lands, the author recorded on its ticket's binding (`carriers[].runtime` and `carriers[].model`, read
+through `work_state.py snapshot`) and the artifact's own session or lane identifier (commit trailer, spec
 front matter) must name an `opus` lane or a Codex lane. The manager's own session id on a commit,
 or a spec written in the manager's transcript, fails the check. A failing artifact is rejected,
 never pushed, merged or forwarded to review: log it in `.events.jsonl`, discard it, and redo the
@@ -196,23 +196,38 @@ is GRILLING.
 
 1. Take ONE snapshot of the event the wake names (the PR's checks, the deploy SHA, the reset
    time, the lane's artifact). One read, never a loop.
-2. Re-read the state file (`<slug>.state.md`, last `## AT-WAKE`) and the map.
-3. Advance the WHOLE independent frontier in parallel (§Parallel by default, §The advance tick
-   steps 5–7), not only the item the wake was for.
-4. Re-arm: for each still-pending untracked event, ONE wake (doubled after an empty snapshot, max
-   2700 s), and write a new `## AT-WAKE` block with `Status:` and `Wake:`. Stop at the event's
-   terminal state.
+2. Run `python3 -I ~/.claude/skills/sessions-to-chips/scripts/work_state.py snapshot --program <slug>`
+   instead of re-reading the map and lane prose. It derives every map ticket's state and four flags
+   (UNBOUND, READY_NOT_DISPATCHED, STALLED, BAKE_OWED) from the tracker, the bindings, sessions,
+   lane rows and PRs.
+3. In ONE message: bind every UNBOUND (`bind`, or file the ticket first, then `bind`); run the
+   bake steps (§The deploy seam) for every BAKE_OWED; dispatch every READY_NOT_DISPATCHED (§Parallel
+   by default; each dispatch is `bind`, a tracked launch, then `carrier`); answer every
+   `awaiting_manager` entry; handle every STALLED: with no live carrier, salvage
+   (`git status --porcelain`), retire the dead carrier and continue in the same worktree (`--cwd`), so
+   one writer exists; with a live carrier, inspect or message it, never a second writer. Founder
+   questions go into one grill round.
+4. Re-arm ONE wake per `pending_events` entry and per still-pending untracked event (doubled after
+   an empty snapshot, max 2700 s); write a new `## AT-WAKE` block with `Status:`, `Wake:` and any
+   `Hold:` lines; post the map `State as of` comment opening with the snapshot's `map_line`, then every
+   open binding (ticket -> carriers, branch, worktree, publication) and every valid hold. Stop at the
+   event's terminal state.
 
 No polling loops, no `sleep`, no `Monitor` waits, no re-arm on an event that already reached its
 terminal state.
 
 **The guard.** `~/.claude/hooks/manager-arm-guard.sh` (logic `~/.claude/scripts/manager_arm_guard.py`)
-runs on Stop for any session titled `[Manager] …`. It finds the program by `manager_session`, else
-by title, reads the last `## AT-WAKE` block and the transcript, and blocks ONCE per turn when the
+runs on Stop for any session titled `[Manager] …`. It finds the program ONLY by the exact
+`manager_session` id (program_family; no title fallback, so write your own session id there at
+takeover), reads the last `## AT-WAKE` block and the transcript, and blocks ONCE per turn when the
 turn would end WORKING with no recorded future/tracked wake, no wake armed in the transcript, and
 no live background task. Its message is the fix: arm one wake and record it, or write
-`Status: GRILLING|DONE`. Decisions log to `~/.claude/analytics/manager-arm-guard.jsonl`; it fails
-open on any error; kill switch `MANAGER_ARM_GUARD=0`.
+`Status: GRILLING|DONE`. **Flag step:** before the arm check it runs `work_state.py guard
+--program <slug>` (no network, no git, 2 s) with the parsed state facts; the engine alone decides
+flags and exemptions, and exit 4 means UNBOUND or READY_NOT_DISPATCHED is blocking. It runs in
+SHADOW today (`would_block:<flag>` is logged, nothing blocks on it); a timeout or error logs
+`flags_skipped:<why>` and is counted (fail open). Decisions log to
+`~/.claude/analytics/manager-arm-guard.jsonl`; kill switch `MANAGER_ARM_GUARD=0`.
 
 ## Owned child continuation invariant
 
@@ -273,19 +288,39 @@ Declaring the files is every manager's first act, in either mode. A resume-mode 
 ```json
 { "program": "<slug>",
   "goal": "<outcome-shaped; allowed to be fuzzy — lanes give it precision>",
-  "manager_session": "<sid>",
-  "claims": { "issues": [], "paths": [], "branches": [] },
-  "map": { "issue": "CYN-n", "url": "", "project": "" },
+  "manager_session": "<this manager instance's exact session id>",
+  "map": { "issue": "<map ticket id>", "url": "", "project": "",
+           "snapshot_cmd": ["<tracker adapter argv; {map} is replaced>"], "snapshot_cwd": "<optional>",
+           "bake_exempt_deny": ["<optional extra globs a docs-only bake exemption never covers>"] },
   "orgs": [ { "slug": "<org>", "surface": "operator|owner" } ],
   "ceded": [ { "item": "…", "to": "<program>" } ],
   "shared_touch_not_owned": [],
-  "lanes": [ { "name": "", "kind": "headless|agent|codex|session", "where": "<branch or session>",
-               "artifact": "<the objective thing this lane must produce>", "status": "" } ],
+  "bindings": [ "<written only by work_state.py; schema below>" ],
   "gates_held_by_manager": [],
   "next_forcing_function": "<the one move that advances the program>",
   "updated_at": "YYYY-MM-DDTHH:MM:SSZ" }
 ```
 
+- **`bindings` — one per dispatched or claimed ticket, written ONLY by `work_state.py
+  bind|carrier|retire|migrate`** (atomic, under flock on `<slug>.json.lock`). Its schema has one owner,
+  the strict validator `validate_binding` in `scripts/work_state_store.py`: an unknown key, a missing
+  required key or a wrong type refuses the write. The shape:
+
+  ```json
+  { "ticket": "<id>", "bound_at": "<RFC3339 UTC>", "bake": "required|none:<reason>",
+    "carriers": [ { "type": "session|lane|agent|workflow|bg|card|wake|founder", "id": "<id>",
+                    "bound_at": "<RFC3339 UTC>", "runtime": "claude|codex", "model": "<alias>",
+                    "wave": "spec-review", "pid": 0, "pid_start": "<ps lstart>", "outfile": "<path>" } ],
+    "branch": "<head ref>", "worktree": "<abs path>", "artifact": "<the objective thing it must produce>",
+    "publication": { "repo": "owner/name", "pr": 0 },
+    "carve_out": false, "paths": ["<globs, never a root glob>"], "lease_s": 5400 }
+  ```
+
+  A push-shipped publication is `{ "repo", "sha": "<40 hex>", "via": "push" }`. Every reader goes
+  through the engine; re-read the manifest after any engine write. The keys `lanes` and `claims` are
+  deleted: `work_state.py migrate` converts `lanes`, and a manifest still holding either fails
+  `error: unmigrated`. A ticket's kind (ship, bake, task, grill) is a tracker fact the snapshot emits,
+  never a binding field.
 - `orgs` (optional, Cynap programs): every customer or test org the program touches, with the surface it
   works. Class (test|real) is never copied here: the SessionStart hook and `tooling/sandbox/org-registry.json`
   own it. Put the hook's `org=… class=…` line in each lane prompt; owner-surface work on a real org is
@@ -295,7 +330,8 @@ Declaring the files is every manager's first act, in either mode. A resume-mode 
 - `updated_at` is RFC3339 UTC **to the second**, so staleness is machine-evaluable; a date-only
   value makes the abandonment rule below unevaluable. Exact check:
   `python3 -c 'import json,sys,datetime as d;m=json.load(open(sys.argv[1]));t=d.datetime.strptime(m["updated_at"],"%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=d.timezone.utc);print((d.datetime.now(d.timezone.utc)-t).total_seconds()/3600)' <manifest>`
-- Update on every spawn, adoption, retire, and claim change. On program end mark `status: done`
+- Bindings change through the engine on every spawn, adoption and retire; hand-edit the other keys.
+  On program end mark `status: done`
   and keep the file: it is the ownership history.
 - Manifests written before this contract may carry `orchestrator_session` and
   `gates_held_by_orchestrator`; read them as the same fields and write the new names on the next update.
@@ -323,14 +359,19 @@ Remaining: <unfinished accepted work, or none with supporting evidence>
 ## AT-WAKE
 Status: <WORKING | GRILLING | DONE>
 Wake: <ScheduleWakeup <id> | bg:<task-id> | agent:<id> | workflow:<id> | session:<local_id>> fires <ISO-8601 UTC or "on exit"> (<size>s) on <event>; on fire: <the one action it takes>
+Hold: <ticket> <cap-codex | file-collision:<ticket> <glob,glob> | completion-mode | founder-gated:<grill>> <why>
+Mode: <completion, only under §Completion mode override>
 Next action: <one executable action, or none when the accepted outcome is verified>
 Owner: <agent/person responsible for that action>
 Prerequisite: <exact external state/approval required, or none>
 Stop condition: <completion, explicit stop, or the named external gate>
 ```
 
-`Status:` and `Wake:` are machine-read by the Stop guard (§No stop without an armed wake): the
-LAST `## AT-WAKE` block in the file wins, and within it the last `Status:` / `Wake:` line. Append
+`Status:`, `Wake:`, `Hold:` and `Mode:` are machine-read by the Stop guard (§No stop without an armed
+wake; `manager_arm_guard.py --state-facts` prints them): the LAST `## AT-WAKE` block in the file wins,
+and within it the last `Status:` / `Wake:` line. Every `Hold:` line in that block counts; a `Hold:` is
+the only valid reason a ready ticket waits, and `work_state.py` checks each reason deterministically
+(a failing one is `hold_invalid` and the ticket stays READY). Append
 a new block rather than editing an old one when the state changes.
 
 Update it at a milestone or a legitimate stopping boundary. If the next action is reachable and
@@ -343,14 +384,16 @@ owner and prerequisite where needed, or state that no requested work remains.
 
 - **Reason only about YOUR lanes.** Filter every machine-wide list (`list_sessions`,
   `claude agents --json`, the worktree registry) to manifest membership: lanes you started,
-  sessions you explicitly adopted (record the adoption), branches matching your claims. Foreign
+  sessions you explicitly adopted (bind them), branches matching your claims. Foreign
   activity is never your progress and never your stall; note it only where it overlaps your claims.
+- **Claims are bindings.** A program's claims are its open bindings' tickets, branches and `paths`;
+  cross-program collision checks read other manifests' `bindings` (there is no `claims` key).
 - **First claim wins.** The earliest manifest recording a claim owns it; the later manager
   re-scopes, stacks on the owner's branch, or cedes (`ceded`).
 - **Transfer, don't grab.** Ask the owning manager for the item (`send_message` on an
   operator-present turn, or an entry in its `.events.jsonl`); proceed only once its manifest
-  releases it. Abandoned means `updated_at` >24h stale AND no live manager session AND no active
-  lanes: then take it and record the takeover.
+  releases it. Abandoned means `updated_at` >24h stale AND no live manager session AND no live
+  carrier in its bindings: then take it and record the takeover.
 - **Contested live-vs-live → `AskUserQuestion`**, naming both goals and the overlapping item.
   Never silently double-own.
 - Path locking inside one repo goes through the repo's own claim-scope CLI where one exists. The
@@ -360,7 +403,9 @@ owner and prerequisite where needed, or state that no requested work remains.
 
 ## Per-turn state survey
 
-Never read raw session JSONL inline. Dispatch the state miner (`../prompts/state-miner.md`, cheap
+Your own carriers are never mined: `work_state.py snapshot` derives them (sessions, lanes, PRs) from
+the bindings, the session index and the lane rows. The survey below is for what the engine cannot
+see. Never read raw session JSONL inline. Dispatch the state miner (`../prompts/state-miner.md`, cheap
 tier) over both session pools — the `claude-sessions` and `codex-sessions` surveys, filtered to the
 project — and read its distilled summary; write the result to `<slug>.state.md`. A program often
 spans both runtimes; skipping a pool because "I'm not in that runtime" is the bug.
@@ -522,42 +567,56 @@ A program is not a to-do list in a state file. Each manager owns exactly ONE **m
 labelled `wayfinder:map`, filed in the right Project with its Function label (repo law:
 `docs/agents/issue-tracker.md` §Wayfinding operations; the `/wayfinder` skill owns the shape:
 Destination, Notes, Decisions-so-far, Not-yet-specified, Out-of-scope). Declare it in the manifest as
-`map: {issue, url, project}` when the program is declared. A program that already has a map (e.g.
+`map: {issue, url, project, snapshot_cmd}` when the program is declared (`snapshot_cmd` is the tracker adapter argv `work_state.py` runs; without it READY is logged `no_tracker`). A program that already has a map (e.g.
 CYN-2724, CYN-2162, CYN-2198, CYN-2765) adopts it; one that has none creates it before dispatching
 anything. Use every wayfinder primitive: child tickets as native sub-issues labelled
-`wayfinder:<research|prototype|grilling|task>`, `blockedBy` edges, the frontier query, claim-by-assignee,
-resolve = comment + Done + a line in Decisions-so-far.
+`wayfinder:<research|prototype|grilling|task>`, `blockedBy` edges, resolve = comment + Done + a line in
+Decisions-so-far. Every new child is created in the team's first `unstarted` state, never Backlog: a
+ticket that must wait carries a `blocks` relation on what it waits for, or a valid `Hold:`.
+- **A claim is a binding** written by `work_state.py bind`; the tracker assignee is not a claim (every
+  agent is one tracker user). A dead binding surfaces as STALLED.
+  Revised: founder 2026-11-03 (in-session approval of the work-state engine)
+- **The frontier is `snapshot.frontier`**: the map's `ready` children in map order, derived by
+  `work_state.py` (closed, else active when bound, else blocked by an open dispatch-blocking
+  relation, else ready; a ship -> ship relation stacks and never blocks dispatch).
+  Revised: founder 2026-11-03 (in-session approval of the work-state engine)
 
 What differs from a vanilla wayfinder map: it is **living**. The manager adds to it as it goes.
 - **Every new piece of work becomes a map ticket in the same turn it is discovered**, before any lane
   is dispatched for it: a finding, a defect, a dead end that needs a replacement path, a review
   finding, a gate, a founder ruling with consequences, a bake that came back red. No lane runs on
-  work that is not a ticket under the map; the Units table is a view of the frontier, never a
-  second list.
+  work that is not a ticket under the map, and no carrier runs outside a binding (UNBOUND); there is
+  no second list.
 - Specs, spec reviews (tier per the rule below), builds, verify-release and bakes are tickets or
   phases of tickets under the map, so "review, workflow and rules" are visible on the map itself.
 - **The goal is the map's Destination.** The manager's job every turn is to advance the frontier: all
   independent unblocked tickets move in parallel (§Parallel by default); it never idles while the
   frontier is non-empty. The map completes only when the Destination criteria are met and verified,
   every child is Done or Canceled, and Not-yet-specified is empty. Then the end state is DONE.
-- **The founder outline is the map.** Every manager report opens with one Map line: `Map CYN-n:
-  done X / open Y / blocked Z; frontier now: <tickets in flight>; needed from you: <the grill round,
+- **The founder outline is the map.** Every manager report opens with the snapshot's `map_line`
+  (`Map <id>: done X / open Y / blocked Z; frontier now: …`) followed by `; needed from you: <the grill round,
   recommended answer first, kits for human steps, or "nothing">`. That replaces ad-hoc status and
   tells the founder what is needed without a question from them.
 - **Arm yourself and drive to completion (founder, 2026-10-26).** A manager never ends a turn with
   the frontier non-empty, nothing in flight and no wake armed: that is a stalled program. At turn end
   check three things and fix the failing one in the same turn: (1) every in-flight lane has a live
   tracked task or an armed wake (§Every dispatch has a wake); (2) everything newly discovered this turn
-  is a map ticket; (3) every independent unblocked ticket is dispatched, or its blocker is named on
-  the ticket. The only legitimate stops are a GRILLING round (the founder's decisions, recommended
+  is a map ticket; (3) every ready ticket is dispatched, or blocked by a tracker `blocks` relation, or
+  named by a valid `Hold:` in the last AT-WAKE, which the `State as of` comment mirrors. The engine
+  checks (1) and (3) as STALLED / READY_NOT_DISPATCHED.
+  Revised: founder 2026-11-03 (in-session approval of the work-state engine)
+  The only legitimate stops are a GRILLING round (the founder's decisions, recommended
   answer first) or DONE (Destination verified). "Waiting for the user" with a ready ticket is neither.
 - Linear is the record (repo law): comments and states live on the tickets; the `.state.md` only
   points to the map and holds the AT-WAKE pointer.
 - **The map must let a stranger resume (founder, 2026-10-27).** The test: a new manager on another
   account, reading only the map and its tickets, finds the real state without your transcript.
-  So (1) every in-flight lane, branch, worktree and PR is named on a ticket with its owner;
+  So (1) every in-flight carrier, branch, worktree and publication is named in the newest `State as
+  of` map comment, rendered from the bindings (resume tick step 4);
   (2) each ticket's state matches reality (Done only with a closing comment that cites the
-  verifying object; merged-but-unbaked and claimed-but-unverified stay open, labelled as such);
+  verifying object; a ship goes Done at merge and its open bake ticket is the merged-but-unbaked
+  record; claimed-but-unverified stays open, labelled as such);
+  Revised: founder 2026-11-03 (in-session approval of the work-state engine)
   (3) one dated comment on the MAP headed `State as of <ISO time>` is posted anew at every turn that
   changes anything, at takeover (reconcile first: tickets for every gap the dispatcher's sweeps
   found), and before any wrap-up: done/open/blocked, merged vs claimed vs unproven, and what is
@@ -644,7 +703,7 @@ exception and needs a reason (a true data or ordering dependency).
   live lane writes. Dispatch all of it in one message: headless lanes, Codex lanes, `Agent`
   subagents, and child sessions where the human must judge.
 - **Caps, not serialization:** Codex fan-out ≤5 (one spec-review wave of 6); one writer per file
-  set; a lane that would touch another live lane's files waits or stacks on its branch.
+  set (this line is the cap's one owner: `work_state.py` reads it for the `cap-codex` hold); a lane that would touch another live lane's files waits or stacks on its branch.
 - **A blocker blocks only its dependents.** Stack on the unmerged branch (§Autonomous stretches),
   dispatch the next spec lane while the last spec reviews, run research beside implementation, and grill
   open decisions while lanes run.
@@ -658,14 +717,14 @@ The canonical failure: every lane drives to "green + READY", the DAG roots on on
 gate, and the night produces polling wakes and zero development.
 
 1. **Stack, don't park.** A lane blocked on an unmerged PR branches its worktree off that PR's
-   branch, builds there, and rebases after the merge. Record the edge on the manifest lane
-   (`stacked_on: <pr>`).
+   branch, builds there, and rebases after the merge. Record the edge as a ship -> ship `blocks`
+   relation on the tracker (it stacks; it never blocks dispatch). The frontier is `snapshot.frontier`.
 2. **Ask for pre-authorization BEFORE the human leaves** (`AskUserQuestion`): present the
    projected merge stack and ask for standing approval per class. A decline is fine; then plan
    around the gate by stacking. Discovering the gate at 2am is the failure.
 3. **Deliberate park.** If the frontier is genuinely empty, persist the ready-to-merge stack and
    the exact resume prerequisite, then stop. Never schedule checks of a gate only a human can open.
-4. **Refresh the frontier on every event.** A merge, a lane exit, or an operator message re-opens
+4. **Refresh the frontier on every event** (`work_state.py snapshot`). A merge, a lane exit, or an operator message re-opens
    the computation; newly un-gated work dispatches at once.
 
 ## The advance tick — one unattended wake, many lanes
@@ -685,21 +744,17 @@ been violated by the survey.
 3. **Owned child active?** That is internal work, not an external wait — continue with
    latency-sized event waits inside its lease (§Owned child continuation invariant). Do not
    proceed to step 7 and start something new alongside it.
-4. **Survey once**, cache-diffed (§Per-turn state survey). One snapshot per wake, never a
-   poll loop.
+4. **Survey once**: `work_state.py snapshot --program <slug>`, cache-diffed (§Per-turn state survey).
+   One snapshot per wake, never a poll loop.
 5. **Classify each lane — artifact and liveness are SEPARATE questions.** Artifact grading
-   is §Grading a lane. Liveness has two known-wrong probes, and both fail toward the
-   expensive error:
-   - `ps aux | grep -c "[c]laude -p"` returns **0 for healthy lanes** — the real command
-     line is `…/bin/claude --permission-mode … -p`, so `claude -p` is never a contiguous
-     substring. Use `ps -eo pid,etime,args | grep "[b]in/claude"`, and **sanity-control it
-     against a lane you know is running before believing any negative.**
-   - A **0-byte output file is not death**: `--output-format json` writes its blob only at
-     exit, so mid-run it is identical to a lane that never started.
-   Measured 2026-08-04: three live lanes were seconds from being declared dead and
-   re-dispatched, which would have raced two writers into one worktree.
-6. **Invoke the existing frontier** (§Autonomous stretches) to compute what is reachable
-   without a human. Do not reimplement that computation here; a second slightly-different
+   is §Grading a lane. Liveness is `work_state.py`'s (§2.1 of its spec): a lane is live when its
+   recorded pid is alive with its recorded start time, never matched by binary name; a session by
+   `program_family.session_live()`. Do not hand-probe with `ps | grep`; both known hand probes failed
+   toward the expensive error, and a **0-byte output file is not death** (`--output-format json` writes
+   its blob only at exit). Measured 2026-08-04: three live lanes were seconds from being declared dead
+   and re-dispatched, which would have raced two writers into one worktree.
+6. **Invoke the existing frontier**: `snapshot.frontier` (§Autonomous stretches) is what is
+   reachable without a human. Do not reimplement that computation here; a second slightly-different
    copy of it is the defect, not the feature.
 7. **Dispatch every independent forcing function on the frontier at once**,
    within the phase and review budget, under the caps in §Parallel by default. A dead lane is salvaged
@@ -724,6 +779,29 @@ is present in the target environment (§Pre-flight verification); only then disp
 grade a keyed `verify-release`. If the wake fired early and the SHA is absent, no verifier
 runs — retain the keyed wake artifact, re-arm it once at double the delay (max 2700 s) and
 record it, and end the bounded task.
+
+**A merged ship's bake is its own map ticket (BAKE_OWED).** In the same turn the snapshot raises
+BAKE_OWED for a merged publication (a PR's `mergedAt`, or a push SHA) whose binding is not
+`bake: none:<reason>`, run, each step idempotent: (1) adopt an open bake-kind child already blocked by
+the ship, else file one with the tracker adapter (`Bake: <ship title>`, blocked by the ship, created
+`unstarted`), body from `work_state.py bake-body <ship>`; (2) resolve the ship Done at merge if still
+open; (3) `work_state.py bind --ticket <bake>` with a `wake` carrier at the deploy p90 (27 min) for a
+PR-deployed repo (for a push-shipped repo the push is the deploy, so step R13 runs at once); (4)
+`retire` the ship binding. When the wake fires, the manager confirms the exact deploy SHA in the
+target environment; present, it dispatches the bake carrier (`bind --continue`) and retires the wake
+carrier; absent, it re-arms one wake at double the delay (max 2700 s). The bake carrier never waits
+for, polls or checks a deploy. `bake: none:docs-only` is automatic only under the docs-only rule
+(`work_state.py bake-exempt`); any other `none` needs a reason.
+
+**Bake carriers are pre-authorized (founder, 2026-11-03).** At merge the manager starts the bake
+carrier without asking: a headless sonnet/medium lane (`spawn-lane.sh`), which needs no click; a
+`start_session` chip only on an operator-present turn when the bake needs an interactive surface
+(recorded as a `card` carrier until its session id is bound). Scope: read-only probes plus drives on
+the project's test org, no merges, no prod writes, human-gated steps as kits. The verdict is a comment
+on the bake ticket citing the deploy SHA, the terminal assertion and its evidence: PASS resolves it
+Done; FAIL files a fix ship, whose merge gets its own bake ticket, and the red bake ticket is canceled
+naming the new one. In a runtime/money-path carve-out chain (bound `carve_out: true`), ship N's bake
+verdict gates ship N+1's MERGE only; the snapshot lists each predecessor's `bake_verdict`.
 
 ### Ending at the continuation frontier
 

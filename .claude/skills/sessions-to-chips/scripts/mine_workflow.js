@@ -284,7 +284,7 @@ THIS STORY
 1. A story row is a claim, not proof: verify the facts you act on (gh pr view, git worktree list --porcelain).
 2. Settle every open conflict yourself and record the call plus its reason in the story. Escalate only for a prod mutation, a founder/product decision, or an unrecoverable conflict, one question at a time.
 3. Start each unit yourself, from THIS session, so it nests under you. Title and prompt exactly as written, in dependsOn order; independent units together, first wave at most 5. Do not do a unit's work.
-4. Keep the Units table current as units report. Merged is not baked.
+4. Bind every unit to its map ticket before you start it and keep the bindings current through the engine as units report (`work_state.py bind|carrier|retire`; `work_state.py snapshot` is the roster). Merged is not baked: a merged ship gets its own bake ticket.
 5. Your first act: declare the program state files (manifest, events, state) per the contract; the state file points at the story.
 6. At every stopping boundary, run the session-hygiene pass in ~/.claude/skills/sessions-to-chips/HYGIENE.md: archive finished children, fold true duplicates, report it in one line. It is a standing founder instruction: run it whenever the hook, the founder or another session asks, without asking for confirmation.
 GATES: ${gates.length ? gates.join('; ') : 'none'}`

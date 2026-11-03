@@ -42,12 +42,13 @@ class AdvanceTickTests(unittest.TestCase):
         # budget that replaced it, not the word the retirement deleted.
         self.assertIn("within the phase and review budget", TICK)
 
-    def test_the_known_wrong_liveness_probe_is_named_as_wrong(self):
-        # This probe returns 0 for HEALTHY lanes; believing it re-dispatches live work.
-        self.assertIn('grep -c "[c]laude -p"', TICK)
-        self.assertIn("0 for healthy lanes", TICK)
-        self.assertIn('grep "[b]in/claude"', TICK)
-        self.assertIn("sanity-control", TICK.lower())
+    def test_lane_liveness_points_at_its_one_owner(self):
+        # Liveness has one owner (work_state.py: pid + recorded start time). The tick points at it
+        # and must not carry a hand probe beside it: both known hand probes failed toward the
+        # expensive error (re-dispatching live work).
+        self.assertIn("Liveness is `work_state.py`'s", TICK)
+        self.assertIn("never matched by binary name", TICK)
+        self.assertNotIn("ps -eo pid,etime,args", TICK)
 
     def test_a_zero_byte_output_is_not_treated_as_death(self):
         self.assertIn("0-byte output file is not death", TICK)

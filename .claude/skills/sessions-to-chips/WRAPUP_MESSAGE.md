@@ -5,7 +5,7 @@ Your live child sessions at last check:
 
 Everything must survive the switch: session history will not be readable from the other account. State that matters lives in git, Linear, and the note below, never in a session's memory.
 
-1. Classify each child (list_sessions / your Units table):
+1. Classify each child (list_sessions / `work_state.py snapshot --program <slug>`: its items and bindings):
    - DONE: PR merged and its post-merge tail done. Cite the PR and mergedAt. Merged is not baked: list any bake still owed as UNPROVEN.
    - RUNNING: a build, verify, Codex or headless lane, or an agent turn is in progress. Do not interrupt it. Ask the child to finish to its next checkpoint (push or record its work, then stop) with one message. Re-check once when it reports idle; do not poll.
    - PARKED: blocked or gated. One line on why and on exactly what (a founder decision, a merge go-ahead, a prod gate, a usage reset).
@@ -15,7 +15,7 @@ Everything must survive the switch: session history will not be readable from th
 3. Linear is the record. For every ticket a child touched: post one comment with status (shipped with PR and mergedAt, parked and why, unproven and the exact probe), and set the state to match reality. Never write a CYN- number you did not get back from the tracker. If the Linear MCP is unavailable, write the intended comment into your note under "Linear owed" instead.
 4. Archive only DONE children whose work is merged and recorded. Archiving a session archives its children, and it is refused while a child works. Never archive a RUNNING, PARKED or LIVE-WORK child. Never delete anything. When unsure, leave it open and say so.
 5. Merge: where two children cover one piece of work, carry the loser's remaining steps and worktree path into the survivor's notes, then archive the loser only if it has no live work.
-6. Update your story/map: Units table current, plus a closing section (shipped with PR and mergedAt; parked and why; still unproven). Then make the Linear map resumable by a stranger: every lane/branch/PR on a ticket with its owner, ticket states true to reality, and one new comment on the map headed `State as of <ISO time>` (done/open/blocked, merged vs claimed vs unproven, owed from the founder); name its URL in your note.
+6. Update your story/map: bindings current through the engine (`work_state.py bind|carrier|retire`), plus a closing section (shipped with PR and mergedAt; parked and why; still unproven). Then make the Linear map resumable by a stranger: every lane/branch/PR on a ticket with its owner, ticket states true to reality, and one new comment on the map headed `State as of <ISO time>` (done/open/blocked, merged vs claimed vs unproven, owed from the founder); name its URL in your note.
 7. Write the checkpoint note to ~/.claude/sessions-to-chips/wrapup/{{DATE}}-{{CATEGORY_SLUG}}.md with:
    - counts before and after;
    - what you archived, with the evidence for each;

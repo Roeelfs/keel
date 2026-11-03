@@ -56,7 +56,7 @@ A candidate is acted on only when **all** of these hold. One failure and it stay
   into your own "Owed to the founder" grill round, with the exact question and its recommended answer, then archive.
 - Work is safe: `git -C <worktree> status --porcelain` is empty and `git -C <worktree> log @{u}..`
   prints nothing, or the worktree is shared, gone, or recorded as abandoned on purpose.
-- Its follow-ups live somewhere durable: your Units table, the tracker, or a card.
+- Its follow-ups live somewhere durable: a map ticket (bound through `work_state.py bind`), the tracker, or a card.
 
 **What a kept session is.** A session stays open only if it is WORKING (a test, bake, preview,
 build, spec or review is running, or it manages active children, each with an artifact it will
