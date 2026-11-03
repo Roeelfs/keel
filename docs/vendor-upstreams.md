@@ -226,3 +226,9 @@ No upstream interface stubs were adopted.
 
 Packaging also trims upstream trailing whitespace in copywriting/copy-frameworks.md
 and langfuse/cli.md so the canonical diff check remains clean.
+
+- 2026-11-03 removal (improve-harness sweep, founder-approved): `copywriting` and `copy-editing`
+  deleted from keel. Zero Skill-tool uses and zero slash invocations in the 2026-10-19..11-03
+  window; referenced only by each other and one prose pointer in `content-strategy`
+  ("For writing individual content pieces"). Upstream history above stays as the record;
+  re-adopt from the recorded upstream commit if needed.
