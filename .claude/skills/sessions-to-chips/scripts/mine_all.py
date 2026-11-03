@@ -224,10 +224,11 @@ def mine(a):
         mgrs = [manager_facts(rows[s], chains.get(s) or {"members": tc.files_named(rows[s].get("cliSessionId"), projects),
                                                          "pre_window": [], "projects": projects}) for s in f["managers"]]
         cp, cp_src, cp_sid = checkpoint_for(mgrs, here, floor)
-        # Live = some unarchived session of the program was active in the window. A program whose
-        # whole family is archived is closed: listed, never mined.
+        # Live = some session of the program is present over the window (program_family: live by the
+        # one liveness predicate, or ended a turn inside the window and awaits its manager). A program
+        # whose whole family is archived is closed: listed, never mined.
         family = [rows[s] for s in f["managers"] + f["lineage"]]
-        live = any(not r.get("isArchived") and ts_of(r) >= floor for r in family)
+        live = any(pf.session_present(r, now, now - floor) for r in family)
         # Moved = anything the checkpoint manager has not seen: another instance's turn or any
         # lineage session's activity after the checkpoint.
         other = [m["last_turn"] for m in mgrs if m["last_turn"] != cp] + [ts_of(rows[s]) for s in f["lineage"]]

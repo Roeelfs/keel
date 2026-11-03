@@ -67,11 +67,137 @@ def load_store(store=None):
     return rows, bad, accounts
 
 
+# ---------- session index: the guard path never parses the whole store ----------
+# Per local_*.json: (mtime_ns, size) and the fields liveness, lineage and identity read. A refresh
+# stats every file and re-parses only the changed ones (measured 2026-11-03: a full parse of the
+# 1,707-row / 615 MB store takes 4.7-6.3 s; a stat pass takes tens of ms).
+INDEX = os.environ.get("S2C_SESSION_INDEX") or os.path.join(HOME, "state/work-state/session-index.json")
+INDEX_VERSION = 1
+TURN_ENDED = frozenset({"completed", "blocked", "review_ready"})
+
+
+def _index_row(d, acct, org, f):
+    summary = d.get("postTurnSummary") if isinstance(d.get("postTurnSummary"), dict) else {}
+    return {"sessionId": d.get("sessionId") or os.path.basename(f)[:-5], "cliSessionId": d.get("cliSessionId"),
+            "title": d.get("title") or "", "spawnedFrom": d.get("spawnedFrom"), "isArchived": bool(d.get("isArchived")),
+            "lastActivityAt": d.get("lastActivityAt"), "lastAssistantUuid": d.get("lastAssistantUuid"),
+            "postTurnSummaryFor": d.get("postTurnSummaryFor"), "status_category": summary.get("status_category"),
+            "lastTurnReport": d.get("lastTurnReport") if isinstance(d.get("lastTurnReport"), str) else None,
+            "writtenBranches": d.get("writtenBranches") or [], "prs": [
+                {k: p.get(k) for k in ("prNumber", "repo", "branch", "state")} for p in d.get("prs") or []
+                if isinstance(p, dict)],
+            "cwd": d.get("cwd"), "worktreePath": d.get("worktreePath"),
+            "_acct": acct, "_org": org, "_file": f}
+
+
+def session_index(store=None, index_path=None, write=True):
+    """-> {sessionId: row}. Incremental over the store; rewrites the index atomically when anything
+    changed. Never raises on one unreadable file (that row keeps its previous parse, or is skipped)."""
+    store, index_path = store or STORE, index_path or INDEX
+    try:
+        with open(index_path) as fh:
+            old = json.load(fh)
+        if old.get("version") != INDEX_VERSION:
+            old = {}
+    except (OSError, ValueError):
+        old = {}
+    prev, files, changed = old.get("files") or {}, {}, False
+    for acct in sorted(os.listdir(store)) if os.path.isdir(store) else []:
+        adir = os.path.join(store, acct)
+        if not os.path.isdir(adir):
+            continue
+        for org in sorted(os.listdir(adir)):
+            odir = os.path.join(adir, org)
+            try:
+                names = os.listdir(odir)
+            except OSError:
+                continue
+            for n in names:
+                if not (n.startswith("local_") and n.endswith(".json")):
+                    continue
+                f = os.path.join(odir, n)
+                try:
+                    st = os.stat(f)
+                except OSError:
+                    continue
+                key = [st.st_mtime_ns, st.st_size]
+                p = prev.get(f)
+                if p and p.get("key") == key:
+                    files[f] = p
+                    continue
+                try:
+                    with open(f) as fh:
+                        d = json.load(fh)
+                except (OSError, ValueError):
+                    if p:
+                        files[f] = p
+                    continue
+                files[f] = {"key": key, "row": _index_row(d, acct, org, f)}
+                changed = True
+    if set(files) != set(prev):
+        changed = True
+    if changed and write:
+        try:
+            os.makedirs(os.path.dirname(index_path), exist_ok=True)
+            tmp = f"{index_path}.{os.getpid()}.tmp"
+            with open(tmp, "w") as fh:
+                json.dump({"version": INDEX_VERSION, "files": files}, fh)
+            os.replace(tmp, index_path)
+        except OSError:
+            pass
+    return {v["row"]["sessionId"]: v["row"] for v in files.values()}
+
+
+def fresh_category(row):
+    """The post-turn status_category, only when it describes the CURRENT last turn."""
+    summary = row.get("postTurnSummary") if isinstance(row.get("postTurnSummary"), dict) else {}
+    cat = row.get("status_category") or summary.get("status_category")  # index row | raw store row
+    if cat and row.get("postTurnSummaryFor") and row.get("postTurnSummaryFor") == row.get("lastAssistantUuid"):
+        return cat
+    return None
+
+
+def session_live(row, now, lease_s):
+    """THE session-liveness predicate (one owner): not archived, and either a fresh non-terminal
+    status_category, or no fresh category and lastActivityAt within lease_s."""
+    if not row or row.get("isArchived"):
+        return False
+    cat = fresh_category(row)
+    if cat:
+        return cat not in TURN_ENDED
+    return now - tc.parse_ts(row.get("lastActivityAt")) <= lease_s
+
+
+def parse_last(row):
+    return tc.parse_ts((row or {}).get("lastActivityAt"))
+
+
+def awaiting_manager(row):
+    """A turn that ended (completed / blocked / review_ready) and waits on its manager."""
+    return bool(row) and not row.get("isArchived") and fresh_category(row) in TURN_ENDED
+
+
+def session_present(row, now, window_s):
+    """Live over the window, or its turn ended inside the window and it awaits its manager. Built on
+    session_live (the one predicate): a manager that just ended a turn is present, not live."""
+    return session_live(row, now, window_s) or (awaiting_manager(row) and now - parse_last(row) <= window_s)
+
+
+def resolve_program(row, manifests, chain_stems=()):
+    """The ONE program-identity resolver: the newest manifest whose manager_session (or legacy
+    orchestrator_session) names this manager instance exactly: its local id, CLI id, or any
+    transcript stem of its continuation chain. No title matching. -> manifest or None."""
+    return manifest_for(instance_ids(row, chain_stems), manifests) if row else None
+
+
 def load_manifests(programs_dir=None):
     out = []
     for f in glob.glob(os.path.join(programs_dir or os.path.join(HOME, "orchestrator/programs"), "*.json")):
+        if "." in os.path.basename(f)[:-5]:
+            continue  # variant snapshots (<slug>.interrupted-wip.json and the like)
         try:
-            d = json.load(open(f))
+            with open(f) as fh:
+                d = json.load(fh)
         except (OSError, ValueError):
             continue
         if not isinstance(d, dict) or not d.get("program"):
