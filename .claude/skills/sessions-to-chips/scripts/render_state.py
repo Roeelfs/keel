@@ -338,6 +338,8 @@ def show_in_chrome(path):
     """Keep one viewable Chrome tab on the page: reload it if open, else open it unfocused. Never raises."""
     if sys.platform != "darwin" or os.environ.get("RENDER_STATE_NO_OPEN"):
         return "skipped"
+    if not os.path.abspath(path).startswith(os.path.expanduser("~/.claude/orchestrator/programs") + os.sep):
+        return "skipped"
     url = "file://" + urllib.parse.quote(path)
     script = (
         'tell application "Google Chrome"\n'
@@ -356,9 +358,6 @@ def show_in_chrome(path):
     try:
         res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=15)
         state = res.stdout.strip() or "error"
-        if state in ("none", "closed"):
-            subprocess.run(["open", "-g", "-a", "Google Chrome", path], timeout=15, check=False)
-            return "opened"
         return state
     except (OSError, subprocess.SubprocessError):
         return "error"
