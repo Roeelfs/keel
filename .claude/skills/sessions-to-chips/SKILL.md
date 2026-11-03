@@ -253,7 +253,7 @@ Depth and evidence for each rule are in [`references/manager-contract.md`](refer
 - **Program state is three bounded files, declared first in either mode,** under `~/.claude/orchestrator/programs/`: a manifest
   (strict keys, ≤~8 KB, `updated_at` to the second), an append-only `.events.jsonl`, and a
   `.state.md` with a completion checkpoint and `## AT-WAKE`.
-- **The founder's view is `scripts/render_state.py --program <slug>`:** run it on every state change and at every wake, and keep the `.state.md` `## VIEW` block current (manager-contract.md "State viewer").
+- **The founder's view is `scripts/render_state.py --program <slug>`:** run it on every state change and at every wake, then edit only the VIEW keys its stdout `author` line names. You own three inputs: manifest `repos`, the `state-view/2` `## VIEW` block and `<slug>.arch.json`; everything else is derived (manager-contract.md "State page").
 - **Pick the lane runtime by deliverable:** headless lane (`~/.claude/scripts/spawn-lane.sh`) for a
   branch or PR, `Agent`/`Workflow` for information, a Codex lane for a crisp off-window pass, a child
   session only when the human must judge. **Probe a headless Claude lane first:**

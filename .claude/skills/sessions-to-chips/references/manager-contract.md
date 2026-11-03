@@ -380,14 +380,31 @@ it and record it on the `Wake:` line (§No stop without an armed wake); only a h
 the turn unarmed, as `Status: GRILLING`. In the final reply, list remaining actions in order, with
 owner and prerequisite where needed, or state that no requested work remains.
 
-**State viewer (founder, 2026-11-03).** `scripts/render_state.py --program <slug>` writes
-`<slug>.state.html`, the page the founder opens instead of reading a transcript. Run it on every state
-change and at every wake: it also reloads the page's Chrome tab, or opens one unfocused (`open -g`), so the
-founder always has a live viewable instance in Chrome (`RENDER_STATE_NO_OPEN=1` skips that). Keep one fenced JSON `## VIEW` block above the AT-WAKE blocks in `<slug>.state.md`
-and edit it in place each turn: `explanation`, `next_steps`, `upcoming`, `needs_you`, `decisions`, `proven`,
-`unproven`. Everything else on the page comes from its existing owner, so never copy it into VIEW. The page
-is derived: never hand-edit it or vary the template per program, and fix what its Problems panel reports.
-Schema and owners: `specs/2026-11-03-manager-state-viewer.md`.
+**State page (founder, 2026-11-03).** `scripts/render_state.py --program <slug>` writes
+`<slug>.state.html` (Now looks forward, History keeps shipped work and decisions), its sidecar
+`<slug>.state.json` and the cross-program `index.state.html`. Run it on every state change and at every wake: it
+also reloads each page's Chrome tab, or opens one unfocused (`open -g`); `RENDER_STATE_NO_OPEN=1` skips that.
+Read its one stdout line instead of opening the page: `{"out", "problems", "stale", "author": [...]}`. `author`
+names the exact VIEW keys to edit (at most 5); make that one small edit and nothing else.
+
+You author only judgment. PRs, merges, deploys per surface, main health, bakes, blockers and file overlap are
+derived on every render, so never copy them into VIEW. Three owners are yours:
+- **Manifest `repos`** (validated by `work_state_store.validate_repos`): each repo the program ships to, its
+  `ticket_pattern`, its `surfaces` (a `deployment` environment or a `job`, each with a `proof_step` when a green
+  record can skip the real deploy, and the `paths` it serves), `red_main_cmd` (or `null` plus `red_main_unproven`),
+  and `security_paths`. No `repos` key means no production truth, shown as one Problems row.
+- **`## VIEW` in `<slug>.state.md`**, one fenced JSON block, schema `state-view/2`, last block wins:
+  `updated_at` (RFC3339), `destination`, `outcomes` (in dependency order, each with its map `tickets`),
+  `needs_you`, `exposure` (`dark|live|n/a` per deployed `#PR`; without a row a deployed change reads
+  "exposure unstated", never live), `proof_owed` (each naming its `ticket`; the ticket's bake verdict wins),
+  `design`, `workstreams`, `decisions`, `dead_ends`, `incidents`, `skills_done`. A v1 key (`explanation`,
+  `next_steps`, `upcoming`, `proven`, `unproven`) shows under "not migrated" with its v2 home: convert it key by key.
+- **`<slug>.arch.json`** (schema `state-arch/1`): the product being changed, never tickets or sessions. An
+  `architecture` view with `base` and `head` draws a before/after; promote `head` to `base` once the change is
+  live. `state_arch.py` archives every version to `<slug>.arch/`, the one owner of architecture over time.
+
+The page is derived: never hand-edit it or vary the template per program, and fix what its Problems panel
+reports. Schema and owners: `specs/2026-11-03-manager-state-viewer.md`.
 
 ## Membership and collisions
 
