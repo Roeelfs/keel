@@ -133,6 +133,13 @@
   .flag-list { margin-top: 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .flag { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-small); padding: 8px 12px; font-size: 13px; }
   .flag .fix { display: block; margin-top: 3px; color: var(--muted); }
+  .flag .fix code { color: var(--muted); }
+  .flag-list h3 { font-size: 12.5px; font-weight: 600; color: var(--muted); margin-top: 4px; }
+  .flag details { margin-top: 3px; font-size: 12.5px; }
+  details.inline-more, details.inline-more > summary { display: inline; }
+  details.inline-more > summary { list-style: none; color: var(--accent); }
+  details.inline-more > summary::-webkit-details-marker { display: none; }
+  details.inline-more[open] > summary { display: none; }
   .more { margin-top: 8px; font-size: 13px; }
 
   .graph-shell { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
@@ -279,6 +286,56 @@
     return p.sha ? el('span', { class: 'mono' }, String(p.sha).slice(0, 10)) : null;
   }
 
+  /* ---------- plain words for internal names ---------- */
+  function words(s) {
+    s = String(s || '').replace(/[_-]+/g, ' ').trim().toLowerCase();
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+  var FLAG = { UNBOUND: ['No one on it', 'warn'], READY_NOT_DISPATCHED: ['Ready, not started', 'warn'],
+    STALLED: ['Stalled', 'bad'], BAKE_OWED: ['Bake owed', 'warn'] };
+  function flagPill(f) { var x = FLAG[f] || [words(f), 'warn']; return pill(x[0], x[1]); }
+  var STATUS = { WORKING: ['Working', 'run'], GRILLING: ['Waiting on you', 'warn'], DONE: ['Done', 'good'] };
+  function statusPill(s) { var x = STATUS[String(s).toUpperCase()] || [words(s), '']; return pill(x[0], x[1]); }
+  var AWAIT = { completed: 'Finished its turn', blocked: 'Stopped, blocked', review_ready: 'Ready for review',
+    pr_closed: 'PR closed unmerged' };
+  var KIND = { ship: 'Ship', bake: 'Bake', grill: 'Decision', task: 'Task' };
+  var VERDICT = { pass: ['Bake passed', 'good'], fail: ['Bake failed', 'bad'], pending: ['Bake pending', 'warn'] };
+  function bakeText(b) {
+    var none = /^none:(.+)$/.exec(String(b));
+    return none ? 'No bake (' + words(none[1]).toLowerCase() + ')' : 'Bake ' + b;
+  }
+  var NOTE = { tracker_error: 'Tracker read failed', tracker_rate_limited: 'Tracker rate-limited',
+    tracker_unavailable: 'Tracker unavailable', no_tracker: 'No tracker command', retire_due: 'Carrier due to retire',
+    retire_carriers: 'Dead carriers to retire', kind_missing: 'No kind set', kind_conflict: 'Kinds disagree',
+    hold_invalid: 'Hold needs a fix', binding_not_in_map: 'Bound but not on the map',
+    ready_dropped: 'Ready list dropped, tracker stale', status_done_with_open_children: 'Marked done, tickets still open',
+    no_migration_floor: 'No migration floor', gh_error: 'GitHub read failed', gh_view_error: 'GitHub PR read failed',
+    worktree_gone: 'Worktree gone' };
+
+  var TICKET_RE = /^[A-Z][A-Z0-9]*-\d+$/;
+  function idNode(id) { return TICKET_RE.test(String(id)) ? ticketLink(id) : el('span', { class: 'mono' }, id); }
+  /* The first few ids inline; the rest sit behind "+N more", never dropped. */
+  function idList(ids, few) {
+    few = few || 4;
+    var out = [];
+    ids.slice(0, few).forEach(function (id, i) { if (i) out.push(', '); out.push(idNode(id)); });
+    var rest = ids.slice(few);
+    if (!rest.length) return out;
+    var tail = [];
+    rest.forEach(function (id) { tail.push(', '); tail.push(idNode(id)); });
+    return out.concat([' ', el('details', { class: 'inline-more' }, el('summary', null, '+' + rest.length + ' more'), tail)]);
+  }
+  /* Rows with the same key become one entry listing every id. */
+  function groupBy(rows, keyOf) {
+    var order = [], groups = {};
+    rows.forEach(function (r) {
+      var k = keyOf(r);
+      if (!groups[k]) { groups[k] = []; order.push(k); }
+      groups[k].push(r);
+    });
+    return order.map(function (k) { return groups[k]; });
+  }
+
   var wake = data.at_wake || {};
   var view = data.view || {};
   var progress = data.progress;
@@ -289,10 +346,6 @@
     return i.state !== 'closed' && (i.carriers || []).some(function (c) { return c.type === 'founder'; });
   });
   var liveLanes = (data.lanes || []).filter(function (l) { return l.live === true; });
-
-  function statusTone(status) {
-    return { WORKING: 'run', GRILLING: 'warn', DONE: 'good' }[status] || '';
-  }
 
   /* ---------- header ---------- */
   var freshEl = el('span', { class: 'fresh' });
@@ -311,7 +364,7 @@
     var map = data.map || {};
     add(document.getElementById('bar'), [
       el('h1', null, data.program),
-      wake.status ? pill(wake.status, statusTone(wake.status)) : pill('Status unknown', 'warn'),
+      wake.status ? statusPill(wake.status) : pill('Status unknown', 'warn'),
       map.issue ? (map.url ? el('a', { href: map.url, target: '_blank', rel: 'noreferrer', class: 'mono' }, map.issue) : el('span', { class: 'mono' }, map.issue)) : null,
       el('span', { class: 'grow' }),
       freshEl, liveBtn, themeControl()
@@ -323,22 +376,22 @@
   var countEl = el('div', { class: 'count' });
   var countUnder = el('div', { class: 'under' });
   function zoneNow() {
-    var carried = liveLanes.length ? plural(liveLanes.length, 'live carrier') : null;
+    var carried = liveLanes.length ? liveLanes.length + ' running' : null;
     return el('div', { class: 'zone' }, el('h2', null, 'Now'), countEl, countUnder,
       carried ? el('div', { class: 'under' }, carried) : null,
-      wake.wake ? el('details', { class: 'clip-note' }, el('summary', null, 'Full wake line'), el('pre', null, wake.wake)) : null);
+      wake.wake ? el('details', { class: 'clip-note' }, el('summary', null, 'Wake line'), el('pre', null, wake.wake)) : null);
   }
   function zoneNext() {
     var action = wake.next_action || wake.on_fire || data.forcing_function;
-    var label = wake.next_action ? null : (wake.on_fire ? 'What the wake does when it fires' : (data.forcing_function ? 'Forcing function from the manifest' : null));
+    var label = wake.next_action ? null : (wake.on_fire ? 'When the wake fires' : (data.forcing_function ? 'Forcing function' : null));
     var rows = [];
     function row(k, v) { if (v) { rows.push(el('dt', null, k)); rows.push(el('dd', null, v)); } }
     row('Owner', wake.owner); row('Needs', wake.prerequisite); row('Stops at', wake.stop_condition); row('Mode', wake.mode);
     return el('div', { class: 'zone' }, el('h2', null, 'Next'),
-      action ? el('div', { class: 'long next-action' }, action) : empty('The AT-WAKE block names no next action.'),
+      action ? el('div', { class: 'long next-action' }, action) : empty('No next action set'),
       label ? el('div', { class: 'under' }, label) : null,
       rows.length ? el('dl', { class: 'meta-row' }, rows) : null,
-      action && action.length > 280 ? el('details', { class: 'clip-note' }, el('summary', null, 'Read all of it'), el('pre', null, action)) : null);
+      action && action.length > 280 ? el('details', { class: 'clip-note' }, el('summary', null, 'All of it'), el('pre', null, action)) : null);
   }
   function zoneAsk() {
     var n = queued.length + openDecisions.length + founderWaits.length;
@@ -349,19 +402,16 @@
     }
     queued.forEach(function (q) { ask(q.ask, q.recommended ? 'Recommended: ' + q.recommended : null); });
     openDecisions.forEach(function (q) { ask(q.question, (q.detail || []).filter(function (d) { return /recommended/i.test(d); })[0]); });
-    founderWaits.forEach(function (i) { ask([ticketLink(i.ticket), ' ', i.title || 'waits on you']); });
-    var known = !!Object.keys(view).length;
+    founderWaits.forEach(function (i) { ask([i.title || 'Waits on you', ' ', ticketLink(i.ticket)]); });
     return el('div', { class: n ? 'zone ask' : 'zone' }, el('h2', null, 'Needs you'),
-      n ? el('div', { class: 'count' }, n) : el('div', { class: 'next-action' }, known ? 'Nothing right now' : 'None recorded'),
-      n ? list : el('div', { class: 'under' }, known ? 'No queued ask, no open grill question and no ticket waiting on the founder.' : 'No grill question is open, and there is no VIEW block that could list anything else.'),
-      n > 3 ? el('div', { class: 'under' }, 'All of them are under Decisions.') : null);
+      n ? el('div', { class: 'count' }, n) : el('div', { class: 'next-action' }, 'Nothing'),
+      n ? list : null,
+      n > 3 ? el('div', { class: 'under' }, '+' + (n - 3) + ' more below') : null);
   }
 
   /* ---------- map ---------- */
   function renderMap() {
-    if (!progress) {
-      return section('Map progress', null, empty('Map counts are unavailable, so none are shown. The reason is under Problems.'));
-    }
+    if (!progress) return section('Map', null, empty('Map unavailable. See Problems.'));
     var tones = [['closed', 'Closed', 'good', 'var(--good)'], ['active', 'Running', 'run', 'var(--run)'],
       ['blocked', 'Blocked', 'bad', 'var(--bad)'], ['ready', 'Ready', '', 'var(--idle)']];
     var tally = el('div', { class: 'tally' });
@@ -374,27 +424,50 @@
     var blocking = data.blocking || [];
     var awaiting = data.awaiting || [];
     var holds = data.holds || [];
-    var ageNote = progress.tracker_age_s === null || progress.tracker_age_s === undefined ? '' : 'tracker read ' + span(progress.tracker_age_s) + ' before this render';
-    return section('Map progress', ageNote, tally, progress.total ? bar : null,
-      progress.frontier.length ? el('p', { class: 'frontier' }, 'Frontier: ', progress.frontier.slice(0, 12).join(', '),
-        progress.frontier.length > 12 ? ' and ' + (progress.frontier.length - 12) + ' more' : '') : null,
-      blocking.length ? el('div', { class: 'flag-list' }, flagGroup(blocking)) : null,
-      awaiting.length ? el('div', { class: 'flag-list' }, awaiting.map(function (a) {
-        return el('div', { class: 'flag' }, pill('Awaiting manager', 'warn'), ' ', ticketLink(a.ticket), ' ', a.category || '');
-      })) : null,
-      holds.length ? el('div', { class: 'flag-list' }, holds.map(function (h) {
-        return el('div', { class: 'flag' }, pill('Hold'), ' ', JSON.stringify(h));
-      })) : null);
+    var age = progress.tracker_age_s === null || progress.tracker_age_s === undefined ? '' : 'tracker ' + span(progress.tracker_age_s) + ' old';
+    return section('Map', age, tally, progress.total ? bar : null,
+      progress.frontier.length ? el('p', { class: 'frontier' }, 'Unblocked: ', idList(progress.frontier, 8)) : null,
+      blocking.length ? el('div', { class: 'flag-list' }, flagGroups(blocking)) : null,
+      awaiting.length ? el('div', { class: 'flag-list' }, awaitGroups(awaiting)) : null,
+      holds.length ? el('div', { class: 'flag-list' }, el('h3', null, 'Held'), holdGroups(holds)) : null);
   }
-  function flagGroup(blocking) {
-    var groups = {};
-    blocking.forEach(function (b) { (groups[b.flag] = groups[b.flag] || []).push(b); });
-    return Object.keys(groups).map(function (flag) {
-      var rows = groups[flag];
-      var tone = flag === 'STALLED' ? 'bad' : 'warn';
-      return el('details', { class: 'flag' },
-        el('summary', null, pill(flag, tone), ' ', plural(rows.length, 'item'), ': ', rows.slice(0, 4).map(function (r) { return r.item; }).join(', '), rows.length > 4 ? ', ...' : ''),
-        rows.map(function (r) { return el('span', { class: 'fix' }, code(r.item), ' ', r.fix); }));
+  function flagGroups(blocking) {
+    return groupBy(blocking, function (b) { return b.flag; }).map(function (rows) {
+      return el('div', { class: 'flag' }, flagPill(rows[0].flag), ' ', idList(rows.map(function (r) { return r.item; })),
+        el('details', null, el('summary', null, 'How to fix'),
+          rows.map(function (r) { return el('span', { class: 'fix' }, idNode(r.item), ' ', code(r.fix)); })));
+    });
+  }
+  function awaitGroups(awaiting) {
+    return groupBy(awaiting, function (a) { return a.category; }).map(function (rows) {
+      var c = rows[0].category;
+      return el('div', { class: 'flag' }, pill('Needs the manager', 'warn'), ' ', AWAIT[c] || words(c), ': ',
+        idList(rows.map(function (a) { return a.ticket; })));
+    });
+  }
+  /* What a hold waits on, in words. `args` is the free text, or the globs for file-collision. */
+  function holdMeaning(h) {
+    var reason = String(h.reason || ''), cut = reason.indexOf(':');
+    var base = (cut < 0 ? reason : reason.slice(0, cut)).toLowerCase(), target = cut < 0 ? '' : reason.slice(cut + 1);
+    var text = (h.args || []).join(' ').replace(/^waits? on (the )?/i, '').replace(/\.$/, '');
+    var more = text ? ' · ' + text : '';
+    if (base === 'founder-gated') return ['Waiting on ', idNode(target), ' (founder)', more];
+    if (base === 'file-collision') return ['Same files as ', idNode(target), more];
+    if (base === 'cap-codex') return ['Codex at capacity', more];
+    if (base === 'completion-mode') return ['Held until the build group finishes', more];
+    return [words(base), target ? [' ', idNode(target)] : null, more];
+  }
+  function holdGroups(holds) {
+    return groupBy(holds, function (h) {
+      return [h.valid === false, h.reason, (h.args || []).join(' '), h.why || ''].join('\u0000');
+    }).map(function (rows) {
+      var h = rows[0];
+      var ids = idList(rows.map(function (r) { return r.ticket; }));
+      if (h.valid === false) {
+        return el('div', { class: 'flag' }, pill('Hold needs a fix', 'bad'), ' ', holdMeaning(h), ': ', ids,
+          el('span', { class: 'fix' }, /^[a-z_]+$/.test(h.why || '') ? words(h.why) : String(h.why || '').replace(/^[a-z-]+:\s*/, '')));
+      }
+      return el('div', { class: 'flag' }, holdMeaning(h), ': ', ids);
     });
   }
 
@@ -402,22 +475,22 @@
   var graphFrame = null;
   function renderGraph() {
     var graph = data.graph || {};
-    if (!graph.html) return section('Work graph', null, empty(graph.reason || 'No graph.'));
+    if (!graph.html) return null; /* why it is missing is under Problems */
     var shell = el('div', { class: 'graph-shell' });
     var exploring = false;
-    var btn = el('button', { type: 'button', onclick: toggleExplore }, 'Explore full screen');
+    var btn = el('button', { type: 'button', onclick: toggleExplore }, 'Full screen');
     graphFrame = el('iframe', { title: data.program + ' work graph' });
     graphFrame.addEventListener('load', function () { styleGraph(exploring); });
     graphFrame.srcdoc = graph.html;
     function toggleExplore() {
       exploring = !exploring;
       shell.classList.toggle('explore', exploring);
-      btn.textContent = exploring ? 'Close (Esc)' : 'Explore full screen';
+      btn.textContent = exploring ? 'Close (Esc)' : 'Full screen';
       styleGraph(exploring);
     }
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && exploring) toggleExplore(); });
     add(shell, [el('div', { class: 'graph-tools' }, btn), graphFrame]);
-    return section('Work graph', 'tickets to lanes to PRs to bakes', shell);
+    return section('Work graph', null, shell);
   }
   function styleGraph(exploring) {
     var doc;
@@ -437,14 +510,14 @@
     var proven = (view.proven || []).slice();
     if (data.checkpoint && data.checkpoint.verified) proven.unshift({ claim: data.checkpoint.verified, evidence: 'Completion checkpoint' });
     var unproven = view.unproven || [];
-    function list(rows, reason, none) {
-      return rows.length ? el('ul', null, rows.map(function (r) {
+    if (!proven.length && !unproven.length) return null;
+    function side(cls, title, rows, reason) {
+      return el('div', { class: cls }, el('h3', null, title + ' (' + rows.length + ')'), rows.length ? el('ul', null, rows.map(function (r) {
         return el('li', null, r.claim, r[reason] ? el('span', { class: 'why' }, r[reason]) : null);
-      })) : empty(none);
+      })) : null);
     }
     return section('Proven and unproven', null, el('div', { class: 'ledger' },
-      el('div', { class: 'proven' }, el('h3', null, 'Proven (' + proven.length + ')'), list(proven, 'evidence', 'Nothing recorded as proven.')),
-      el('div', { class: 'unproven' }, el('h3', null, 'Unproven (' + unproven.length + ')'), list(unproven, 'owed', 'Nothing recorded as unproven.'))));
+      side('proven', 'Proven', proven, 'evidence'), side('unproven', 'Unproven', unproven, 'owed')));
   }
 
   /* ---------- lanes ---------- */
@@ -453,31 +526,29 @@
     if (v === false) return pill('Not live', 'bad');
     return pill('Unknown');
   }
+  function line(node, cls) { return node ? el('span', { class: cls || 'dim' }, node) : null; }
   function renderLanes() {
     var rows = data.lanes || [];
-    if (!rows.length) {
-      return section('What is running', null, empty('The manifest has no bindings. The Wake line under Now names anything else in flight.'));
-    }
-    return section('What is running', plural(rows.length, 'carrier'), el('div', { class: 'table-wrap' }, el('table', null,
-      el('thead', null, el('tr', null, ['Ticket', 'Carrier', 'Live', 'Model', 'Branch', 'Published', 'Artifact'].map(function (h) { return el('th', { scope: 'col' }, h); }))),
+    if (!rows.length) return null;
+    return section('Who is on it', String(rows.length), el('div', { class: 'table-wrap' }, el('table', null,
+      el('thead', null, el('tr', null, ['Ticket', 'Who', 'Live', 'Output'].map(function (h) { return el('th', { scope: 'col' }, h); }))),
       el('tbody', null, rows.map(function (r) {
+        var who = [words(r.type), r.runtime, r.model].filter(Boolean).join(' ');
         return el('tr', null,
-          el('td', null, ticketLink(r.ticket), r.title ? el('span', { class: 'dim' }, r.title) : null),
-          el('td', null, r.type, r.id ? el('span', { class: 'dim mono' }, r.id) : null),
+          el('td', null, ticketLink(r.ticket), line(r.title)),
+          el('td', null, who, line(r.wave), line(r.id, 'dim mono')),
           el('td', null, liveCell(r.live)),
-          el('td', null, [r.runtime, r.model].filter(Boolean).join(' ') || '-', r.wave ? el('span', { class: 'dim' }, r.wave) : null),
-          el('td', null, r.branch ? code(r.branch) : '-'),
-          el('td', null, publication(r.publication) || '-', r.bake ? el('span', { class: 'dim' }, 'bake ' + r.bake) : null),
-          el('td', null, r.artifact || '-', r.outfile ? el('span', { class: 'dim mono' }, r.outfile) : null));
+          el('td', null, publication(r.publication), r.branch ? line(code(r.branch)) : null,
+            r.bake ? line(bakeText(r.bake)) : null, line(r.artifact), line(r.outfile, 'dim mono')));
       })))));
   }
 
   /* ---------- what is left ---------- */
   function ticketRow(i) {
-    return el('div', { class: 'ticket' }, ticketLink(i.ticket), el('span', null, i.title || '(no title)'),
-      el('span', { class: 'chips' }, i.kind ? pill(i.kind) : null,
-        (i.flags || []).filter(function (f) { return f !== 'READY_NOT_DISPATCHED'; }).map(function (f) { return pill(f, f === 'STALLED' ? 'bad' : 'warn'); }),
-        i.bake_verdict ? pill('bake ' + i.bake_verdict, { pass: 'good', fail: 'bad', pending: 'warn' }[i.bake_verdict]) : null));
+    return el('div', { class: 'ticket' }, ticketLink(i.ticket), el('span', null, i.title || ''),
+      el('span', { class: 'chips' }, i.kind ? pill(KIND[i.kind] || words(i.kind)) : null,
+        (i.flags || []).filter(function (f) { return f !== 'READY_NOT_DISPATCHED'; }).map(flagPill),
+        i.bake_verdict ? pill((VERDICT[i.bake_verdict] || ['Bake ' + i.bake_verdict])[0], (VERDICT[i.bake_verdict] || [])[1]) : null));
   }
   function renderLeft() {
     var items = data.items || [];
@@ -485,41 +556,40 @@
     var head = [
       checkpoint.done_when ? el('p', null, el('b', null, 'Done when: '), checkpoint.done_when) : null,
       checkpoint.remaining ? el('p', null, el('b', null, 'Remaining: '), checkpoint.remaining) : null
-    ];
-    if (!progress) {
-      return section('What is left', null, head, empty('The ticket list comes from the map snapshot, which is unavailable. The reason is under Problems.'));
-    }
+    ].filter(Boolean);
     var groups = [['active', 'Running'], ['blocked', 'Blocked'], ['ready', 'Ready']];
     var open = groups.map(function (g) {
       var rows = items.filter(function (i) { return i.state === g[0]; });
       return rows.length ? el('div', null, el('h3', null, g[1] + ' (' + rows.length + ')'), rows.map(ticketRow)) : null;
-    });
+    }).filter(Boolean);
     var closed = items.filter(function (i) { return i.state === 'closed'; });
+    if (!head.length && !open.length && !closed.length) return null;
     return section('What is left', null, el('div', { class: 'tickets' }, head, open,
-      items.some(function (i) { return i.state !== 'closed'; }) ? null : empty('No open ticket on the map.'),
       closed.length ? el('details', null, el('summary', null, closed.length + ' closed'), closed.map(ticketRow)) : null));
   }
 
   /* ---------- rail ---------- */
   function renderSteps() {
     var steps = view.next_steps || [];
-    return section('Next steps', null, steps.length ? el('ol', { class: 'steps' }, steps.map(function (s) {
+    if (!steps.length) return null;
+    return section('Next steps', null, el('ol', { class: 'steps' }, steps.map(function (s) {
       return el('li', null, s.step, s.owner ? el('span', { class: 'who' }, s.owner) : null);
-    })) : empty('The VIEW block lists no next steps.'));
+    })));
   }
   function renderUpcoming() {
     var rows = view.upcoming || [];
-    var fired = wake.on_fire && wake.next_action ? [{ when: 'At the wake', what: wake.on_fire }] : [];
+    var fired = wake.on_fire && wake.next_action ? [{ when: 'At wake', what: wake.on_fire }] : [];
     var all = fired.concat(rows);
-    return section('What is going to happen', null, all.length ? el('ul', { class: 'upcoming' }, all.map(function (r) {
+    if (!all.length) return null;
+    return section('Coming up', null, el('ul', { class: 'upcoming' }, all.map(function (r) {
       return el('li', null, el('span', { class: 'when' }, r.when || 'Later'), el('span', { style: 'overflow-wrap:anywhere' }, r.what));
-    })) : empty('Nothing is scheduled in the VIEW block or on the Wake line.'));
+    })));
   }
   function renderDecisions() {
     var made = (view.decisions || []).map(function (d) {
       return { text: d.decision, why: d.why, when: [d.date, d.by].filter(Boolean).join(', ') };
     }).concat(answered.map(function (q) {
-      return { text: q.question, why: q.answer, when: 'Grill answer' };
+      return { text: q.question, why: q.answer, when: 'Your answer' };
     }));
     var openList = queued.map(function (q) {
       return el('div', { class: 'decision' }, el('div', { class: 'text' }, q.ask),
@@ -529,19 +599,19 @@
         (q.detail || []).map(function (d) { return el('div', { class: 'why' }, d); }));
     }));
     var gates = data.gates || [];
+    if (!openList.length && !gates.length && !made.length) return null;
     return section('Decisions', null,
-      el('h3', { style: 'font-size:13px;font-weight:600;color:var(--warn);margin-bottom:2px' }, 'Open (' + openList.length + ')'),
-      openList.length ? openList : empty('No open decision.'),
-      gates.length ? el('details', { style: 'margin-top:10px;font-size:13px' }, el('summary', null, plural(gates.length, 'gate') + ' held for the founder'),
+      openList.length ? [el('h3', { style: 'font-size:13px;font-weight:600;color:var(--warn);margin-bottom:2px' }, 'Open (' + openList.length + ')'), openList] : null,
+      gates.length ? el('details', { style: 'margin-top:10px;font-size:13px' }, el('summary', null, 'Founder gates (' + gates.length + ')'),
         gates.map(function (g) { return el('div', { class: 'decision why' }, g); })) : null,
-      el('h3', { style: 'font-size:13px;font-weight:600;color:var(--muted);margin:16px 0 2px' }, 'Made (' + made.length + ')'),
-      made.length ? made.slice().reverse().map(function (d) {
-        return el('div', { class: 'decision' }, el('div', { class: 'text' }, d.text), d.why ? el('div', { class: 'why' }, d.why) : null, d.when ? el('div', { class: 'when' }, d.when) : null);
-      }) : empty('No decision recorded.'));
+      made.length ? [el('h3', { style: 'font-size:13px;font-weight:600;color:var(--muted);margin:16px 0 2px' }, 'Made (' + made.length + ')'),
+        made.slice().reverse().map(function (d) {
+          return el('div', { class: 'decision' }, el('div', { class: 'text' }, d.text), d.why ? el('div', { class: 'why' }, d.why) : null, d.when ? el('div', { class: 'when' }, d.when) : null);
+        })] : null);
   }
   function renderTimeline() {
     var events = data.events || { rows: [], total: 0 };
-    if (!events.rows.length) return section('Timeline', null, empty('The events file has no rows.'));
+    if (!events.rows.length) return null;
     var box = el('div', { class: 'timeline' });
     var lastDay = null;
     events.rows.slice().reverse().forEach(function (r) {
@@ -549,31 +619,50 @@
       var day = t === null ? 'Undated' : new Date(t).toLocaleDateString(undefined, { month: 'long', day: 'numeric' });
       if (day !== lastDay) { box.appendChild(el('div', { class: 'day' }, day)); lastDay = day; }
       var when = t === null ? '' : new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-      box.appendChild(el('div', { class: 'event' }, el('div', { class: 'head' }, [when, r.event, r.lane].filter(Boolean).join(', ')),
+      box.appendChild(el('div', { class: 'event' }, el('div', { class: 'head' }, [when, words(r.event), r.lane].filter(Boolean).join(' · ')),
         r.note ? el('div', { class: 'note' }, r.note) : null));
     });
     var last = events.rows[events.rows.length - 1];
-    return section('Timeline', 'last event ' + ago(last.ts) + (events.total > events.rows.length ? ', newest ' + events.rows.length + ' of ' + events.total : ''), box);
+    return section('Timeline', ago(last.ts) + (events.total > events.rows.length ? ' · newest ' + events.rows.length + ' of ' + events.total : ''), box);
   }
 
   /* ---------- problems and sources ---------- */
+  /* Engine notes read `key:ticket:detail`; the same key and detail collapse into one row listing every ticket. */
+  function problemRows(rows) {
+    var parsed = rows.map(function (p) {
+      var m = /^engine note: ([a-z_]+)(?::(.*))?$/.exec(String(p.detail || ''));
+      if (!m) return { source: p.source, text: p.detail, fix: p.fix, ids: [] };
+      var rest = m[2] === undefined ? [] : m[2].split(':');
+      var id = rest.length && TICKET_RE.test(rest[0]) ? rest.shift() : null;
+      var tail = rest.join(':');
+      tail = /^[a-z_]+$/.test(tail) ? words(tail).toLowerCase() : tail;
+      return { source: p.source, text: (NOTE[m[1]] || words(m[1])) + (tail ? ' (' + tail + ')' : ''), fix: p.fix, ids: id ? [id] : [] };
+    });
+    return groupBy(parsed, function (p) { return [p.source, p.text, p.fix || ''].join('\u0000'); }).map(function (g) {
+      var ids = [];
+      g.forEach(function (p) { ids = ids.concat(p.ids); });
+      return { source: g[0].source, text: g[0].text, fix: g[0].fix, ids: ids, n: g.length };
+    });
+  }
   function renderProblems() {
     var rows = data.problems || [];
     if (!rows.length) return null;
-    return section('Problems', plural(rows.length, 'row'), el('div', { class: 'problems' }, rows.map(function (p) {
-      return el('div', { class: 'problem' }, el('b', null, p.source), ': ', p.detail, p.fix ? el('span', { class: 'fix' }, 'Fix: ', code(p.fix)) : null);
+    return section('Problems', String(rows.length), el('div', { class: 'problems' }, problemRows(rows).map(function (p) {
+      return el('div', { class: 'problem' }, el('b', null, p.source), ': ', p.text,
+        p.ids.length ? [': ', idList(p.ids)] : (p.n > 1 ? ' (' + p.n + ')' : null),
+        p.fix ? el('span', { class: 'fix' }, 'Fix: ', code(p.fix)) : null);
     })));
   }
   function renderSources() {
-    return section('Where this came from', null, el('ul', { class: 'sources' }, (data.sources || []).map(function (s) {
-      return el('li', null, s.name, ': ', code(s.path), s.exists ? ', changed ' + ago(s.modified) : ', missing');
+    return section('Sources', null, el('ul', { class: 'sources' }, (data.sources || []).map(function (s) {
+      return el('li', null, s.name, ': ', code(s.path), s.exists ? ', changed ' + ago(s.modified) : el('b', { style: 'color:var(--warn)' }, ', missing'));
     }).concat(view.updated_at ? [el('li', null, 'VIEW block edited ' + ago(view.updated_at))] : [],
-      data.manifest_updated_at ? [el('li', null, 'Manifest updated_at ' + ago(data.manifest_updated_at))] : [])));
+      data.manifest_updated_at ? [el('li', null, 'Manifest updated ' + ago(data.manifest_updated_at))] : [])));
   }
 
   /* ---------- page ---------- */
   function renderPage() {
-    var lede = el('div', { class: 'lede' }, el('p', { class: 'goal' }, data.goal || 'The manifest names no goal.'),
+    var lede = el('div', { class: 'lede' }, el('p', { class: 'goal' }, data.goal || 'No goal set'),
       view.explanation ? el('p', { class: 'explain' }, view.explanation) : null);
     var strip = el('div', { class: 'strip' }, zoneNow(), zoneNext(), zoneAsk());
     var main = el('div', { class: 'column' }, renderMap(), renderGraph(), renderLedger(), renderLanes(), renderLeft(), renderProblems(), renderSources());
@@ -590,22 +679,22 @@
     var status = wake.status;
     var fire = ms(wake.wake_fire_at);
     countEl.classList.remove('over');
-    if (status === 'DONE') { countEl.textContent = 'Done'; countUnder.textContent = 'The program reports DONE.'; return; }
+    if (status === 'DONE') { countEl.textContent = 'Done'; countUnder.textContent = ''; return; }
     if (fire !== null) {
       var left = (fire - Date.now()) / 1000;
       countEl.textContent = span(left);
       countEl.classList.toggle('over', left < 0);
-      countUnder.textContent = (left < 0 ? 'Wake overdue, was due ' : 'Next wake ') + clock(wake.wake_fire_at);
+      countUnder.textContent = (left < 0 ? 'Overdue since ' : 'Wakes ') + clock(wake.wake_fire_at);
     } else if (wake.wake) {
       countEl.textContent = 'On event';
-      countUnder.textContent = wake.wake_armed ? 'The wake fires when a tracked carrier reports.' : 'The Wake line is not armed.';
+      countUnder.textContent = wake.wake_armed ? 'Wakes when a carrier reports' : 'Wake not armed';
     } else if (status === 'GRILLING') {
-      countEl.textContent = 'Grilling';
-      countUnder.textContent = 'Waiting on your answers. No wake is needed.';
+      countEl.textContent = 'Asking you';
+      countUnder.textContent = 'Waiting on your answers';
     } else {
       countEl.textContent = 'No wake';
       countEl.classList.add('over');
-      countUnder.textContent = 'The AT-WAKE block records no wake.';
+      countUnder.textContent = 'No wake set';
     }
   }
 
