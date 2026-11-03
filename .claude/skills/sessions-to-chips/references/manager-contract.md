@@ -678,11 +678,20 @@ open question or pending decision written down as prose.
    its reason in the events file, and proceed. Only what is really the founder's (product
    direction, money, legal, a prod ship, an irreversible or customer-visible change) is a
    founder decision.
-2. **Grill the founder decisions in this session, now** (`/grilling`): the whole frontier in one
-   round, numbered, each with your recommended answer so "yes" settles it, or `AskUserQuestion`
-   with up to 4 questions and the recommended option first. A go-ahead is one click with the
-   approval pre-written. Never relay another program's decision, and never ask in another session.
-3. **Keep working while the round waits.** Everything that does not depend on the open answers
+2. **Dispatch a grill chip for the founder decisions, now (founder, 2026-11-03).** Standard
+   procedure whenever a decision is open: write the whole frontier to
+   `~/.claude/orchestrator/grills/<slug>-<date>.md` (numbered, each item with the options, your
+   recommended answer first, and the one-click `Approved: <exact action>. Proceed.` text for a
+   go-ahead), then start ONE chip session titled `Grill: <program> decisions` (`start_session`,
+   fresh, sonnet/medium; brief = GOAL: ask the founder every item in that file in one
+   `AskUserQuestion` round; STATE: the file path; START HERE: the file; GUARDRAIL: ask only, decide
+   nothing, write each answer back into the file's `Answers:` block and `SendMessage` the manager
+   `<id>` one line when done). Where the app refuses a session start on an automated turn, propose
+   it as an `own_initiative` card with the same brief and keep the round in `## AT-WAKE`. The
+   manager may still ask inline (`AskUserQuestion`, up to 4) when the round is one or two items it
+   can ask in its own turn. A go-ahead is one click with the approval pre-written. Never relay
+   another program's decision, and never ask in another program's session.
+3. **Keep working while the round waits** (the grill chip is a tracked child and satisfies the armed-wake rule, wake kind `session:<id>`). Everything that does not depend on the open answers
    proceeds (§Parallel by default). When the answers land, record them and dispatch what they
    unblock in the same turn.
 4. **Unattended turn** (no human present): take the recommended answer for anything reversible
