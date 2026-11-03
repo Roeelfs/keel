@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""render_state.py - write a program's state page by injecting one JSON payload into the one template.
+"""render_state.py - write a program's state page, its sidecar and the cross-program index.
 
 Usage: render_state.py --program <slug> [--out <path>]
-Pure render: it reads the owners, writes only the output file, and keeps no state. Every source that
-is missing or refuses shows up on the page with its reason. Exit 0 = page written; 1 = unknown
-program or failed write. Owners and rules: ../specs/2026-11-03-manager-state-viewer.md
+Reads every owner (manifest, work-state snapshot, AT-WAKE through the Stop guard, grills, events, the
+`## VIEW` block, `<slug>.arch.json`) and the derived sources in state_sources.py, then injects one JSON
+payload into the one template. Never writes a source. Prints one compact JSON line for the manager.
+Exit 0 = page written; 1 = unknown program or failed write. RENDER_STATE_NO_OPEN=1 skips Chrome.
+Owners and rules: ../specs/2026-11-03-manager-state-viewer.md
 """
 import argparse
 import datetime as dt
@@ -18,33 +20,38 @@ import sys
 import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import state_graph  # noqa: E402
+import state_arch  # noqa: E402
+import state_index as si  # noqa: E402
+import state_sources as ss  # noqa: E402
+import state_view as sv  # noqa: E402
+import work_state_sources as wsrc  # noqa: E402
 import work_state_store as st  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE = os.path.join(HERE, "..", "references", "state-viewer", "template.html")
 PLACEHOLDER = "__STATE_PAYLOAD__"
-SCHEMA = "state-view/1"
-SNAPSHOT_TIMEOUT_S = 90
-EVENT_TAIL = 40
+SCHEMA = si.SCHEMA
+VIEWER_SCHEMA = "state-viewer-cache/1"
+DEADLINE_S = 45
+PAGE_BUDGET = 200_000
+AUTHOR_MAX = 5
 AT_WAKE_FIELDS = {"next action": "next_action", "owner": "owner", "prerequisite": "prerequisite",
-                  "stop condition": "stop_condition", "mode": "mode"}
-CHECKPOINT_FIELDS = {"accepted outcome": "accepted", "done when": "done_when", "verified": "verified",
-                     "remaining": "remaining"}
-VIEW_LISTS = {"next_steps": ("step", {"step", "owner"}), "upcoming": ("what", {"when", "what"}),
-              "needs_you": ("ask", {"ask", "recommended"}),
-              "decisions": ("decision", {"decision", "date", "why", "by"}),
-              "proven": ("claim", {"claim", "evidence"}), "unproven": ("claim", {"claim", "owed"})}
-VIEW_TEXT = {"updated_at", "explanation"}
-
-
-def problem(source, detail, fix=None):
-    return {"source": source, "detail": str(detail), "fix": fix}
+                  "stop condition": "stop_condition"}
+problem = sv.problem
 
 
 def utc(t):
     return t.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+
+def ts(iso):
+    try:
+        return st.parse_iso(iso) if iso else None
+    except ValueError:
+        return None
+
+
+# ---------- owners read as-is ----------
 
 def guard_path():
     return os.environ.get("WORK_STATE_GUARD_SCRIPT") or os.path.join(st.HOME, "scripts", "manager_arm_guard.py")
@@ -67,18 +74,6 @@ def _fields(text, wanted):
     return out
 
 
-def _wake_fire_at(guard, wake, now):
-    """The soonest future time on the Wake line, else its latest past time, else None (event-bound)."""
-    times = []
-    for s in guard.ISO.findall(wake or ""):
-        try:
-            times.append(guard.parse_iso(s))
-        except ValueError:
-            continue
-    future = sorted(t for t in times if t > now)
-    return utc(future[0]) if future else (utc(max(times)) if times else None)
-
-
 def read_at_wake(text, now, problems):
     try:
         guard = load_guard(guard_path())
@@ -86,95 +81,13 @@ def read_at_wake(text, now, problems):
         problems.append(problem("Stop guard", f"cannot load {guard_path()}: {exc}"))
         return {}
     facts = guard.state_facts(text, now)
-    tail = guard.at_wake_tail(text)
     if not facts.get("has_at_wake"):
         problems.append(problem("AT-WAKE", "the state file has no ## AT-WAKE block"))
         return {}
-    wake = facts.get("wake")
-    on_fire = re.search(r"\bon fire:\s*(.+)$", wake or "", re.I)
+    tail = guard.at_wake_tail(text)
     holds = [m.group(1).strip() for m in re.finditer(r"^\s*[-*]?\s*\**Hold\**:\s*(.+)$", tail, re.M | re.I)]
-    return dict(_fields(tail, AT_WAKE_FIELDS), status=facts.get("status"), wake=wake,
-                wake_armed=bool(facts.get("wake_armed")), wake_fire_at=_wake_fire_at(guard, wake, now),
-                on_fire=on_fire.group(1).strip() if on_fire else None, holds=holds)
-
-
-def read_checkpoint(text):
-    idx = [m.end() for m in re.finditer(r"^##\s+Completion checkpoint\b.*$", text, re.M)]
-    if not idx:
-        return {}
-    body = re.split(r"^##\s", text[idx[-1]:], maxsplit=1, flags=re.M)[0]
-    return _fields(body, CHECKPOINT_FIELDS)
-
-
-def _check_list(key, rows, problems):
-    required, allowed = VIEW_LISTS[key]
-    if not isinstance(rows, list):
-        problems.append(problem("VIEW", f"`{key}` must be a list, got {type(rows).__name__}; it was not shown"))
-        return []
-    kept = []
-    for n, row in enumerate(rows):
-        where = f"{key}[{n}]"
-        if not isinstance(row, dict) or not isinstance(row.get(required), str):
-            problems.append(problem("VIEW", f"{where} needs a string `{required}`; it was not shown"))
-            continue
-        extra = sorted(set(row) - allowed)
-        if extra:
-            problems.append(problem("VIEW", f"{where} has unknown keys {extra}; those keys were not shown"))
-        kept.append({k: str(v) for k, v in row.items() if k in allowed and v is not None})
-    return kept
-
-
-def read_view(text, problems):
-    """The last fenced JSON block under `## VIEW`. Bad input is reported, never silently dropped."""
-    heads = list(re.finditer(r"^##\s+VIEW\b.*$", text, re.M))
-    if not heads:
-        problems.append(problem("VIEW", "no ## VIEW block in the state file, so the narrative sections are empty",
-                                "Add the block: references/manager-contract.md, Program state"))
-        return {}
-    body = re.split(r"^##\s", text[heads[-1].end():], maxsplit=1, flags=re.M)[0]
-    fence = re.search(r"^```(?:json)?[ \t]*\n(.*?)^```", body, re.M | re.S)
-    if not fence:
-        problems.append(problem("VIEW", "the ## VIEW block has no fenced JSON"))
-        return {}
-    try:
-        raw = json.loads(fence.group(1))
-    except ValueError as exc:
-        problems.append(problem("VIEW", f"the ## VIEW block is not valid JSON: {exc}"))
-        return {}
-    if not isinstance(raw, dict):
-        problems.append(problem("VIEW", f"the ## VIEW block must be an object, got {type(raw).__name__}"))
-        return {}
-    unknown = sorted(set(raw) - VIEW_TEXT - set(VIEW_LISTS))
-    if unknown:
-        problems.append(problem("VIEW", f"unknown keys {unknown} were not shown"))
-    view = {}
-    for key in VIEW_TEXT & set(raw):
-        if isinstance(raw[key], str):
-            view[key] = raw[key]
-        else:
-            problems.append(problem("VIEW", f"`{key}` must be a string, got {type(raw[key]).__name__}; it was not shown"))
-    for key in VIEW_LISTS.keys() & set(raw):
-        view[key] = _check_list(key, raw[key], problems)
-    return view
-
-
-def read_events(path, problems):
-    if not os.path.isfile(path):
-        return {"rows": [], "total": 0, "bad_lines": 0}
-    rows, bad = [], 0
-    with open(path, encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-                rows.append(row) if isinstance(row, dict) else None
-                bad += not isinstance(row, dict)
-            except ValueError:
-                bad += 1
-    if bad:
-        problems.append(problem("Events", f"{bad} line(s) of {os.path.basename(path)} are not JSON objects; not shown"))
-    return {"rows": rows[-EVENT_TAIL:], "total": len(rows), "bad_lines": bad}
+    return dict(_fields(tail, AT_WAKE_FIELDS), status=facts.get("status"), wake=facts.get("wake"),
+                wake_armed=bool(facts.get("wake_armed")), holds=holds)
 
 
 def _parse_grill(path):
@@ -190,15 +103,14 @@ def _parse_grill(path):
             questions.append(current)
         elif current and line.strip():
             current["detail"].append(line.strip().lstrip("- "))
-    return [dict(q, file=path, answer=answers.get(q["n"])) for q in questions]
+    return [dict(q, file=os.path.basename(path), answer=answers.get(q["n"])) for q in questions]
 
 
 def read_grills(slug, problems):
     """Founder decisions: a numbered question with no matching `Answers:` line is open."""
     pattern = re.compile(re.escape(slug) + r"-\d{4}-\d{2}-\d{2}.*\.md$")
-    grills_dir = os.path.join(st.HOME, "orchestrator", "grills")
     open_q, answered = [], []
-    for path in sorted(glob.glob(os.path.join(grills_dir, f"{slug}-*.md"))):
+    for path in sorted(glob.glob(os.path.join(st.HOME, "orchestrator", "grills", f"{slug}-*.md"))):
         if not pattern.match(os.path.basename(path)):
             continue
         try:
@@ -209,110 +121,453 @@ def read_grills(slug, problems):
     return {"open": open_q, "answered": answered}
 
 
-def read_snapshot(slug, problems):
-    """The engine's snapshot. Exit 0 and 4 both carry one; exit 1 carries {error, detail}."""
-    cmd = [sys.executable, "-I", os.path.join(HERE, "work_state.py"), "snapshot", "--program", slug, "--json"]
+def read_snapshot(slug, deadline, problems):
+    """The engine's snapshot under the remaining deadline; on timeout, its cached tier with no network."""
+    base = [sys.executable, "-I", os.path.join(HERE, "work_state.py")]
+    budget = max(1.0, deadline.left() - 20)
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=SNAPSHOT_TIMEOUT_S)
+        r = subprocess.run(base + ["snapshot", "--program", slug, "--json"], capture_output=True, text=True,
+                           timeout=budget)
+        cached = False
     except (OSError, subprocess.TimeoutExpired) as exc:
-        problems.append(problem("Map snapshot", f"work_state.py snapshot did not finish: {exc}"))
-        return None
+        problems.append(problem("Map snapshot", f"the live snapshot did not finish ({exc}); showing the cached copy"))
+        try:
+            r = subprocess.run(base + ["guard", "--program", slug], input="{}", capture_output=True, text=True, timeout=10)
+            cached = True
+        except (OSError, subprocess.TimeoutExpired) as exc2:
+            problems.append(problem("Map snapshot", f"the cached snapshot did not finish either: {exc2}"))
+            return None
     try:
         data = json.loads(r.stdout)
     except ValueError:
         problems.append(problem("Map snapshot", f"exit {r.returncode}: {(r.stderr or r.stdout).strip()[:400]}"))
         return None
     if r.returncode not in (0, 4) or "error" in data:
-        problems.append(problem("Map snapshot", data.get("detail") or data.get("error") or f"exit {r.returncode}",
-                                f"python3 {os.path.join(HERE, 'work_state.py')} migrate --program {slug}"
-                                if "unmigrated" in str(data.get("detail")) else None))
+        detail = data.get("detail") or data.get("error") or f"exit {r.returncode}"
+        problems.append(problem("Map snapshot", detail, f"python3 {os.path.join(HERE, 'work_state.py')} migrate --program {slug}"
+                                if "unmigrated" in str(detail) else None))
         return None
     for note in data.get("notes") or []:
         problems.append(problem("Map snapshot", f"engine note: {note}"))
+    data["cached"] = cached
     return data
 
 
-def map_progress(snap):
-    if not snap:
-        return None
-    states = [i.get("state") for i in snap.get("items") or []]
-    return {"closed": states.count("closed"), "active": states.count("active"), "blocked": states.count("blocked"),
-            "ready": states.count("ready"), "total": len(states), "line": snap.get("map_line"),
-            "frontier": snap.get("frontier") or [], "taken_at": snap.get("taken_at"),
-            "tracker_age_s": (snap.get("remote_age_s") or {}).get("tracker"), "children_count": snap.get("children_count")}
+def read_events(path, problems):
+    if not os.path.isfile(path):
+        return []
+    rows, bad = [], 0
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                bad += 1
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+            else:
+                bad += 1
+    if bad:
+        problems.append(problem("Events", f"{bad} line(s) of {os.path.basename(path)} are not JSON objects; not shown"))
+    return rows
+
+
+def publications(events):
+    """History's shipped list from `binding-retired`, deduplicated by repo plus PR or push SHA, never cut."""
+    seen, out = set(), []
+    for e in events:
+        if e.get("event") != "binding-retired":
+            continue
+        b = e.get("binding") or {}
+        p = b.get("publication") or {}
+        if not p.get("repo"):
+            continue
+        key = f"{p['repo']}#{p['pr']}" if p.get("pr") else f"{p['repo']}@{p.get('sha')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"repo": p["repo"], "pr": p.get("pr"), "sha": p.get("sha") or e.get("merge_sha"),
+                    "ticket": b.get("ticket") or e.get("lane"), "at": e.get("ts"), "verdict": e.get("verdict"),
+                    "artifact": b.get("artifact"), "note": e.get("note")})
+    return out
+
+
+# ---------- derived facts for the page ----------
+
+def read_repos(manifest, problems):
+    if "repos" not in manifest:
+        problems.append(problem("Repos", "the manifest names no repos, so PRs, deploys and main health are not read",
+                                "add a `repos` entry to the manifest: references/manager-contract.md, State page"))
+        return []
+    good, errors = st.validate_repos(manifest["repos"])
+    for e in errors:
+        problems.append(problem("Repos", f"{e}; that repo was skipped", "fix the manifest `repos` entry"))
+    return good
+
+
+def viewer_cache_key(slug):
+    return f"{slug}.viewer"
+
+
+def read_viewer_cache(slug):
+    data = wsrc.read_cache(viewer_cache_key(slug))
+    return data if data.get("schema") == VIEWER_SCHEMA else {"schema": VIEWER_SCHEMA}
+
+
+def derive(slug, manifest, snap, events, deadline, now, problems, run=subprocess.run):
+    """Per repo, every derived read. -> {repos: [...], prs: [...], cache}."""
+    cache = read_viewer_cache(slug)
+    repos_cfg = read_repos(manifest, problems)
+    tickets = sorted({i["ticket"] for i in (snap or {}).get("items") or []}
+                     | {b["ticket"] for b in manifest.get("bindings") or []})
+    pubs = [dict(b["publication"], ticket=b["ticket"]) for b in manifest.get("bindings") or [] if b.get("publication")]
+    pubs += [dict(p, at=p.get("at")) for p in publications(events)]
+    gh = ss.Runner(deadline, run)
+    out, searches = [], cache.setdefault("searches", {})
+    for r in repos_cfg:
+        res = ss.collect_repo(r, tickets, pubs, gh, deadline, searches.setdefault(r["repo"], {}), now.timestamp())
+        problems += [problem(p["source"], p["detail"], p.get("fix")) for p in res["problems"]]
+        out.append(res)
+        wsrc.write_cache(viewer_cache_key(slug), cache)
+    prs = [p for r in out for p in r["prs"]]
+    return {"repos": out, "repos_cfg": repos_cfg, "prs": prs, "cache": cache}
+
+
+def production(derived, view, snap, manifest):
+    """One row per change on the ladder. -> (now rows, shipped rows, counts)."""
+    exposure = {}
+    for e in view.get("exposure") or []:
+        exposure[e["ref"].split("#")[-1] if "#" in e["ref"] else e["ref"]] = e
+    items = (snap or {}).get("items") or []
+    has = {r["repo"]: r["has_surfaces"] for r in derived["repos"]}
+    bindings = manifest.get("bindings") or []
+    now_rows, shipped = [], []
+    counts = {"open": 0, "merged": 0, "deployed": 0, "exposed": 0, "baked": 0}
+    for p in sorted(derived["prs"], key=lambda p: p.get("mergedAt") or p.get("updatedAt") or "", reverse=True):
+        ref = str(p.get("number") or (p.get("push_sha") or "")[:12])
+        bake = ss.bake_of(p.get("tickets") or [], items, bindings)
+        lad = ss.ladder(p, exposure.get(ref), bake, has.get(p["repo"], False))
+        if lad["step"] == "closed":
+            continue
+        row = {"repo": p["repo"], "pr": p.get("number"), "sha": p.get("push_sha"), "title": p.get("title"),
+               "tickets": p.get("tickets") or [], "ladder": lad, "additions": p.get("additions"),
+               "deletions": p.get("deletions"), "merged_at": p.get("mergedAt"), "draft": p.get("isDraft"),
+               "files_known": p.get("files") is not None}
+        done = lad["final"] or _closed_and_shipped(p, lad, items)
+        if not done:
+            counts[lad["step"]] = counts.get(lad["step"], 0) + 1
+        (shipped if done else now_rows).append(row)
+    return now_rows, shipped, counts
+
+
+def _closed_and_shipped(pr, lad, items):
+    """Work on closed tickets leaves Now once every affected surface is proven deployed and no bake is open.
+    Its ladder keeps any unstated exposure in History, so nothing is ever upgraded to 'live'."""
+    states = {i["ticket"]: i for i in items}
+    tickets = pr.get("tickets") or []
+    if not tickets or any((states.get(t) or {}).get("state") != "closed" for t in tickets):
+        return False
+    bake = (lad["steps"].get("bake") or {})
+    return lad["step"] in ("deployed", "exposed", "baked") and not bake.get("owed")
+
+
+def outcomes(view, snap, problems):
+    """Open outcomes stay on Now; an outcome moves to History only when every ticket closed and no bake is open."""
+    items = {i["ticket"]: i for i in (snap or {}).get("items") or []}
+    now_rows, done = [], []
+    for o in view.get("outcomes") or []:
+        tickets = o.get("tickets") or []
+        known = [items[t] for t in tickets if t in items]
+        if not tickets or len(known) != len(tickets):
+            missing = [t for t in tickets if t not in items]
+            if snap is not None:
+                problems.append(problem("VIEW", f"outcome '{o['outcome'][:60]}' names " +
+                                        (f"tickets not on the map: {', '.join(missing)}" if tickets else "no tickets"),
+                                        "list the outcome's map tickets in `tickets`"))
+            now_rows.append(dict(o, tickets=[_ticket(items.get(t), t) for t in tickets], state="unknown"))
+            continue
+        closed = all(i["state"] == "closed" for i in known)
+        bake_open = any(i.get("bake_verdict") in ("pending", "fail") for i in known)
+        row = dict(o, tickets=[_ticket(i, i["ticket"]) for i in known],
+                   state="done" if closed and not bake_open else ("bake" if closed else "open"))
+        (done if row["state"] == "done" else now_rows).append(row)
+    return now_rows, done
+
+
+def _ticket(item, tid):
+    item = item or {}
+    return {"id": tid, "state": item.get("state"), "title": item.get("title"), "ended": item.get("ended"),
+            "bake": item.get("bake_verdict"), "bake_ended": item.get("bake_ended")}
+
+
+def proof_owed(view, snap, problems):
+    items = {i["ticket"]: i for i in (snap or {}).get("items") or []}
+    rows = []
+    for r in view.get("proof_owed") or []:
+        derived = (items.get(r.get("ticket")) or {}).get("bake_verdict")
+        if not r.get("ticket"):
+            problems.append(problem("VIEW", f"proof_owed '{r['claim'][:60]}' names no ticket", "add its `ticket`"))
+        elif derived and r.get("verdict") and derived != r["verdict"]:
+            problems.append(problem("VIEW", f"proof_owed for {r['ticket']} says {r['verdict']}, the ticket records {derived}; "
+                                    "the ticket wins", "edit `proof_owed` to match"))
+        rows.append(dict(r, verdict=derived or r.get("verdict") or "owed", derived=bool(derived)))
+    return rows
+
+
+def held_by(snap, derived, overlap_rows, view):
+    """Everything stopping progress, named by what holds it."""
+    rows = []
+    for x in (snap or {}).get("blocking") or []:
+        rows.append({"kind": "flag", "flag": x.get("flag"), "id": x.get("item"), "fix": x.get("fix")})
+    for fl in ("STALLED", "BAKE_OWED"):
+        for x in ((snap or {}).get("flags") or {}).get(fl) or []:
+            rows.append({"kind": "flag", "flag": fl, "id": x.get("item"), "fix": x.get("fix")})
+    for h in (snap or {}).get("holds") or []:
+        rows.append({"kind": "hold", "id": h.get("ticket"), "reason": h.get("reason"), "text": " ".join(h.get("args") or []),
+                     "valid": h.get("valid"), "why": h.get("why")})
+    for i in (snap or {}).get("items") or []:
+        if i.get("state") == "blocked":
+            rows.append({"kind": "blocked", "id": i["ticket"], "by": [b.get("ticket") if isinstance(b, dict) else b
+                                                                       for b in i.get("blocked_by") or []]})
+    for a in (snap or {}).get("awaiting_manager") or []:
+        rows.append({"kind": "awaiting", "id": a.get("ticket"), "category": a.get("category")})
+    for r in derived["repos"]:
+        red = r["red_main"]
+        rows.append({"kind": "main", "repo": r["repo"], "state": red["state"], "why": red.get("why"), "fix": red.get("fix"),
+                     "owners": red.get("owners"), "sha": red.get("sha")})
+    for o in overlap_rows:
+        rows.append(dict(o, kind="overlap"))
+    for d in view.get("design") or []:
+        if d.get("stop"):
+            rows.append({"kind": "design", "what": d["what"], "ref": d.get("ref"), "stop": d["stop"]})
+    return rows
+
+
+def codebase(derived):
+    """Modules this program is changing, from its open PRs' file lists, sized by diff."""
+    mods = {}
+    for r in derived["repos"]:
+        for p in r["prs"]:
+            if p.get("mergedAt") or p.get("state") != "OPEN":
+                continue
+            entry = r["open"].get(str(p["number"])) or {}
+            for f in entry.get("files") or p.get("files") or []:
+                parts = [x for x in f.split("/")[:-1] if x != "src"][:3] or ["(repo root)"]
+                key = (r["repo"], "/".join(parts))
+                m = mods.setdefault(key, {"repo": r["repo"], "module": key[1], "files": 0, "prs": set(), "size": 0})
+                m["files"] += 1
+                m["prs"].add(p["number"])
+                m["size"] += (entry.get("sizes") or {}).get(f, 0)
+    rows = [dict(m, prs=sorted(m["prs"])) for m in mods.values()]
+    return sorted(rows, key=lambda m: (-m["size"], -m["files"]))[:24]
+
+
+def needs_you(view, grills, snap):
+    rows = [{"ask": q["ask"], "recommended": q.get("recommended"), "where": q.get("grill"), "from": "view"}
+            for q in view.get("needs_you") or []]
+    for q in grills["open"]:
+        rec = next((d for d in q.get("detail") or [] if re.search(r"recommend", d, re.I)), None)
+        rows.append({"ask": q["question"], "recommended": rec, "where": q["file"], "n": q["n"], "from": "grill"})
+    for i in (snap or {}).get("items") or []:
+        if i.get("state") != "closed" and any(c.get("type") == "founder" for c in i.get("carriers") or []):
+            rows.append({"ask": i.get("title") or "Waits on you", "ticket": i["ticket"], "from": "ticket"})
+    return rows
+
+
+# ---------- events, staleness, since you last looked ----------
+
+def derived_events(slug, prod_rows, shipped, snap, grills, outcome_rows, cache, now):
+    """Each event: a stable id, a kind, and a time. Merges and deploys carry their own proof times; the rest carry
+    a first-seen time from the program cache. After cache loss, first-seen times are unknown, never "new"."""
+    seen = cache.setdefault("seen", {})
+    baseline = bool(cache.get("baseline_at"))
+    stamp = utc(now)
+    events = []
+
+    def first_seen(eid):
+        if eid not in seen:
+            seen[eid] = stamp if baseline else None
+        return seen[eid]
+
+    for row in prod_rows + shipped:
+        ref = f"{row['repo']}#{row['pr']}" if row.get("pr") else f"{row['repo']}@{row.get('sha')}"
+        label = f"#{row['pr']}" if row.get("pr") else "direct push"
+        steps = row["ladder"].get("steps") or {}
+        if row.get("merged_at") and ts(row["merged_at"]):
+            events.append({"id": f"merge:{ref}", "kind": "merge", "at": row["merged_at"], "label": label})
+        for s in steps.get("deploy") or []:
+            if s.get("state") == "deployed":
+                at = (s.get("deploy") or {}).get("at") or first_seen(f"deploy:{s['surface']}:{ref}")
+                events.append({"id": f"deploy:{s['surface']}:{ref}", "kind": "deploy", "at": at,
+                               "label": f"{label} on {s['surface']}"})
+    for x in (snap or {}).get("blocking") or []:
+        eid = f"blocker:{x.get('item')}:{x.get('flag')}"
+        events.append({"id": eid, "kind": "blocker", "at": first_seen(eid), "label": x.get("item")})
+    for q in grills["open"]:
+        eid = f"grill:{q['file']}:{q['n']}"
+        events.append({"id": eid, "kind": "question", "at": first_seen(eid), "label": q["question"][:80]})
+    for o in outcome_rows:
+        for t in o.get("tickets") or []:
+            if t.get("state") == "closed":
+                eid = f"closed:{t['id']}"
+                events.append({"id": eid, "kind": "closed", "at": first_seen(eid), "label": t["id"]})
+    if not baseline:
+        cache["baseline_at"] = stamp
+    return events, baseline
+
+
+def staleness(view, events):
+    """The narrative is stale when any derived event is newer than VIEW updated_at."""
+    updated = ts(view.get("updated_at"))
+    if updated is None:
+        return {"stale": bool(events), "since": None, "counts": {}, "reason": "no valid updated_at"}
+    newer = [e for e in events if e.get("at") and ts(e["at"]) and ts(e["at"]) > updated]
+    counts = {}
+    for e in newer:
+        counts[e["kind"]] = counts.get(e["kind"], 0) + 1
+    return {"stale": bool(newer), "since": view["updated_at"], "counts": counts, "ids": [e["id"] for e in newer]}
+
+
+def author_line(view, legacy, prod_rows, outcome_rows, stale, problems_rows):
+    """At most 5 exact keys to edit, drawn only from what is unresolved on Now."""
+    out = []
+    unstated = [r for r in prod_rows if (r["ladder"]["steps"].get("exposure") or {}).get("state") == "unstated"]
+    if unstated:
+        refs = [f"#{r['pr']}" for r in unstated if r.get("pr")]
+        out.append(f"exposure: {refs[0]}{f' and {len(refs) - 1} more' if len(refs) > 1 else ''} deployed, no row"
+                   if refs else "exposure: a deployed push, no row")
+    for o in outcome_rows:
+        for t in o.get("tickets") or []:
+            if t.get("state") == "closed" and f"closed:{t['id']}" in (stale.get("ids") or []):
+                out.append(f"outcomes: {t['id']} closed")
+    if not view.get("destination"):
+        out.append("destination: not written")
+    if not view.get("outcomes"):
+        out.append("outcomes: none written")
+    for leg in legacy:
+        out.append(f"{leg['key']}: move to {leg['home']}")
+    if any(p["source"] == "VIEW" and "proof_owed for" in p["detail"] for p in problems_rows):
+        out.append("proof_owed: a verdict disagrees with its ticket")
+    if stale.get("stale"):
+        out.append("updated_at: set it after the edits")
+    return out[:AUTHOR_MAX]
+
+
+# ---------- the payload ----------
+
+def build_payload(slug, now, run=subprocess.run, deadline=None):
+    """Read every owner. Raises FileNotFoundError / ValueError only for an unreadable manifest."""
+    deadline = deadline or ss.Deadline(DEADLINE_S)
+    problems = []
+    base = st.manifest_path(slug)[:-5]
+    with open(base + ".json", encoding="utf-8") as fh:
+        manifest = json.load(fh)
+    if not isinstance(manifest, dict):
+        raise ValueError("the manifest is not a JSON object")
+    text = ""
+    if os.path.isfile(base + ".state.md"):
+        with open(base + ".state.md", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    else:
+        problems.append(problem("State file", f"{base}.state.md does not exist"))
+    at_wake = read_at_wake(text, now, problems) if text else {}
+    parsed = sv.read_view(text, now, problems) if text else {"view": {}, "legacy": []}
+    view = parsed["view"]
+    events = read_events(base + ".events.jsonl", problems)
+    grills = read_grills(slug, problems)
+    snap = read_snapshot(slug, deadline, problems)
+    derived = derive(slug, manifest, snap, events, deadline, now, problems, run)
+    prod_rows, shipped, counts = production(derived, view, snap, manifest)
+    out_now, out_done = outcomes(view, snap, problems)
+    overlap_rows = ss.overlap(si.holdings(manifest, derived), si.other_sidecars(slug, now))
+    arch = state_arch.page_section(slug)
+    problems += [problem("System diagram", p) for p in arch["problems"]]
+    evts, baseline = derived_events(slug, prod_rows, shipped, snap, grills, out_now + out_done, derived["cache"], now)
+    wsrc.write_cache(viewer_cache_key(slug), derived["cache"])
+    stale = staleness(view, evts)
+    done = {(d["skill"], d.get("ref")) for d in view.get("skills_done") or []}
+    files_of = {(p["repo"], p.get("number")): p for p in derived["prs"]}
+    skill_rows = ss.skills([dict(p, files=(files_of.get((p["repo"], p.get("number"))) or {}).get("files")) for p in derived["prs"]],
+                           view, derived["repos_cfg"], (snap or {}).get("items") or [], now.timestamp(), done)
+    health = [dict(h, repo=r["repo"]) for r in derived["repos"] for h in r["health"]]
+    health.append({"name": "Map snapshot", "ok": snap is not None and not snap.get("cached"),
+                   "age_s": ((snap or {}).get("remote_age_s") or {}).get("tracker")})
+    payload = {
+        "schema": SCHEMA, "kind": "program", "program": slug, "generated_at": utc(now), "goal": manifest.get("goal"),
+        "map": manifest.get("map"), "destination": view.get("destination"), "updated_at": view.get("updated_at"),
+        "status": at_wake.get("status"),
+        "now": {"outcomes": out_now, "needs_you": needs_you(view, grills, snap),
+                "held_by": held_by(snap, derived, overlap_rows, view), "overlap": overlap_rows,
+                "system": arch, "production": {"rows": prod_rows, "counts": counts,
+                                               "repos": [{"repo": r["repo"], "surfaces": [
+                                                   {k: s[k] for k in ("name", "unproven", "age_s", "error", "fix")}
+                                                   for s in r["surfaces"]], "has_surfaces": r["has_surfaces"]}
+                                                   for r in derived["repos"]],
+                                               "configured": bool(derived["repos_cfg"])},
+                "proof_owed": proof_owed(view, snap, problems), "design": view.get("design") or [],
+                "codebase": codebase(derived), "workstreams": view.get("workstreams") or [], "skills": skill_rows,
+                "legacy": parsed["legacy"]},
+        "history": {"shipped": shipped, "publications": publications(events), "outcomes": out_done,
+                    "decisions": (view.get("decisions") or []) + [
+                        {"decision": q["question"], "why": q["answer"], "by": "founder", "grill": q["file"]}
+                        for q in grills["answered"]],
+                    "dead_ends": view.get("dead_ends") or [], "incidents": view.get("incidents") or [],
+                    "events": [e for e in events if e.get("event") not in ("binding-retired",)][-300:],
+                    "architecture": arch["archived"], "dropped": 0},
+        "since": {"events": [e for e in evts if e.get("at")], "unknown": sum(1 for e in evts if not e.get("at")),
+                  "baseline": baseline},
+        "stale": stale,
+        "machinery": {"at_wake": at_wake, "lanes": lane_rows(manifest, snap), "health": health,
+                      "items": [{"ticket": i["ticket"], "state": i["state"], "title": i.get("title"), "flags": i.get("flags"),
+                                 "ended": i.get("ended")} for i in (snap or {}).get("items") or []],
+                      "map_line": (snap or {}).get("map_line"), "gates": manifest.get("gates_held_by_manager") or [],
+                      "sources": [_source("Manifest", base + ".json"), _source("State file", base + ".state.md"),
+                                  _source("Events", base + ".events.jsonl"), _source("System diagram", base + ".arch.json")]},
+        "problems": problems,
+    }
+    payload["author"] = author_line(view, parsed["legacy"], prod_rows, out_now, stale, problems)
+    return payload, si.holdings(manifest, derived)
 
 
 def lane_rows(manifest, snap):
-    """One row per carrier: the binding owns the detail, the snapshot owns liveness and title."""
+    """Carriers for the machinery footer: the binding owns the detail, the snapshot owns liveness."""
     items = {i.get("ticket"): i for i in (snap or {}).get("items") or []}
     rows = []
     for b in manifest.get("bindings") or []:
         item = items.get(b.get("ticket")) or {}
         live = {(c.get("type"), c.get("id")): c.get("live") for c in item.get("carriers") or []}
-        for c in b.get("carriers") or [{}]:
-            rows.append({"ticket": b.get("ticket"), "title": item.get("title"), "state": item.get("state"),
-                         "type": c.get("type"), "id": c.get("id"), "runtime": c.get("runtime"), "model": c.get("model"),
-                         "wave": c.get("wave"), "outfile": c.get("outfile"), "live": live.get((c.get("type"), c.get("id"))),
-                         "branch": b.get("branch"), "worktree": b.get("worktree"), "artifact": b.get("artifact"),
-                         "publication": b.get("publication"), "bake": b.get("bake")})
+        for c in b.get("carriers") or []:
+            rows.append({"ticket": b.get("ticket"), "type": c.get("type"), "id": c.get("id"), "runtime": c.get("runtime"),
+                         "model": c.get("model"), "live": live.get((c.get("type"), c.get("id")))})
     return rows
-
-
-def graph_section(slug, snap, problems):
-    if not snap:
-        return {"html": None, "reason": "No graph, because the map snapshot is unavailable. See Problems."}
-    spec, drawn = state_graph.build_spec(slug, snap)
-    if not spec:
-        return {"html": None, "reason": "No graph, because the map has no open ticket."}
-    archify = os.path.join(st.HOME, "skills", "archify", "bin", "archify.mjs")
-    html, why = state_graph.deliver(spec, archify)
-    if why:
-        problems.append(problem("Work graph", why))
-        return {"html": None, "reason": "The graph could not be drawn. See Problems. The list under What is left is complete."}
-    return {"html": html, "reason": None, "drawn": drawn}
 
 
 def _source(name, path):
     exists = os.path.isfile(path)
     mtime = utc(dt.datetime.fromtimestamp(os.path.getmtime(path), dt.timezone.utc)) if exists else None
-    return {"name": name, "path": path, "exists": exists, "modified": mtime}
+    return {"name": name, "file": os.path.basename(path), "exists": exists, "modified": mtime}
 
 
-def build_payload(slug, now):
-    """Read every owner. Raises FileNotFoundError / ValueError only for an unreadable manifest."""
-    problems = []
-    base = st.manifest_path(slug)[:-5]
-    manifest_file = base + ".json"
-    with open(manifest_file, encoding="utf-8") as fh:
-        manifest = json.load(fh)
-    state_file = base + ".state.md"
-    if os.path.isfile(state_file):
-        with open(state_file, encoding="utf-8", errors="replace") as fh:
-            text = fh.read()
-    else:
-        text = ""
-        problems.append(problem("State file", f"{state_file} does not exist"))
-    at_wake = read_at_wake(text, now, problems) if text else {}
-    checkpoint = read_checkpoint(text)
-    view = read_view(text, problems) if text else {}
-    events = read_events(base + ".events.jsonl", problems)
-    decisions = read_grills(slug, problems)
-    snap = read_snapshot(slug, problems)
-    lanes = lane_rows(manifest, snap)
-    graph = graph_section(slug, snap, problems)
-    return {"schema": SCHEMA, "program": slug, "generated_at": utc(now), "goal": manifest.get("goal"),
-            "manager": manifest.get("manager_session") or manifest.get("orchestrator_session"),
-            "map": manifest.get("map"), "forcing_function": manifest.get("next_forcing_function"),
-            "manifest_status": manifest.get("status"), "manifest_updated_at": manifest.get("updated_at"),
-            "gates": manifest.get("gates_held_by_manager") or manifest.get("gates_held_by_orchestrator") or [],
-            "ceded": manifest.get("ceded") or [], "at_wake": at_wake, "checkpoint": checkpoint, "view": view,
-            "progress": map_progress(snap), "items": (snap or {}).get("items") or [],
-            "blocking": (snap or {}).get("blocking") or [], "awaiting": (snap or {}).get("awaiting_manager") or [],
-            "holds": (snap or {}).get("holds") or [], "lanes": lanes, "decisions": decisions, "events": events,
-            "graph": graph, "problems": problems,
-            "sources": [_source("Manifest", manifest_file), _source("State file", state_file),
-                        _source("Events", base + ".events.jsonl")]}
+def fit_budget(payload):
+    """Past the page budget, drop the oldest History rows and say how many."""
+    order = ("events", "publications", "shipped", "decisions", "dead_ends", "incidents")
+    dropped = 0
+    room = PAGE_BUDGET - os.path.getsize(TEMPLATE) - 2_000
+    while len(json.dumps(payload, ensure_ascii=False, default=str).encode()) > room:
+        key = next((k for k in order if payload["history"][k]), None)
+        if not key:
+            break
+        cut = max(1, len(payload["history"][key]) // 4)
+        payload["history"][key] = payload["history"][key][cut:] if key == "events" else payload["history"][key][:-cut]
+        dropped += cut
+    payload["history"]["dropped"] = dropped
+    return payload
 
+
+# ---------- writing ----------
 
 def inject(template, payload):
     """Exactly one placeholder; `<` and the JS line separators are escaped so data cannot end the script."""
@@ -334,6 +589,22 @@ def write_atomic(path, text):
             os.unlink(tmp)
 
 
+def write_page(path, payload):
+    with open(TEMPLATE, encoding="utf-8") as fh:
+        write_atomic(path, inject(fh.read(), payload))
+
+
+def relocate_diagrams(payload, out):
+    """Diagram iframes are relative siblings; a page written elsewhere links them by absolute path instead."""
+    arch = payload["now"]["system"]
+    here = os.path.dirname(os.path.abspath(out))
+    sibling = os.path.abspath(here) == os.path.abspath(os.path.dirname(arch["dir"]))
+    payload["now"]["system"] = dict({k: v for k, v in arch.items() if k not in ("dir", "problems")}, sibling=sibling,
+                                    base_url=None if sibling else "file://" + urllib.parse.quote(os.path.dirname(arch["dir"])) + "/")
+    payload["history"]["architecture"] = payload["now"]["system"]["archived"]
+    return payload
+
+
 def show_in_chrome(path):
     """Keep one viewable Chrome tab on the page: reload it if open, else open it unfocused. Never raises."""
     if sys.platform != "darwin" or os.environ.get("RENDER_STATE_NO_OPEN"):
@@ -341,20 +612,10 @@ def show_in_chrome(path):
     if not os.path.abspath(path).startswith(os.path.expanduser("~/.claude/orchestrator/programs") + os.sep):
         return "skipped"
     url = "file://" + urllib.parse.quote(path)
-    script = (
-        'tell application "Google Chrome"\n'
-        '  if it is not running then return "closed"\n'
-        '  repeat with w in windows\n'
-        '    repeat with t in tabs of w\n'
-        f'      if URL of t starts with "{url}" then\n'
-        '        tell t to reload\n'
-        '        return "reloaded"\n'
-        '      end if\n'
-        '    end repeat\n'
-        '  end repeat\n'
-        '  return "none"\n'
-        'end tell'
-    )
+    script = ('tell application "Google Chrome"\n  if it is not running then return "closed"\n'
+              '  repeat with w in windows\n    repeat with t in tabs of w\n'
+              f'      if URL of t starts with "{url}" then\n        tell t to reload\n        return "reloaded"\n'
+              '      end if\n    end repeat\n  end repeat\n  return "none"\nend tell')
     try:
         res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=15)
         state = res.stdout.strip() or "error"
@@ -363,27 +624,52 @@ def show_in_chrome(path):
         return "error"
 
 
-def main(argv=None):
+def main(argv=None, run=subprocess.run):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--program", required=True)
-    ap.add_argument("--out", help="output path; default <programs>/<slug>.state.html")
+    ap.add_argument("--out", help="page path; default <programs>/<slug>.state.html (sidecar and index stay in programs)")
     args = ap.parse_args(argv)
     now = dt.datetime.now(dt.timezone.utc)
     try:
-        payload = build_payload(args.program, now)
+        payload, hold = build_payload(args.program, now, run)
     except (OSError, ValueError) as exc:
         print(f"render_state: cannot read program {args.program!r}: {exc}", file=sys.stderr)
         return 1
-    out = args.out or st.manifest_path(args.program)[:-5] + ".state.html"
+    base = st.manifest_path(args.program)[:-5]
+    out = os.path.abspath(args.out or base + ".state.html")
+    payload = fit_budget(relocate_diagrams(payload, out))
     try:
-        with open(TEMPLATE, encoding="utf-8") as fh:
-            write_atomic(out, inject(fh.read(), payload))
+        write_page(out, payload)
+        write_atomic(base + ".state.json", json.dumps(si.sidecar(payload, hold), default=str))
     except (OSError, ValueError) as exc:
         print(f"render_state: cannot write {out}: {exc}", file=sys.stderr)
         return 1
-    print(json.dumps({"out": out, "problems": len(payload["problems"]),
-                      "graph": bool(payload["graph"]["html"]), "chrome": show_in_chrome(out)}))
+    index_path = os.path.join(st.PROGRAMS, "index.state.html")
+    index_note = write_index(index_path, now)
+    _, arch_problems = state_arch.build(args.program)
+    section = state_arch.page_section(args.program)
+    if (section["current"] or {}).get("built") != (payload["now"]["system"].get("current") or {}).get("built") \
+            or arch_problems:
+        payload["now"]["system"] = dict(section, dir=section["dir"])
+        payload["problems"] = [p for p in payload["problems"] if p["source"] != "System diagram"] + \
+            [problem("System diagram", p) for p in arch_problems]
+        payload = fit_budget(relocate_diagrams(payload, out))
+        try:
+            write_page(out, payload)
+        except (OSError, ValueError) as exc:
+            print(f"render_state: cannot rewrite {out} with its diagram: {exc}", file=sys.stderr)
+    print(json.dumps({"out": out, "problems": len(payload["problems"]), "stale": payload["stale"]["stale"],
+                      "author": payload["author"], "index": index_note,
+                      "chrome": [show_in_chrome(out), show_in_chrome(index_path)]}))
     return 0
+
+
+def write_index(path, now):
+    try:
+        write_page(path, si.build_index(now))
+        return path
+    except (OSError, ValueError) as exc:
+        return f"not written: {exc}"
 
 
 if __name__ == "__main__":

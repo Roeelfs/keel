@@ -17,204 +17,168 @@
 </script>
 <style>
   :root {
-    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif;
+    --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", system-ui, sans-serif;
     --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --radius: 10px;
-    --radius-small: 6px;
+    --radius: 14px; --radius-small: 8px;
   }
   html[data-theme="dark"] {
     color-scheme: dark;
-    --bg: #0d0e10; --surface: #15171a; --raised: #1c1f23; --line: #26292e; --line-strong: #363a41;
-    --text: #e9eaec; --muted: #a1a5ad; --faint: #72767e;
-    --accent: #7ba7f7; --accent-soft: rgba(123, 167, 247, .13);
-    --run: #7ba7f7; --run-soft: rgba(123, 167, 247, .13);
-    --good: #5cc592; --good-soft: rgba(92, 197, 146, .12);
-    --warn: #e3b35a; --warn-soft: rgba(227, 179, 90, .12);
-    --bad: #ee7f7f; --bad-soft: rgba(238, 127, 127, .12);
-    --idle: #8d929a; --idle-soft: rgba(141, 146, 154, .14);
+    --bg: #0b0c0e; --surface: #121417; --raised: #191c20; --line: #22262b; --line-strong: #30353c;
+    --text: #ebecee; --muted: #a3a8b0; --faint: #6f747c;
+    --accent: #8db1f5; --accent-soft: rgba(141, 177, 245, .12);
+    --good: #6cc89b; --good-soft: rgba(108, 200, 155, .12);
+    --warn: #e2b766; --warn-soft: rgba(226, 183, 102, .11);
+    --bad: #ef8a8a; --bad-soft: rgba(239, 138, 138, .12);
+    --idle: #8f949c; --idle-soft: rgba(143, 148, 156, .13);
+    --shadow: 0 1px 0 rgba(255, 255, 255, .03) inset, 0 10px 30px -18px rgba(0, 0, 0, .7);
   }
   html[data-theme="light"] {
     color-scheme: light;
-    --bg: #f5f6f7; --surface: #ffffff; --raised: #eef0f2; --line: #e2e4e8; --line-strong: #cfd2d8;
-    --text: #15171b; --muted: #565b63; --faint: #80858d;
-    --accent: #2259c7; --accent-soft: rgba(34, 89, 199, .08);
-    --run: #2259c7; --run-soft: rgba(34, 89, 199, .08);
-    --good: #14774a; --good-soft: rgba(20, 119, 74, .09);
-    --warn: #8f5f00; --warn-soft: rgba(177, 120, 0, .11);
-    --bad: #bb2d2d; --bad-soft: rgba(187, 45, 45, .08);
-    --idle: #666b73; --idle-soft: rgba(102, 107, 115, .1);
+    --bg: #f6f6f4; --surface: #ffffff; --raised: #f0f0ed; --line: #e6e5e1; --line-strong: #d3d2cd;
+    --text: #17181b; --muted: #575b62; --faint: #85898f;
+    --accent: #2457c5; --accent-soft: rgba(36, 87, 197, .07);
+    --good: #157549; --good-soft: rgba(21, 117, 73, .08);
+    --warn: #8c5b00; --warn-soft: rgba(184, 125, 0, .1);
+    --bad: #b42e2e; --bad-soft: rgba(180, 46, 46, .07);
+    --idle: #686c73; --idle-soft: rgba(104, 108, 115, .09);
+    --shadow: 0 1px 2px rgba(20, 20, 20, .04), 0 12px 32px -22px rgba(20, 20, 20, .25);
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
-  body {
-    margin: 0; min-height: 100dvh; background: var(--bg); color: var(--text);
-    font: 14px/1.5 var(--sans); font-feature-settings: "tnum";
-    -webkit-font-smoothing: antialiased;
-  }
+  body { margin: 0; min-height: 100dvh; background: var(--bg); color: var(--text);
+    font: 14px/1.55 var(--sans); font-feature-settings: "tnum", "cv11"; -webkit-font-smoothing: antialiased; }
   a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
-  code, .mono { font-family: var(--mono); font-size: .92em; }
+  a:hover { text-decoration: underline; text-underline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  code, .mono { font-family: var(--mono); font-size: .9em; }
   code { overflow-wrap: anywhere; }
   h1, h2, h3, p, ul, ol { margin: 0; padding: 0; }
   ul, ol { list-style: none; }
-  button {
-    font: inherit; color: var(--muted); background: transparent; border: 1px solid var(--line-strong);
-    border-radius: var(--radius-small); padding: 3px 10px; cursor: pointer; white-space: nowrap;
-    transition: color .15s, background .15s;
-  }
+  button, input { font: inherit; color: inherit; }
+  button { color: var(--muted); background: transparent; border: 1px solid var(--line-strong);
+    border-radius: var(--radius-small); padding: 4px 11px; cursor: pointer; white-space: nowrap; transition: color .15s, background .15s; }
   button:hover { color: var(--text); background: var(--raised); }
-  button[aria-pressed="true"] { color: var(--text); background: var(--raised); }
-  details > summary { cursor: pointer; color: var(--muted); }
+  button[aria-pressed="true"], button[aria-selected="true"] { color: var(--text); background: var(--raised); }
+  details > summary { cursor: pointer; color: var(--muted); list-style: none; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: "\203A"; display: inline-block; width: 1em; transition: transform .15s; color: var(--faint); }
+  details[open] > summary::before { transform: rotate(90deg); }
   details > summary:hover { color: var(--text); }
 
-  .bar {
-    position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    padding: 10px 28px; background: var(--bg); border-bottom: 1px solid var(--line);
-  }
-  .bar h1 { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+  .bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap;
+    padding: 12px 32px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+  .bar h1 { font: 600 15px/1.2 var(--display); letter-spacing: -.01em; }
   .bar .grow { flex: 1; }
   .bar .fresh { color: var(--faint); font-size: 12.5px; }
   .bar .fresh.stale { color: var(--warn); }
   .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius-small); overflow: hidden; }
-  .seg button { border: 0; border-radius: 0; padding: 3px 9px; font-size: 12.5px; }
+  .seg button { border: 0; border-radius: 0; padding: 4px 10px; font-size: 12.5px; }
   .seg button + button { border-left: 1px solid var(--line-strong); }
+  .tabs { display: inline-flex; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+  .tabs button { border: 0; padding: 4px 14px; font-size: 13px; border-radius: 7px; }
+  .problem-chip { font-size: 12.5px; border-radius: 99px; padding: 2px 10px; border: 1px solid var(--line-strong); color: var(--muted); }
+  .problem-chip.has { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: var(--warn-soft); }
 
-  .pill {
-    display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 99px; font-size: 12px;
-    font-weight: 550; white-space: nowrap; color: var(--idle); background: var(--idle-soft);
-  }
-  .pill.run { color: var(--run); background: var(--run-soft); }
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px; border-radius: 99px; font-size: 12px;
+    font-weight: 550; white-space: nowrap; color: var(--idle); background: var(--idle-soft); line-height: 1.65; }
+  .pill.run { color: var(--accent); background: var(--accent-soft); }
   .pill.good { color: var(--good); background: var(--good-soft); }
   .pill.warn { color: var(--warn); background: var(--warn-soft); }
   .pill.bad { color: var(--bad); background: var(--bad-soft); }
+  .new-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft); margin-right: 7px; vertical-align: 1px; }
 
-  main { max-width: 1480px; margin: 0 auto; padding: 26px 28px 56px; }
-  .lede { max-width: 92ch; margin-bottom: 22px; }
-  .goal { font-size: 19px; line-height: 1.38; letter-spacing: -.012em; font-weight: 500; }
-  .explain { margin-top: 8px; color: var(--muted); max-width: 84ch; }
+  main { max-width: 1180px; margin: 0 auto; padding: 30px 32px 72px; }
+  .panel[hidden] { display: none; }
+  .since { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 11px 16px; margin-bottom: 14px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); font-size: 13.5px; }
+  .since .what { flex: 1; min-width: 0; color: var(--muted); }
+  .since .what b { color: var(--text); font-weight: 600; }
+  .since.fresh-news { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); background: linear-gradient(0deg, var(--accent-soft), var(--accent-soft)), var(--surface); }
+  .banner { padding: 10px 16px; margin-bottom: 14px; border-radius: var(--radius); font-size: 13.5px;
+    background: var(--warn-soft); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); }
+  .banner .fixes { color: var(--muted); display: block; margin-top: 3px; font-size: 12.5px; }
 
-  .strip {
-    display: grid; grid-template-columns: 1fr 1.25fr 1.15fr; background: var(--surface);
-    border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin-bottom: 30px;
-  }
-  .zone { padding: 16px 20px 18px; min-width: 0; }
-  .zone + .zone { border-left: 1px solid var(--line); }
-  .zone h2 { font-size: 12.5px; font-weight: 600; color: var(--muted); margin-bottom: 8px; }
-  .zone.ask { background: var(--warn-soft); }
-  .zone.ask h2 { color: var(--warn); }
-  .count { font: 300 34px/1.1 var(--mono); letter-spacing: -.03em; }
-  .count.over { color: var(--bad); }
-  .under { color: var(--muted); margin-top: 4px; font-size: 13px; }
-  .next-action { font-size: 15px; line-height: 1.42; font-weight: 500; overflow-wrap: anywhere; }
-  .meta-row { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin-top: 10px; font-size: 13px; }
-  .meta-row dt { color: var(--faint); }
-  .meta-row dd { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
-  .ask-list li + li { margin-top: 8px; }
-  .ask-list .q { font-weight: 500; overflow-wrap: anywhere; }
-  .long { max-height: 8.6em; overflow: hidden; position: relative; }
-  .clip-note { margin-top: 8px; font-size: 13px; }
-  .clip-note pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.5 var(--mono); color: var(--muted); margin: 8px 0 0; }
+  .lands { padding: 26px 28px 24px; margin: 8px 0 22px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); box-shadow: var(--shadow); }
+  .eyebrow { font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin-bottom: 8px; }
+  .destination { font: 500 21px/1.36 var(--display); letter-spacing: -.016em; max-width: 64ch; }
+  .goal-under { margin-top: 8px; color: var(--muted); max-width: 84ch; font-size: 13.5px; }
+  .outcomes { margin-top: 20px; counter-reset: o; display: grid; gap: 2px; }
+  .outcomes li { counter-increment: o; position: relative; padding: 9px 0 9px 36px; border-top: 1px solid var(--line); }
+  .outcomes li:first-child { border-top: 0; }
+  .outcomes li::before { content: counter(o); position: absolute; left: 0; top: 10px; width: 22px; height: 22px; border-radius: 50%;
+    font: 600 11.5px/22px var(--mono); text-align: center; color: var(--muted); background: var(--raised); }
+  .outcomes li.next::before { color: var(--accent); background: var(--accent-soft); }
+  .outcomes .o-text { font-size: 15px; font-weight: 500; }
+  .outcomes .o-ids { margin-top: 3px; font-size: 12.5px; color: var(--faint); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 
-  .columns { display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 38px; align-items: start; }
-  .column { display: grid; grid-template-columns: minmax(0, 1fr); gap: 34px; min-width: 0; }
-  section > h2 { font-size: 14.5px; font-weight: 600; letter-spacing: -.005em; margin-bottom: 12px; }
-  section > h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; font-size: 13px; }
-  .empty { color: var(--faint); font-size: 13.5px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; min-width: 0; }
+  .card.ask { background: linear-gradient(0deg, var(--warn-soft), var(--warn-soft)), var(--surface);
+    border-color: color-mix(in srgb, var(--warn) 32%, var(--line)); }
+  section { margin-top: 22px; }
+  section > h2, .card > h2 { font: 600 13.5px/1.3 var(--display); margin-bottom: 12px; display: flex; align-items: baseline; gap: 8px; }
+  h2 .sub { font-weight: 400; color: var(--faint); font-size: 12.5px; }
+  .card.ask > h2 { color: var(--warn); }
+  .rows { display: grid; gap: 0; }
+  .row { padding: 9px 0; border-top: 1px solid var(--line); font-size: 13.5px; min-width: 0; overflow-wrap: anywhere; }
+  .rows > .row:first-child { border-top: 0; padding-top: 2px; }
+  .row .main-line { font-weight: 500; }
+  .row .under { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  .row .ids { color: var(--faint); font-size: 12.5px; }
+  .row .fix { display: block; color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+  .row .fix code { color: var(--muted); }
+  .empty { color: var(--faint); font-size: 13px; }
+  .rec { color: var(--text); }
+  .rec b { color: var(--warn); font-weight: 600; }
 
-  .tally { display: flex; gap: 30px; flex-wrap: wrap; margin-bottom: 12px; }
-  .tally b { display: block; font: 300 27px/1.1 var(--mono); letter-spacing: -.03em; }
-  .tally span { font-size: 12.5px; color: var(--muted); }
-  .tally .run b { color: var(--run); } .tally .bad b { color: var(--bad); }
-  .tally .good b { color: var(--good); }
-  .segbar { display: flex; height: 6px; gap: 2px; margin-bottom: 12px; }
-  .segbar i { display: block; min-width: 3px; border-radius: 2px; }
-  .frontier { font-size: 13px; color: var(--muted); }
-  .flag-list { margin-top: 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  .flag { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-small); padding: 8px 12px; font-size: 13px; }
-  .flag .fix { display: block; margin-top: 3px; color: var(--muted); }
-  .flag .fix code { color: var(--muted); }
-  .flag-list h3 { font-size: 12.5px; font-weight: 600; color: var(--muted); margin-top: 4px; }
-  .flag details { margin-top: 3px; font-size: 12.5px; }
-  details.inline-more, details.inline-more > summary { display: inline; }
-  details.inline-more > summary { list-style: none; color: var(--accent); }
-  details.inline-more > summary::-webkit-details-marker { display: none; }
-  details.inline-more[open] > summary { display: none; }
-  .more { margin-top: 8px; font-size: 13px; }
+  .ladder { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; align-items: center; }
+  .ladder .arrow { color: var(--faint); font-size: 11px; }
+  .counts { display: flex; gap: 26px; flex-wrap: wrap; margin-bottom: 14px; }
+  .counts div b { display: block; font: 300 26px/1.1 var(--mono); letter-spacing: -.03em; }
+  .counts div span { font-size: 12px; color: var(--muted); }
+  .counts .unknown b { color: var(--warn); font-size: 18px; line-height: 1.6; }
 
-  .graph-shell { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
-  .graph-tools { display: flex; justify-content: flex-end; padding: 8px 10px; border-bottom: 1px solid var(--line); }
-  .graph-shell iframe { display: block; width: 100%; height: 480px; border: 0; background: transparent; }
-  .graph-shell.explore { position: fixed; inset: 0; z-index: 20; border: 0; border-radius: 0; display: flex; flex-direction: column; }
-  .graph-shell.explore iframe { flex: 1; height: auto !important; }
+  .diagram { border: 1px solid var(--line); border-radius: var(--radius-small); overflow: hidden; background: var(--bg); }
+  .diagram iframe { display: block; width: 100%; height: 720px; border: 0; background: transparent; }
+  .diagram-tools { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+  .diagram-tools .grow { flex: 1; }
+  .diagram.explore { position: fixed; inset: 0; z-index: 30; border-radius: 0; display: flex; flex-direction: column; }
+  .diagram.explore iframe { flex: 1; height: auto; }
+  .view-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
 
-  .ledger { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; }
-  .ledger h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
-  .ledger .proven h3 { color: var(--good); } .ledger .unproven h3 { color: var(--warn); }
-  .ledger li { padding: 8px 0 8px 12px; border-left: 2px solid var(--line-strong); }
-  .ledger li + li { margin-top: 4px; }
-  .ledger .proven li { border-left-color: var(--good); }
-  .ledger .unproven li { border-left-color: var(--warn); }
-  .ledger .why { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
+  .mods { display: grid; gap: 7px; }
+  .mod { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 12px; align-items: center; font-size: 13px; }
+  .mod .bar-wrap { height: 6px; background: var(--raised); border-radius: 3px; overflow: hidden; }
+  .mod .bar-fill { height: 100%; background: var(--accent); opacity: .7; border-radius: 3px; }
+  .mod .name { overflow-wrap: anywhere; }
 
-  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+  .problems .row b { font-weight: 600; }
+  .problems .row { border-left: 2px solid var(--warn); padding-left: 12px; border-top: 0; margin-top: 6px; }
+  footer.machinery { margin-top: 34px; border-top: 1px solid var(--line); padding-top: 14px; font-size: 13px; }
+  footer.machinery .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 12px 0; }
+  footer.machinery dt { color: var(--faint); }
+  footer.machinery dd { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
-  th { text-align: left; font-weight: 500; color: var(--faint); padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  td { padding: 9px 12px; vertical-align: top; }
-  tbody tr + tr td { border-top: 1px solid var(--line); }
-  td .dim { color: var(--muted); display: block; font-size: 12.5px; overflow-wrap: anywhere; }
+  th { text-align: left; font-weight: 500; color: var(--faint); padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 8px 10px; vertical-align: top; border-top: 1px solid var(--line); }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-small); background: var(--surface); }
 
-  .tickets { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
-  .tickets h3 { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
-  .ticket { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 10px; padding: 5px 0; font-size: 13.5px; align-items: baseline; }
-  .ticket .chips { display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+  .search { width: 100%; max-width: 420px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 10px;
+    background: var(--surface); margin-bottom: 6px; }
+  .history-note { color: var(--faint); font-size: 12.5px; margin-bottom: 8px; }
+  .day { font-size: 12px; font-weight: 600; color: var(--faint); margin: 14px 0 4px; letter-spacing: .02em; }
+  .hide { display: none !important; }
 
-  .steps { counter-reset: step; }
-  .steps li { position: relative; padding: 0 0 12px 26px; counter-increment: step; }
-  .steps li::before {
-    content: counter(step); position: absolute; left: 0; top: 1px; width: 18px; height: 18px; border-radius: 50%;
-    background: var(--raised); color: var(--muted); font: 11px/18px var(--mono); text-align: center;
-  }
-  .steps .who { color: var(--faint); font-size: 12.5px; display: block; }
-  .upcoming li { display: grid; grid-template-columns: minmax(70px, max-content) 1fr; gap: 10px; padding-bottom: 9px; }
-  .upcoming .when { color: var(--faint); font-size: 12.5px; }
+  .index-row .np { font: 600 14px/1.3 var(--display); white-space: nowrap; }
+  .index-row .ids { white-space: nowrap; }
+  .num { font-family: var(--mono); }
+  .unknown-num { color: var(--warn); }
 
-  .decision { padding: 9px 0; }
-  .decision + .decision { border-top: 1px solid var(--line); }
-  .decision .text { font-weight: 500; overflow-wrap: anywhere; }
-  .decision .why { color: var(--muted); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
-  .decision .when { color: var(--faint); font-size: 12.5px; margin-top: 2px; }
-
-  .timeline { position: relative; padding-left: 15px; border-left: 1px solid var(--line-strong); }
-  .day { font-size: 12.5px; font-weight: 600; color: var(--muted); margin: 14px 0 6px -15px; padding-left: 15px; }
-  .day:first-child { margin-top: 0; }
-  .event { padding: 3px 0 8px; font-size: 13px; }
-  .event .head { color: var(--faint); font-size: 12.5px; }
-  .event .note { overflow-wrap: anywhere; }
-
-  .problems { display: grid; gap: 8px; }
-  .problem { border-left: 2px solid var(--warn); padding: 2px 0 2px 12px; font-size: 13px; }
-  .problem b { font-weight: 600; }
-  .problem .fix { display: block; color: var(--muted); margin-top: 2px; }
-  .sources { font-size: 12.5px; color: var(--faint); display: grid; gap: 3px; }
-  .sources li { overflow-wrap: anywhere; }
-
-  @media (max-width: 1140px) {
-    .columns { grid-template-columns: minmax(0, 1fr); }
-    .strip { grid-template-columns: 1fr 1fr; }
-    .zone.ask { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); order: -1; border-top: 0; border-bottom: 1px solid var(--line); }
-    .zone:first-child { border-left: 0; }
-  }
-  @media (max-width: 680px) {
-    .bar { padding: 8px 16px; gap: 8px 10px; }
-    main { padding: 18px 16px 40px; }
-    .goal { font-size: 17px; }
-    .strip, .ledger { grid-template-columns: minmax(0, 1fr); }
-    .zone + .zone { border-left: 0; border-top: 1px solid var(--line); }
-    .zone.ask { border-bottom: 0; }
-    .ticket { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-    .ticket .chips { justify-content: flex-start; }
-  }
+  @media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } .bar { padding: 10px 18px; } main { padding: 22px 18px 56px; } }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -231,10 +195,11 @@
   function el(tag, attrs) {
     var node = document.createElement(tag);
     Object.keys(attrs || {}).forEach(function (k) {
-      if (attrs[k] === null || attrs[k] === undefined || attrs[k] === false) return;
-      if (k === 'class') node.className = attrs[k];
-      else if (k.indexOf('on') === 0) node.addEventListener(k.slice(2), attrs[k]);
-      else node.setAttribute(k, attrs[k]);
+      var v = attrs[k];
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'class') node.className = v;
+      else if (k.indexOf('on') === 0) node.addEventListener(k.slice(2), v);
+      else node.setAttribute(k, v);
     });
     for (var i = 2; i < arguments.length; i++) add(node, arguments[i]);
     return node;
@@ -244,392 +209,404 @@
     if (Array.isArray(child)) child.forEach(function (c) { add(node, c); });
     else node.appendChild(child.nodeType ? child : document.createTextNode(String(child)));
   }
-  function section(title, sub) {
-    var kids = Array.prototype.slice.call(arguments, 2);
-    return el('section', null, el('h2', null, title, sub ? el('span', { class: 'sub' }, sub) : null), kids);
-  }
+  function pill(text, tone, title) { return el('span', { class: 'pill ' + (tone || ''), title: title || null }, text); }
   function empty(text) { return el('p', { class: 'empty' }, text); }
-  function pill(text, tone) { return el('span', { class: 'pill ' + (tone || '') }, text); }
-  function code(text) { return el('code', null, text); }
-  function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
-
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
+  function words(s) { s = String(s || '').replace(/[_-]+/g, ' ').trim().toLowerCase(); return s.charAt(0).toUpperCase() + s.slice(1); }
   function ms(iso) { var t = Date.parse(iso); return isNaN(t) ? null : t; }
   function span(seconds) {
     var s = Math.abs(Math.round(seconds));
     if (s < 60) return s + 's';
-    if (s < 3600) return Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's';
-    if (s < 86400) return Math.floor(s / 3600) + 'h ' + String(Math.floor(s % 3600 / 60)).padStart(2, '0') + 'm';
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm';
     return Math.floor(s / 86400) + 'd ' + Math.floor(s % 86400 / 3600) + 'h';
   }
-  function ago(iso) {
-    var t = ms(iso);
-    if (t === null) return String(iso || 'unknown');
-    return span((Date.now() - t) / 1000).split(' ')[0] + ' ago';
-  }
+  function ago(iso) { var t = ms(iso); return t === null ? 'unknown' : span((Date.now() - t) / 1000) + ' ago'; }
   function clock(iso) {
     var t = ms(iso);
     if (t === null) return String(iso || '');
     return new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
+  function day(iso) { var t = ms(iso); return t === null ? 'Undated' : new Date(t).toLocaleDateString(undefined, { weekday: 'short', month: 'long', day: 'numeric' }); }
+  function ext(href, text, cls) { return el('a', { href: href, target: '_blank', rel: 'noreferrer', class: cls || 'mono' }, text); }
   function ticketUrl(id) {
     var map = data.map || {};
     if (!map.url || !map.issue || map.url.indexOf(map.issue) < 0) return null;
-    return map.url.replace(map.issue, id);
+    return map.url.slice(0, map.url.indexOf(map.issue)) + id;
   }
-  function ticketLink(id) {
-    var url = ticketUrl(id);
-    return url ? el('a', { href: url, target: '_blank', rel: 'noreferrer', class: 'mono' }, id) : el('span', { class: 'mono' }, id);
-  }
-  function publication(p) {
-    if (!p) return null;
-    if (p.pr) return el('a', { href: 'https://github.com/' + p.repo + '/pull/' + p.pr, target: '_blank', rel: 'noreferrer', class: 'mono' }, 'PR #' + p.pr);
-    return p.sha ? el('span', { class: 'mono' }, String(p.sha).slice(0, 10)) : null;
-  }
-
-  /* ---------- plain words for internal names ---------- */
-  function words(s) {
-    s = String(s || '').replace(/[_-]+/g, ' ').trim().toLowerCase();
-    return s.charAt(0).toUpperCase() + s.slice(1);
-  }
-  var FLAG = { UNBOUND: ['No one on it', 'warn'], READY_NOT_DISPATCHED: ['Ready, not started', 'warn'],
-    STALLED: ['Stalled', 'bad'], BAKE_OWED: ['Bake owed', 'warn'] };
-  function flagPill(f) { var x = FLAG[f] || [words(f), 'warn']; return pill(x[0], x[1]); }
-  var STATUS = { WORKING: ['Working', 'run'], GRILLING: ['Waiting on you', 'warn'], DONE: ['Done', 'good'] };
-  function statusPill(s) { var x = STATUS[String(s).toUpperCase()] || [words(s), '']; return pill(x[0], x[1]); }
-  var AWAIT = { completed: 'Finished its turn', blocked: 'Stopped, blocked', review_ready: 'Ready for review',
-    pr_closed: 'PR closed unmerged' };
-  var KIND = { ship: 'Ship', bake: 'Bake', grill: 'Decision', task: 'Task' };
-  var VERDICT = { pass: ['Bake passed', 'good'], fail: ['Bake failed', 'bad'], pending: ['Bake pending', 'warn'] };
-  function bakeText(b) {
-    var none = /^none:(.+)$/.exec(String(b));
-    return none ? 'No bake (' + words(none[1]).toLowerCase() + ')' : 'Bake ' + b;
-  }
-  var NOTE = { tracker_error: 'Tracker read failed', tracker_rate_limited: 'Tracker rate-limited',
-    tracker_unavailable: 'Tracker unavailable', no_tracker: 'No tracker command', retire_due: 'Carrier due to retire',
-    retire_carriers: 'Dead carriers to retire', kind_missing: 'No kind set', kind_conflict: 'Kinds disagree',
-    hold_invalid: 'Hold needs a fix', binding_not_in_map: 'Bound but not on the map',
-    ready_dropped: 'Ready list dropped, tracker stale', status_done_with_open_children: 'Marked done, tickets still open',
-    no_migration_floor: 'No migration floor', gh_error: 'GitHub read failed', gh_view_error: 'GitHub PR read failed',
-    worktree_gone: 'Worktree gone' };
-
   var TICKET_RE = /^[A-Z][A-Z0-9]*-\d+$/;
-  function idNode(id) { return TICKET_RE.test(String(id)) ? ticketLink(id) : el('span', { class: 'mono' }, id); }
-  /* The first few ids inline; the rest sit behind "+N more", never dropped. */
-  function idList(ids, few) {
-    few = few || 4;
+  function ticket(id) { var u = TICKET_RE.test(String(id)) ? ticketUrl(id) : null; return u ? ext(u, id) : el('span', { class: 'mono' }, id); }
+  function prLink(repo, n) { return n ? ext('https://github.com/' + repo + '/pull/' + n, '#' + n) : null; }
+  function idList(nodes, few) {
+    few = few || 5;
     var out = [];
-    ids.slice(0, few).forEach(function (id, i) { if (i) out.push(', '); out.push(idNode(id)); });
-    var rest = ids.slice(few);
-    if (!rest.length) return out;
-    var tail = [];
-    rest.forEach(function (id) { tail.push(', '); tail.push(idNode(id)); });
-    return out.concat([' ', el('details', { class: 'inline-more' }, el('summary', null, '+' + rest.length + ' more'), tail)]);
+    nodes.slice(0, few).forEach(function (n, i) { if (i) out.push(' '); out.push(n); });
+    var rest = nodes.slice(few);
+    if (rest.length) {
+      var tail = [];
+      rest.forEach(function (n) { tail.push(' '); tail.push(n); });
+      out.push(' ', el('details', { style: 'display:inline' }, el('summary', { style: 'display:inline;color:var(--accent)' }, '+' + rest.length + ' more'), tail));
+    }
+    return out;
   }
-  /* Rows with the same key become one entry listing every id. */
   function groupBy(rows, keyOf) {
     var order = [], groups = {};
-    rows.forEach(function (r) {
-      var k = keyOf(r);
-      if (!groups[k]) { groups[k] = []; order.push(k); }
-      groups[k].push(r);
-    });
+    rows.forEach(function (r) { var k = keyOf(r); if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(r); });
     return order.map(function (k) { return groups[k]; });
   }
+  function section(title, sub) { return el('section', null, el('h2', null, title, sub ? el('span', { class: 'sub' }, sub) : null), Array.prototype.slice.call(arguments, 2)); }
+  function card(title, sub, cls) { return el('div', { class: 'card ' + (cls || '') }, el('h2', null, title, sub ? el('span', { class: 'sub' }, sub) : null), Array.prototype.slice.call(arguments, 3)); }
+  function rows(list) { return el('div', { class: 'rows' }, list); }
+  function row(main, under, extra) { return el('div', { class: 'row' }, el('div', { class: 'main-line' }, main), under ? el('span', { class: 'under' }, under) : null, extra || null); }
 
-  var wake = data.at_wake || {};
-  var view = data.view || {};
-  var progress = data.progress;
-  var openDecisions = (data.decisions || {}).open || [];
-  var answered = (data.decisions || {}).answered || [];
-  var queued = view.needs_you || [];
-  var founderWaits = (data.items || []).filter(function (i) {
-    return i.state !== 'closed' && (i.carriers || []).some(function (c) { return c.type === 'founder'; });
-  });
-  var liveLanes = (data.lanes || []).filter(function (l) { return l.live === true; });
+  /* ---------- since you last looked (client side) ---------- */
+  var SEEN_KEY = 'state-viewer-last-seen:' + (data.program || 'index');
+  var PENDING_KEY = 'state-viewer-pending-seen:' + (data.program || 'index');
+  var store = null;
+  try { store = window.localStorage; store.getItem('x'); } catch (_) { store = null; }
+  function navType() { try { return (performance.getEntriesByType('navigation')[0] || {}).type; } catch (_) { return null; } }
+  /* Leaving the page records a candidate; a reload discards it, any other arrival commits it. */
+  if (store) {
+    try {
+      var pending = store.getItem(PENDING_KEY);
+      if (pending && navType() !== 'reload') store.setItem(SEEN_KEY, pending);
+      store.removeItem(PENDING_KEY);
+    } catch (_) {}
+    window.addEventListener('pagehide', function () { try { store.setItem(PENDING_KEY, new Date().toISOString()); } catch (_) {} });
+  }
+  var lastSeen = null;
+  try { lastSeen = store ? store.getItem(SEEN_KEY) : null; } catch (_) {}
+  var lastSeenMs = ms(lastSeen);
+  var since = data.since || { events: [] };
+  function isNew(eid) {
+    if (lastSeenMs === null) return false;
+    var e = (since.events || []).filter(function (x) { return x.id === eid; })[0];
+    return !!(e && ms(e.at) !== null && ms(e.at) > lastSeenMs);
+  }
+  function newAt(iso) { return lastSeenMs !== null && ms(iso) !== null && ms(iso) > lastSeenMs; }
+  function dot(on) { return on ? el('span', { class: 'new-dot', title: 'New since you last looked' }) : null; }
 
-  /* ---------- header ---------- */
+  /* ---------- plain words ---------- */
+  var STATUS = { WORKING: ['Working', 'run'], GRILLING: ['Waiting on you', 'warn'], DONE: ['Done', 'good'] };
+  var FLAG = { UNBOUND: 'No one on it', READY_NOT_DISPATCHED: 'Ready, not started', STALLED: 'No live worker', BAKE_OWED: 'Bake owed' };
+  var KIND = { merge: ['merged', 'merged'], deploy: ['reached prod', 'reached prod'], blocker: ['new blocker', 'new blockers'],
+    question: ['new question for you', 'new questions for you'], closed: ['ticket closed', 'tickets closed'] };
+  var SURFACE = {
+    deployed: ['Deployed', 'good'], deploying: ['Deploying', 'run'], failed: ['Deploy failed', 'bad'],
+    not_established: ['Deploy not established', 'warn'], na: ['Not affected', ''], cannot_tell: ['Cannot tell', 'warn'],
+    unavailable: ['Deploys unavailable', 'warn'] };
+  var ENDED = { completed: 'done', canceled: 'canceled', duplicate: 'duplicate' };
+  var MAIN = { green: ['Main green', 'good'], red: ['Main red', 'bad'], outage: ['CI outage', 'bad'], pending: ['Main checking', 'run'] };
+  var AWAIT = { completed: 'finished its turn', blocked: 'stopped, blocked', review_ready: 'ready for review', pr_closed: 'PR closed unmerged' };
+  var NOTE = { tracker_error: 'Tracker read failed, using the cached map', tracker_rate_limited: 'Tracker rate-limited',
+    tracker_unavailable: 'Tracker unavailable', no_tracker: 'No tracker command', retire_due: 'Worker due to retire',
+    retire_carriers: 'Dead workers to retire', kind_missing: 'Ticket has no kind', kind_conflict: 'Ticket kinds disagree',
+    hold_invalid: 'A hold needs a fix', binding_not_in_map: 'Bound but not on the map',
+    ready_dropped: 'Ready list hidden, the tracker copy is old', status_done_with_open_children: 'Marked done, tickets still open',
+    no_migration_floor: 'No migration floor', gh_error: 'GitHub read failed', gh_view_error: 'GitHub PR read failed', worktree_gone: 'Worktree gone' };
+
+  function ticketChip(t) {
+    var tone = t.state === 'closed' ? 'good' : (t.state === 'blocked' ? 'bad' : (t.state === 'active' ? 'run' : ''));
+    var label = t.state === 'closed' ? (ENDED[t.ended] || 'closed') : (t.state ? words(t.state === 'active' ? 'in progress' : t.state).toLowerCase() : 'not on the map');
+    if (t.bake === 'pending') label += ', bake owed';
+    if (t.bake === 'fail') label += t.bake_ended === 'canceled' ? ', bake canceled' : ', bake failed';
+    return el('span', null, ticket(t.id), ' ', pill(label, t.bake === 'fail' ? 'bad' : tone, t.title || null));
+  }
+
+  /* ---------- the bar ---------- */
   var freshEl = el('span', { class: 'fresh' });
   var liveBtn = el('button', { type: 'button', 'aria-pressed': 'true', onclick: toggleLive }, 'Live');
   var themeButtons = {};
+  var tabButtons = {};
   function themeControl() {
     var seg = el('div', { class: 'seg', role: 'group', 'aria-label': 'Theme' });
     ['auto', 'light', 'dark'].forEach(function (mode) {
-      themeButtons[mode] = el('button', { type: 'button', onclick: function () { setTheme(mode, true); } },
-        mode.charAt(0).toUpperCase() + mode.slice(1));
+      themeButtons[mode] = el('button', { type: 'button', onclick: function () { setTheme(mode, true); } }, words(mode));
       seg.appendChild(themeButtons[mode]);
     });
     return seg;
   }
-  function renderBar() {
-    var map = data.map || {};
-    add(document.getElementById('bar'), [
-      el('h1', null, data.program),
-      wake.status ? statusPill(wake.status) : pill('Status unknown', 'warn'),
-      map.issue ? (map.url ? el('a', { href: map.url, target: '_blank', rel: 'noreferrer', class: 'mono' }, map.issue) : el('span', { class: 'mono' }, map.issue)) : null,
-      el('span', { class: 'grow' }),
-      freshEl, liveBtn, themeControl()
+  function problemCount() { return (data.problems || []).length; }
+  function renderBar(tabs) {
+    var bar = document.getElementById('bar');
+    var st = STATUS[String(data.status || '').toUpperCase()];
+    var n = problemCount();
+    add(bar, [
+      data.kind === 'index' ? el('h1', null, 'Programs') : el('h1', null, data.program),
+      data.kind === 'index' ? null : (st ? pill(st[0], st[1]) : pill('Status unknown', 'warn')),
+      tabs ? el('div', { class: 'tabs', role: 'tablist' }, tabs.map(function (t) {
+        tabButtons[t] = el('button', { type: 'button', role: 'tab', 'aria-selected': 'false', onclick: function () { showTab(t, true); } }, t);
+        return tabButtons[t];
+      })) : null,
+      data.kind === 'index' ? null : el('a', { href: '#problems', class: 'problem-chip' + (n ? ' has' : ''), onclick: function () { showTab('Now', true); } },
+        n ? plural(n, 'problem') : 'No problems'),
+      el('span', { class: 'grow' }), freshEl, liveBtn, themeControl()
     ]);
-    document.title = data.program + ' state';
+    document.title = (data.kind === 'index' ? 'Programs' : data.program) + ' state';
   }
 
-  /* ---------- now / next / needs you ---------- */
-  var countEl = el('div', { class: 'count' });
-  var countUnder = el('div', { class: 'under' });
-  function zoneNow() {
-    var carried = liveLanes.length ? liveLanes.length + ' running' : null;
-    return el('div', { class: 'zone' }, el('h2', null, 'Now'), countEl, countUnder,
-      carried ? el('div', { class: 'under' }, carried) : null,
-      wake.wake ? el('details', { class: 'clip-note' }, el('summary', null, 'Wake line'), el('pre', null, wake.wake)) : null);
-  }
-  function zoneNext() {
-    var action = wake.next_action || wake.on_fire || data.forcing_function;
-    var label = wake.next_action ? null : (wake.on_fire ? 'When the wake fires' : (data.forcing_function ? 'Forcing function' : null));
-    var rows = [];
-    function row(k, v) { if (v) { rows.push(el('dt', null, k)); rows.push(el('dd', null, v)); } }
-    row('Owner', wake.owner); row('Needs', wake.prerequisite); row('Stops at', wake.stop_condition); row('Mode', wake.mode);
-    return el('div', { class: 'zone' }, el('h2', null, 'Next'),
-      action ? el('div', { class: 'long next-action' }, action) : empty('No next action set'),
-      label ? el('div', { class: 'under' }, label) : null,
-      rows.length ? el('dl', { class: 'meta-row' }, rows) : null,
-      action && action.length > 280 ? el('details', { class: 'clip-note' }, el('summary', null, 'All of it'), el('pre', null, action)) : null);
-  }
-  function zoneAsk() {
-    var n = queued.length + openDecisions.length + founderWaits.length;
-    var list = el('ul', { class: 'ask-list' });
-    var shown = 0;
-    function ask(node, under) {
-      if (shown++ < 3) list.appendChild(el('li', null, el('div', { class: 'q' }, node), under ? el('div', { class: 'under' }, under) : null));
+  /* ---------- Now ---------- */
+  function sinceStrip() {
+    var evs = since.events || [];
+    var strip = el('div', { class: 'since' });
+    var what = el('div', { class: 'what' });
+    if (!store) {
+      add(what, 'First visit: this browser keeps no history, so nothing is marked new.');
+    } else if (lastSeenMs === null) {
+      add(what, 'First visit. Everything below is current; "Mark seen" starts tracking what changes.');
+    } else {
+      var newer = evs.filter(function (e) { return ms(e.at) !== null && ms(e.at) > lastSeenMs; });
+      var counts = {};
+      newer.forEach(function (e) { counts[e.kind] = (counts[e.kind] || 0) + 1; });
+      var parts = Object.keys(KIND).filter(function (k) { return counts[k]; }).map(function (k) {
+        return el('b', null, counts[k] + ' ' + KIND[k][counts[k] === 1 ? 0 : 1]);
+      });
+      if (parts.length) strip.classList.add('fresh-news');
+      add(what, [span((Date.now() - lastSeenMs) / 1000) + ' since you looked: ']);
+      if (parts.length) parts.forEach(function (p, i) { if (i) add(what, ', '); add(what, p); });
+      else add(what, 'nothing new.');
     }
-    queued.forEach(function (q) { ask(q.ask, q.recommended ? 'Recommended: ' + q.recommended : null); });
-    openDecisions.forEach(function (q) { ask(q.question, (q.detail || []).filter(function (d) { return /recommended/i.test(d); })[0]); });
-    founderWaits.forEach(function (i) { ask([i.title || 'Waits on you', ' ', ticketLink(i.ticket)]); });
-    return el('div', { class: n ? 'zone ask' : 'zone' }, el('h2', null, 'Needs you'),
-      n ? el('div', { class: 'count' }, n) : el('div', { class: 'next-action' }, 'Nothing'),
-      n ? list : null,
-      n > 3 ? el('div', { class: 'under' }, '+' + (n - 3) + ' more below') : null);
+    if (since.unknown && !since.baseline) add(what, el('span', { class: 'under' }, ' Baseline unavailable for ' + plural(since.unknown, 'item') + ', so they are never shown as new.'));
+    add(strip, [what, store ? el('button', { type: 'button', onclick: markSeen }, 'Mark seen') : null]);
+    return strip;
   }
-
-  /* ---------- map ---------- */
-  function renderMap() {
-    if (!progress) return section('Map', null, empty('Map unavailable. See Problems.'));
-    var tones = [['closed', 'Closed', 'good', 'var(--good)'], ['active', 'Running', 'run', 'var(--run)'],
-      ['blocked', 'Blocked', 'bad', 'var(--bad)'], ['ready', 'Ready', '', 'var(--idle)']];
-    var tally = el('div', { class: 'tally' });
-    var bar = el('div', { class: 'segbar', role: 'img',
-      'aria-label': tones.map(function (t) { return progress[t[0]] + ' ' + t[1]; }).join(', ') });
-    tones.forEach(function (t) {
-      tally.appendChild(el('div', { class: t[2] }, el('b', null, progress[t[0]]), el('span', null, t[1])));
-      if (progress[t[0]]) bar.appendChild(el('i', { style: 'flex:' + progress[t[0]] + ';background:' + t[3] }));
-    });
-    var blocking = data.blocking || [];
-    var awaiting = data.awaiting || [];
-    var holds = data.holds || [];
-    var age = progress.tracker_age_s === null || progress.tracker_age_s === undefined ? '' : 'tracker ' + span(progress.tracker_age_s) + ' old';
-    return section('Map', age, tally, progress.total ? bar : null,
-      progress.frontier.length ? el('p', { class: 'frontier' }, 'Unblocked: ', idList(progress.frontier, 8)) : null,
-      blocking.length ? el('div', { class: 'flag-list' }, flagGroups(blocking)) : null,
-      awaiting.length ? el('div', { class: 'flag-list' }, awaitGroups(awaiting)) : null,
-      holds.length ? el('div', { class: 'flag-list' }, el('h3', null, 'Held'), holdGroups(holds)) : null);
+  function markSeen() {
+    try { store.setItem(SEEN_KEY, new Date().toISOString()); store.removeItem(PENDING_KEY); } catch (_) {}
+    lastSeenMs = Date.now();
+    rerender();
   }
-  function flagGroups(blocking) {
-    return groupBy(blocking, function (b) { return b.flag; }).map(function (rows) {
-      return el('div', { class: 'flag' }, flagPill(rows[0].flag), ' ', idList(rows.map(function (r) { return r.item; })),
-        el('details', null, el('summary', null, 'How to fix'),
-          rows.map(function (r) { return el('span', { class: 'fix' }, idNode(r.item), ' ', code(r.fix)); })));
-    });
+  function staleBanner() {
+    var s = data.stale || {};
+    if (!s.stale) return null;
+    var c = s.counts || {};
+    var bits = Object.keys(KIND).filter(function (k) { return c[k]; }).map(function (k) { return c[k] + ' ' + (k === 'merge' ? (c[k] === 1 ? 'merge' : 'merges') : KIND[k][c[k] === 1 ? 0 : 1]); });
+    var head = s.since ? 'Narrative stale: ' + (bits.join(' and ') || 'changes') + ' since ' + clock(s.since) : 'Narrative has no valid edit time, so it cannot be checked for staleness';
+    return el('div', { class: 'banner' }, head,
+      (data.author || []).length ? el('span', { class: 'fixes' }, 'To edit: ' + data.author.join('; ')) : null);
   }
-  function awaitGroups(awaiting) {
-    return groupBy(awaiting, function (a) { return a.category; }).map(function (rows) {
-      var c = rows[0].category;
-      return el('div', { class: 'flag' }, pill('Needs the manager', 'warn'), ' ', AWAIT[c] || words(c), ': ',
-        idList(rows.map(function (a) { return a.ticket; })));
-    });
+  function lands() {
+    var n = data.now || {};
+    var list = n.outcomes || [];
+    var box = el('div', { class: 'lands' }, el('div', { class: 'eyebrow' }, 'Where this lands'),
+      el('p', { class: 'destination' }, data.destination || data.goal || 'No destination written'),
+      data.destination && data.goal && data.goal !== data.destination ? el('p', { class: 'goal-under' }, 'Goal: ' + data.goal) : null);
+    if (list.length) {
+      add(box, el('ol', { class: 'outcomes' }, list.slice(0, 6).map(function (o, i) {
+        var anyNew = (o.tickets || []).some(function (t) { return isNew('closed:' + t.id); });
+        return el('li', { class: i === 0 ? 'next' : null }, el('div', { class: 'o-text' }, dot(anyNew), o.outcome),
+          el('div', { class: 'o-ids' }, o.state === 'unknown' ? pill('tickets not on the map', 'warn') : (o.state === 'bake' ? pill('closed, bake still open', 'warn') : null),
+            (o.tickets || []).map(ticketChip)));
+      })));
+      if (list.length > 6) add(box, el('p', { class: 'goal-under' }, '+' + (list.length - 6) + ' later outcomes'));
+    } else {
+      add(box, el('p', { class: 'goal-under' }, 'No outcomes written yet.'));
+    }
+    return box;
   }
-  /* What a hold waits on, in words. `args` is the free text, or the globs for file-collision. */
-  function holdMeaning(h) {
+  function needsYou() {
+    var list = (data.now || {}).needs_you || [];
+    if (!list.length) return null;
+    return card('Needs you', String(list.length), 'ask', rows(list.map(function (q) {
+      var ndot = q.from === 'grill' ? dot(isNew('grill:' + q.where + ':' + q.n)) : null;
+      return row([ndot, q.ask, q.ticket ? [' ', ticket(q.ticket)] : null],
+        q.recommended ? el('span', { class: 'rec' }, el('b', null, 'Recommended: '), String(q.recommended).replace(/^recommended:?\s*/i, '')) : null,
+        q.where ? el('span', { class: 'under' }, 'In ' + q.where) : null);
+    })));
+  }
+  function heldWords(h) {
+    if (h.kind === 'flag') return [FLAG[h.flag] || words(h.flag), 'warn'];
+    if (h.kind === 'blocked') return ['Blocked by another ticket', ''];
+    if (h.kind === 'awaiting') return ['Worker ' + (AWAIT[h.category] || words(h.category).toLowerCase()) + ', needs the manager', 'warn'];
+    return [words(h.kind), ''];
+  }
+  function holdText(h) {
     var reason = String(h.reason || ''), cut = reason.indexOf(':');
     var base = (cut < 0 ? reason : reason.slice(0, cut)).toLowerCase(), target = cut < 0 ? '' : reason.slice(cut + 1);
-    var text = (h.args || []).join(' ').replace(/^waits? on (the )?/i, '').replace(/\.$/, '');
-    var more = text ? ' · ' + text : '';
-    if (base === 'founder-gated') return ['Waiting on ', idNode(target), ' (founder)', more];
-    if (base === 'file-collision') return ['Same files as ', idNode(target), more];
-    if (base === 'cap-codex') return ['Codex at capacity', more];
-    if (base === 'completion-mode') return ['Held until the build group finishes', more];
-    return [words(base), target ? [' ', idNode(target)] : null, more];
+    var more = String(h.text || '').replace(/^waits? on (the )?/i, '').replace(/\.$/, '');
+    if (base === 'founder-gated') return ['Waiting on you: ', ticket(target), more ? ' (' + more + ')' : ''];
+    if (base === 'file-collision') return ['Same files as ', ticket(target), more ? ' (' + more + ')' : ''];
+    if (base === 'cap-codex') return ['Codex at capacity', more ? ' (' + more + ')' : ''];
+    if (base === 'completion-mode') return ['Held until the build group finishes'];
+    return [words(base), target ? [' ', ticket(target)] : null, more ? ' (' + more + ')' : ''];
   }
-  function holdGroups(holds) {
-    return groupBy(holds, function (h) {
-      return [h.valid === false, h.reason, (h.args || []).join(' '), h.why || ''].join('\u0000');
-    }).map(function (rows) {
-      var h = rows[0];
-      var ids = idList(rows.map(function (r) { return r.ticket; }));
-      if (h.valid === false) {
-        return el('div', { class: 'flag' }, pill('Hold needs a fix', 'bad'), ' ', holdMeaning(h), ': ', ids,
-          el('span', { class: 'fix' }, /^[a-z_]+$/.test(h.why || '') ? words(h.why) : String(h.why || '').replace(/^[a-z-]+:\s*/, '')));
+  function heldBy() {
+    var list = (data.now || {}).held_by || [];
+    var out = [];
+    list.filter(function (h) { return h.kind === 'main'; }).forEach(function (h) {
+      if (h.state === 'unavailable') out.push(row(['Main health unavailable ', el('span', { class: 'ids' }, h.repo)], h.why, h.fix ? el('span', { class: 'fix' }, 'Fix: ', h.fix) : null));
+      else if (h.state !== 'green') {
+        var m = MAIN[h.state] || [words(h.state), 'warn'];
+        var owners = (h.owners || []).map(function (o) { return o.title || o.id; }).join(', ');
+        out.push(row([pill(m[0], m[1]), ' ', el('span', { class: 'ids' }, h.repo)], h.state === 'red' ? (owners ? 'Owned by ' + owners : 'Red, no owner') : null));
       }
-      return el('div', { class: 'flag' }, holdMeaning(h), ': ', ids);
     });
+    groupBy(list.filter(function (h) { return h.kind === 'flag' || h.kind === 'blocked' || h.kind === 'awaiting'; }), function (h) { return h.kind + (h.flag || '') + (h.category || ''); }).forEach(function (g) {
+      var w = heldWords(g[0]);
+      var anyNew = g.some(function (h) { return isNew('blocker:' + h.id + ':' + h.flag); });
+      if (g[0].kind === 'blocked') {
+        out.push(row([dot(anyNew), w[0]], el('span', { class: 'ids' }, idList(g.map(function (h) { return el('span', null, ticket(h.id), ' waits on ', (h.by || []).join(', ')); }), 3))));
+        return;
+      }
+      out.push(row([dot(anyNew), w[0], ': '], el('span', { class: 'ids' }, idList(g.map(function (h) { return ticket(h.id); }), 6))));
+    });
+    groupBy(list.filter(function (h) { return h.kind === 'hold'; }), function (h) { return [h.valid, h.reason, h.text].join('\u0000'); }).forEach(function (g) {
+      out.push(row([g[0].valid === false ? pill('Hold needs a fix', 'bad') : null, g[0].valid === false ? ' ' : null, holdText(g[0])],
+        el('span', { class: 'ids' }, 'Holds ', idList(g.map(function (h) { return ticket(h.id); }), 6)),
+        g[0].valid === false && g[0].why ? el('span', { class: 'fix' }, String(g[0].why).replace(/^[a-z-]+:\s*/, '')) : null));
+    });
+    list.filter(function (h) { return h.kind === 'design'; }).forEach(function (h) { out.push(row(['Design stop: ', h.stop], h.what + (h.ref ? ' ' + h.ref : ''))); });
+    list.filter(function (h) { return h.kind === 'overlap'; }).forEach(function (h) {
+      out.push(row(['Same files as ', el('b', null, h.program), ' (advisory)'],
+        plural(h.path_count, 'path') + ' in ' + h.repo + ': ' + h.paths.slice(0, 3).join(', ') + (h.path_count > 3 ? ' and more' : ''),
+        el('span', { class: 'ids' }, 'ours ' + h.ours.map(function (x) { return x === 'bound paths' ? x : '#' + x; }).join(' ') + ' · theirs ' + h.theirs.map(function (x) { return x === 'bound paths' ? x : '#' + x; }).join(' '))));
+    });
+    if (!out.length) return null;
+    return card('Held by', String(out.length), null, rows(out));
   }
-
-  /* ---------- graph ---------- */
-  var graphFrame = null;
-  function renderGraph() {
-    var graph = data.graph || {};
-    if (!graph.html) return null; /* why it is missing is under Problems */
-    var shell = el('div', { class: 'graph-shell' });
-    var exploring = false;
-    var btn = el('button', { type: 'button', onclick: toggleExplore }, 'Full screen');
-    graphFrame = el('iframe', { title: data.program + ' work graph' });
-    graphFrame.addEventListener('load', function () { styleGraph(exploring); });
-    graphFrame.srcdoc = graph.html;
-    function toggleExplore() {
-      exploring = !exploring;
-      shell.classList.toggle('explore', exploring);
-      btn.textContent = exploring ? 'Close (Esc)' : 'Full screen';
-      styleGraph(exploring);
+  var DIAGRAM_SRC = /^[A-Za-z0-9._-]+\.arch\/[0-9a-f]{12}\/[a-z0-9-]+\.html$/;
+  function diagramFrame(file, title, lazy) {
+    var box = el('div', { class: 'diagram' });
+    var btn = el('button', { type: 'button' }, 'Full screen');
+    var frame = el('iframe', { title: title, loading: lazy ? 'lazy' : null });
+    frame.addEventListener('load', function () { frame.setAttribute('data-loaded', 'true'); });
+    if (DIAGRAM_SRC.test(file)) frame.setAttribute('src', file); /* relative sibling only, never a remote URL */
+    btn.addEventListener('click', function () { var on = box.classList.toggle('explore'); btn.textContent = on ? 'Close (Esc)' : 'Full screen'; });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && box.classList.contains('explore')) { box.classList.remove('explore'); btn.textContent = 'Full screen'; } });
+    add(box, [el('div', { class: 'diagram-tools' }, el('span', { class: 'grow' }, title), el('a', { href: file, target: '_blank', rel: 'noreferrer' }, 'Open'), btn), frame]);
+    return box;
+  }
+  function changeLine(s) {
+    if (!s) return null;
+    var bits = [];
+    if (s.added) bits.push(s.added + ' new');
+    if (s.changed) bits.push(s.changed + ' changed');
+    if (s.removed) bits.push(s.removed + ' removed');
+    return bits.length ? bits.join(', ') : 'No component changes';
+  }
+  function system() {
+    var sys = (data.now || {}).system || {};
+    var cur = sys.current;
+    if (!cur) return section('The system, changing', null, empty((sys.reason || 'No system diagram') + '. Author one: ' + (sys.pointer || '<slug>.arch.json') + '.'));
+    if (!cur.built) return section('The system, changing', null, empty('The diagram is being drawn; it appears on the next render.'), cur.views.map(function (v) { return v.note ? el('p', { class: 'goal-under' }, v.title + ': ' + v.note) : null; }));
+    if (!sys.sibling) return section('The system, changing', null, empty('This page was written away from its diagrams; open them from the programs folder.'));
+    var holder = el('div');
+    var views = cur.views || [];
+    function show(i) {
+      holder.textContent = '';
+      var v = views[i];
+      add(holder, [el('p', { style: 'margin-bottom:10px' }, el('b', null, v.title), v.summary ? [' · ', changeLine(v.summary)] : null,
+        v.note ? el('span', { class: 'under', style: 'display:block;color:var(--muted)' }, v.note) : null), diagramFrame(v.file, v.title)]);
+      Array.prototype.forEach.call(tabsEl.children, function (b, j) { b.setAttribute('aria-pressed', String(i === j)); });
     }
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && exploring) toggleExplore(); });
-    add(shell, [el('div', { class: 'graph-tools' }, btn), graphFrame]);
-    return section('Work graph', null, shell);
+    var tabsEl = el('div', { class: 'view-tabs' }, views.length > 1 ? views.map(function (v, i) { return el('button', { type: 'button', onclick: function () { show(i); } }, v.title); }) : null);
+    var s = section('The system, changing', views[0] && views[0].summary ? changeLine(views[0].summary) : null, tabsEl, holder);
+    if (views.length) show(0);
+    return s;
   }
-  function styleGraph(exploring) {
-    var doc;
-    try { doc = graphFrame.contentDocument; } catch (_) { return; }
-    if (!doc || !doc.documentElement) return;
-    if (exploring) doc.documentElement.removeAttribute('data-embed');
-    else doc.documentElement.setAttribute('data-embed', 'true');
-    doc.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme'));
-    doc.documentElement.style.setProperty('--bg', exploring ? '' : getComputedStyle(document.documentElement).getPropertyValue('--surface'));
-    if (exploring) { graphFrame.style.height = ''; return; }
-    var box = doc.querySelector('.diagram-container') || doc.documentElement;
-    graphFrame.style.height = Math.max(240, Math.ceil(box.getBoundingClientRect().height) + 4) + 'px';
+  function stepPills(r) {
+    var lad = r.ladder || {}, steps = lad.steps || {}, out = [];
+    if (lad.step === 'open') { out.push(pill(steps.open && steps.open.draft ? 'Draft PR' : 'PR open', 'run')); return out; }
+    out.push(pill('Merged ' + clock((steps.merged || {}).at), 'good', (steps.merged || {}).sha || null));
+    if (lad.no_deploy_step) out.push(pill('No deploy step, merged is final', ''));
+    (steps.deploy || []).forEach(function (s) {
+      var w = SURFACE[s.state] || [words(s.state), 'warn'];
+      var label = s.state === 'na' ? s.surface + ' not affected' : w[0] + ' ' + s.surface;
+      var url = (s.deploy || {}).url;
+      var title = s.state === 'not_established' ? 'No proven deploy in the last ' + (s.walked || 0) + ' records. Check this surface\'s config.' : (s.why || s.unproven || null);
+      out.push(url ? el('a', { href: url, target: '_blank', rel: 'noreferrer' }, pill(label, w[1], title)) : pill(label, w[1], title));
+    });
+    var exp = steps.exposure;
+    if (exp) out.push(exp.state === 'unstated' ? pill('Exposure unstated', 'warn', 'Add an exposure row for this change') : pill(exp.state === 'dark' ? 'Dark' : (exp.state === 'live' ? 'Live' : 'Exposure n/a'), exp.state === 'live' ? 'good' : '', exp.evidence || null));
+    var b = steps.bake || {};
+    if (b.verdict === 'pass') out.push(pill('Ticket records bake pass', 'good'));
+    else if (b.verdict === 'fail') out.push(pill(b.canceled ? 'Bake canceled' : 'Bake failed', 'bad'));
+    else if (b.verdict === 'pending') out.push(pill('Bake owed', 'warn'));
+    else if (b.verdict === 'none') out.push(pill('No bake: ' + (b.why || []).join(', ').replace(/-/g, ' '), ''));
+    return out;
   }
-
-  /* ---------- proven / unproven ---------- */
-  function renderLedger() {
-    var proven = (view.proven || []).slice();
-    if (data.checkpoint && data.checkpoint.verified) proven.unshift({ claim: data.checkpoint.verified, evidence: 'Completion checkpoint' });
-    var unproven = view.unproven || [];
-    if (!proven.length && !unproven.length) return null;
-    function side(cls, title, rows, reason) {
-      return el('div', { class: cls }, el('h3', null, title + ' (' + rows.length + ')'), rows.length ? el('ul', null, rows.map(function (r) {
-        return el('li', null, r.claim, r[reason] ? el('span', { class: 'why' }, r[reason]) : null);
-      })) : null);
-    }
-    return section('Proven and unproven', null, el('div', { class: 'ledger' },
-      side('proven', 'Proven', proven, 'evidence'), side('unproven', 'Unproven', unproven, 'owed')));
+  function signature(r) { return stepPills(r).map(function (n) { return n.textContent; }).join('|').replace(/Merged [^|]*/, 'Merged'); }
+  function production() {
+    var p = (data.now || {}).production || {};
+    if (!p.configured) return section('Production truth', null, empty('Not read: this program names no repos. See Problems for the fix.'));
+    var c = p.counts || {};
+    var failed = (data.machinery.health || []).some(function (h) { return !h.ok && /Pull requests|Deploys/.test(h.name); });
+    var counts = el('div', { class: 'counts' }, [['open', 'PR open'], ['merged', 'Merged'], ['deployed', 'Deployed'], ['exposed', 'Live'], ['baked', 'Baked']].map(function (k) {
+      return el('div', { class: failed ? 'unknown' : null }, el('b', null, failed && !c[k[0]] ? 'unknown' : (c[k[0]] || 0)), el('span', null, k[1]));
+    }));
+    var list = p.rows || [];
+    var surf = [];
+    (p.repos || []).forEach(function (r) {
+      (r.surfaces || []).forEach(function (s) {
+        if (s.error) surf.push(row([pill('Deploys unavailable', 'warn'), ' ', s.name], s.error + (s.age_s !== null && s.age_s !== undefined ? '; last good read ' + span(s.age_s) + ' old' : ''), s.fix ? el('span', { class: 'fix' }, 'Fix: ' + s.fix) : null));
+        if (s.unproven) surf.push(row([s.name + ': partly unproven'], s.unproven));
+      });
+    });
+    var groups = groupBy(list, signature).map(function (g) {
+      var r = g[0];
+      var anyNew = g.some(function (x) { return isNew('merge:' + x.repo + '#' + x.pr) || (x.ladder.steps.deploy || []).some(function (s) { return isNew('deploy:' + s.surface + ':' + x.repo + '#' + x.pr); }); });
+      if (g.length === 1) {
+        return row([dot(anyNew), r.title || 'Direct push'], el('span', { class: 'ids' }, r.pr ? prLink(r.repo, r.pr) : el('span', { class: 'mono' }, String(r.sha || '').slice(0, 10)), ' ', idList((r.tickets || []).map(ticket), 3)),
+          el('div', { class: 'ladder' }, stepPills(r)));
+      }
+      return row([dot(anyNew), plural(g.length, 'change')], el('span', { class: 'ids' }, idList(g.map(function (x) { return el('span', { title: x.title || '' }, prLink(x.repo, x.pr)); }), 8)),
+        el('div', { class: 'ladder' }, stepPills(r).map(function (n) { if (/^Merged /.test(n.textContent)) n.textContent = 'Merged'; return n; })));
+    });
+    return section('Production truth', list.length ? plural(list.length, 'change') + ' in flight' : null, counts,
+      surf.length ? rows(surf) : null, groups.length ? rows(groups) : empty('Nothing in flight. Shipped work is in History.'));
   }
-
-  /* ---------- lanes ---------- */
-  function liveCell(v) {
-    if (v === true) return pill('Live', 'run');
-    if (v === false) return pill('Not live', 'bad');
-    return pill('Unknown');
-  }
-  function line(node, cls) { return node ? el('span', { class: cls || 'dim' }, node) : null; }
-  function renderLanes() {
-    var rows = data.lanes || [];
-    if (!rows.length) return null;
-    return section('Who is on it', String(rows.length), el('div', { class: 'table-wrap' }, el('table', null,
-      el('thead', null, el('tr', null, ['Ticket', 'Who', 'Live', 'Output'].map(function (h) { return el('th', { scope: 'col' }, h); }))),
-      el('tbody', null, rows.map(function (r) {
-        var who = [words(r.type), r.runtime, r.model].filter(Boolean).join(' ');
-        return el('tr', null,
-          el('td', null, ticketLink(r.ticket), line(r.title)),
-          el('td', null, who, line(r.wave), line(r.id, 'dim mono')),
-          el('td', null, liveCell(r.live)),
-          el('td', null, publication(r.publication), r.branch ? line(code(r.branch)) : null,
-            r.bake ? line(bakeText(r.bake)) : null, line(r.artifact), line(r.outfile, 'dim mono')));
-      })))));
-  }
-
-  /* ---------- what is left ---------- */
-  function ticketRow(i) {
-    return el('div', { class: 'ticket' }, ticketLink(i.ticket), el('span', null, i.title || ''),
-      el('span', { class: 'chips' }, i.kind ? pill(KIND[i.kind] || words(i.kind)) : null,
-        (i.flags || []).filter(function (f) { return f !== 'READY_NOT_DISPATCHED'; }).map(flagPill),
-        i.bake_verdict ? pill((VERDICT[i.bake_verdict] || ['Bake ' + i.bake_verdict])[0], (VERDICT[i.bake_verdict] || [])[1]) : null));
-  }
-  function renderLeft() {
-    var items = data.items || [];
-    var checkpoint = data.checkpoint || {};
-    var head = [
-      checkpoint.done_when ? el('p', null, el('b', null, 'Done when: '), checkpoint.done_when) : null,
-      checkpoint.remaining ? el('p', null, el('b', null, 'Remaining: '), checkpoint.remaining) : null
-    ].filter(Boolean);
-    var groups = [['active', 'Running'], ['blocked', 'Blocked'], ['ready', 'Ready']];
-    var open = groups.map(function (g) {
-      var rows = items.filter(function (i) { return i.state === g[0]; });
-      return rows.length ? el('div', null, el('h3', null, g[1] + ' (' + rows.length + ')'), rows.map(ticketRow)) : null;
-    }).filter(Boolean);
-    var closed = items.filter(function (i) { return i.state === 'closed'; });
-    if (!head.length && !open.length && !closed.length) return null;
-    return section('What is left', null, el('div', { class: 'tickets' }, head, open,
-      closed.length ? el('details', null, el('summary', null, closed.length + ' closed'), closed.map(ticketRow)) : null));
-  }
-
-  /* ---------- rail ---------- */
-  function renderSteps() {
-    var steps = view.next_steps || [];
-    if (!steps.length) return null;
-    return section('Next steps', null, el('ol', { class: 'steps' }, steps.map(function (s) {
-      return el('li', null, s.step, s.owner ? el('span', { class: 'who' }, s.owner) : null);
+  function proofOwed() {
+    var list = (data.now || {}).proof_owed || [];
+    if (!list.length) return null;
+    return card('Proof owed', String(list.length), null, rows(list.map(function (r) {
+      var tone = r.verdict === 'pass' ? 'good' : (r.verdict === 'fail' ? 'bad' : 'warn');
+      var verdict = r.verdict === 'pass' ? (r.derived ? 'Ticket records pass' : 'Manager reports pass') : (r.verdict === 'fail' ? 'Failed' : 'Owed');
+      return row([pill(verdict, tone), ' ', r.claim], [r.proof, r.org ? 'on ' + r.org : null, r.runner ? 'run by ' + r.runner : null].filter(Boolean).join(' · '),
+        r.ticket ? el('span', { class: 'ids' }, ticket(r.ticket)) : null);
     })));
   }
-  function renderUpcoming() {
-    var rows = view.upcoming || [];
-    var fired = wake.on_fire && wake.next_action ? [{ when: 'At wake', what: wake.on_fire }] : [];
-    var all = fired.concat(rows);
-    if (!all.length) return null;
-    return section('Coming up', null, el('ul', { class: 'upcoming' }, all.map(function (r) {
-      return el('li', null, el('span', { class: 'when' }, r.when || 'Later'), el('span', { style: 'overflow-wrap:anywhere' }, r.what));
+  var TIER = { critical: ['Critical review', 'bad'], standard: ['Standard review', 'run'], light: ['Light review', ''], none: ['No review', 'warn'] };
+  function design() {
+    var list = (data.now || {}).design || [];
+    if (!list.length) return null;
+    return card('Design changes', String(list.length), null, rows(list.map(function (d) {
+      var t = TIER[d.tier] || (d.review ? ['Reviewed', 'good'] : ['Review tier unstated', 'warn']);
+      return row([words(d.kind || 'change') + ': ', d.what], d.stop ? 'Hard stop: ' + d.stop : (d.review ? 'Review: ' + d.review : null),
+        el('div', { class: 'ladder' }, pill(t[0], t[1]), d.ref ? el('span', { class: 'ids' }, d.ref) : null));
     })));
   }
-  function renderDecisions() {
-    var made = (view.decisions || []).map(function (d) {
-      return { text: d.decision, why: d.why, when: [d.date, d.by].filter(Boolean).join(', ') };
-    }).concat(answered.map(function (q) {
-      return { text: q.question, why: q.answer, when: 'Your answer' };
-    }));
-    var openList = queued.map(function (q) {
-      return el('div', { class: 'decision' }, el('div', { class: 'text' }, q.ask),
-        q.recommended ? el('div', { class: 'why' }, 'Recommended: ' + q.recommended) : null);
-    }).concat(openDecisions.map(function (q) {
-      return el('div', { class: 'decision' }, el('div', { class: 'text' }, q.question),
-        (q.detail || []).map(function (d) { return el('div', { class: 'why' }, d); }));
-    }));
-    var gates = data.gates || [];
-    if (!openList.length && !gates.length && !made.length) return null;
-    return section('Decisions', null,
-      openList.length ? [el('h3', { style: 'font-size:13px;font-weight:600;color:var(--warn);margin-bottom:2px' }, 'Open (' + openList.length + ')'), openList] : null,
-      gates.length ? el('details', { style: 'margin-top:10px;font-size:13px' }, el('summary', null, 'Founder gates (' + gates.length + ')'),
-        gates.map(function (g) { return el('div', { class: 'decision why' }, g); })) : null,
-      made.length ? [el('h3', { style: 'font-size:13px;font-weight:600;color:var(--muted);margin:16px 0 2px' }, 'Made (' + made.length + ')'),
-        made.slice().reverse().map(function (d) {
-          return el('div', { class: 'decision' }, el('div', { class: 'text' }, d.text), d.why ? el('div', { class: 'why' }, d.why) : null, d.when ? el('div', { class: 'when' }, d.when) : null);
-        })] : null);
+  function codebase() {
+    var list = (data.now || {}).codebase || [];
+    if (!list.length) return null;
+    var max = Math.max.apply(null, list.map(function (m) { return m.size || m.files; }).concat([1]));
+    return card('Codebase', 'open PRs', null, el('div', { class: 'mods' }, list.map(function (m) {
+      return el('div', { class: 'mod' }, el('span', { class: 'name' }, el('span', { class: 'mono' }, m.module), el('span', { class: 'ids' }, ' ' + plural(m.files, 'file') + ' · ' + m.prs.map(function (n) { return '#' + n; }).join(' '))),
+        el('div', { class: 'bar-wrap', title: (m.size || 0) + ' lines changed' }, el('div', { class: 'bar-fill', style: 'width:' + Math.max(4, Math.round(100 * (m.size || m.files) / max)) + '%' })));
+    })));
   }
-  function renderTimeline() {
-    var events = data.events || { rows: [], total: 0 };
-    if (!events.rows.length) return null;
-    var box = el('div', { class: 'timeline' });
-    var lastDay = null;
-    events.rows.slice().reverse().forEach(function (r) {
-      var t = ms(r.ts);
-      var day = t === null ? 'Undated' : new Date(t).toLocaleDateString(undefined, { month: 'long', day: 'numeric' });
-      if (day !== lastDay) { box.appendChild(el('div', { class: 'day' }, day)); lastDay = day; }
-      var when = t === null ? '' : new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-      box.appendChild(el('div', { class: 'event' }, el('div', { class: 'head' }, [when, words(r.event), r.lane].filter(Boolean).join(' · ')),
-        r.note ? el('div', { class: 'note' }, r.note) : null));
-    });
-    var last = events.rows[events.rows.length - 1];
-    return section('Timeline', ago(last.ts) + (events.total > events.rows.length ? ' · newest ' + events.rows.length + ' of ' + events.total : ''), box);
+  function workstreams() {
+    var list = (data.now || {}).workstreams || [];
+    if (!list.length) return null;
+    return card('Workstreams', String(list.length), null, rows(list.map(function (w) {
+      return row(w.outcome, [w.building ? 'Building: ' + w.building : null, w.found ? 'Found: ' + w.found : null].filter(Boolean).join(' · '),
+        el('span', { class: 'ids' }, [w.artifact, w.carrier ? '(' + w.carrier + ')' : null].filter(Boolean).join(' ')));
+    })));
   }
-
-  /* ---------- problems and sources ---------- */
-  /* Engine notes read `key:ticket:detail`; the same key and detail collapse into one row listing every ticket. */
-  function problemRows(rows) {
-    var parsed = rows.map(function (p) {
+  function skills() {
+    var list = (data.now || {}).skills || [];
+    if (!list.length) return null;
+    return card('Skills worth running', String(list.length), null, rows(groupBy(list, function (s) { return s.skill + s.why; }).map(function (g) {
+      return row([el('code', null, g[0].skill)], g[0].why, el('span', { class: 'ids' }, idList(g.map(function (s) { return TICKET_RE.test(s.ref) ? ticket(s.ref) : el('span', null, s.ref); }), 5)));
+    })));
+  }
+  function legacy() {
+    var list = (data.now || {}).legacy || [];
+    if (!list.length) return null;
+    return section('Not migrated', 'the manager\'s older notes, shown as written', rows(list.map(function (l) {
+      return row(words(l.key) + ' (moves to ' + l.home + ')', null, el('div', null, l.text.map(function (t) { return el('span', { class: 'under' }, (l.key === 'proven' ? 'Manager\'s claim: ' : '') + t); })));
+    })));
+  }
+  function problemRows(list) {
+    var parsed = list.map(function (p) {
       var m = /^engine note: ([a-z_]+)(?::(.*))?$/.exec(String(p.detail || ''));
       if (!m) return { source: p.source, text: p.detail, fix: p.fix, ids: [] };
       var rest = m[2] === undefined ? [] : m[2].split(':');
@@ -644,85 +621,202 @@
       return { source: g[0].source, text: g[0].text, fix: g[0].fix, ids: ids, n: g.length };
     });
   }
-  function renderProblems() {
-    var rows = data.problems || [];
-    if (!rows.length) return null;
-    return section('Problems', String(rows.length), el('div', { class: 'problems' }, problemRows(rows).map(function (p) {
-      return el('div', { class: 'problem' }, el('b', null, p.source), ': ', p.text,
-        p.ids.length ? [': ', idList(p.ids)] : (p.n > 1 ? ' (' + p.n + ')' : null),
-        p.fix ? el('span', { class: 'fix' }, 'Fix: ', code(p.fix)) : null);
-    })));
+  function problems() {
+    var list = data.problems || [];
+    var s = el('section', { id: 'problems', class: 'problems' }, el('h2', null, 'Problems', el('span', { class: 'sub' }, list.length ? String(list.length) : 'none')));
+    if (!list.length) { add(s, empty('No problems: every source was read.')); return s; }
+    add(s, problemRows(list).map(function (p) {
+      return el('div', { class: 'row' }, el('b', null, p.source), ': ', p.text, p.ids.length ? [': ', idList(p.ids.map(ticket), 6)] : (p.n > 1 ? ' (' + p.n + ')' : null),
+        p.fix ? el('span', { class: 'fix' }, 'Fix: ', el('code', null, p.fix)) : null);
+    }));
+    return s;
   }
-  function renderSources() {
-    return section('Sources', null, el('ul', { class: 'sources' }, (data.sources || []).map(function (s) {
-      return el('li', null, s.name, ': ', code(s.path), s.exists ? ', changed ' + ago(s.modified) : el('b', { style: 'color:var(--warn)' }, ', missing'));
-    }).concat(view.updated_at ? [el('li', null, 'VIEW block edited ' + ago(view.updated_at))] : [],
-      data.manifest_updated_at ? [el('li', null, 'Manifest updated ' + ago(data.manifest_updated_at))] : [])));
+  function machinery() {
+    var m = data.machinery || {};
+    var w = m.at_wake || {};
+    var health = m.health || [];
+    var bad = health.filter(function (h) { return !h.ok; });
+    var lanes = m.lanes || [];
+    var live = lanes.filter(function (l) { return l.live === true; }).length;
+    var summary = ['Machinery', w.wake_armed ? 'wake armed' : (w.wake ? 'wake not armed' : 'no wake'), plural(live, 'live worker'), bad.length ? plural(bad.length, 'source') + ' failing' : 'sources read'].join(' · ');
+    var kv = [];
+    function pair(k, v) { if (v) { kv.push(el('dt', null, k)); kv.push(el('dd', null, v)); } }
+    pair('Next action', w.next_action); pair('Owner', w.owner); pair('Needs', w.prerequisite); pair('Stops at', w.stop_condition);
+    pair('Wake', w.wake); pair('Map', m.map_line); pair('Founder gates', (m.gates || []).join('; '));
+    pair('Holds in the state file', (w.holds || []).join('; '));
+    return el('footer', { class: 'machinery' }, el('details', { id: 'machinery' }, el('summary', null, summary),
+      el('dl', { class: 'kv' }, kv),
+      lanes.length ? el('div', { class: 'table-wrap' }, el('table', null, el('thead', null, el('tr', null, ['Ticket', 'Worker', 'Live'].map(function (h) { return el('th', null, h); }))),
+        el('tbody', null, lanes.map(function (l) {
+          return el('tr', null, el('td', null, ticket(l.ticket)), el('td', null, [words(l.type), l.runtime, l.model].filter(Boolean).join(' '), el('span', { class: 'ids', style: 'display:block' }, l.id)),
+            el('td', null, l.live === true ? pill('Live', 'run') : (l.live === false ? pill('Not live', 'bad') : pill('Unknown'))));
+        })))) : null,
+      el('h2', { style: 'font-size:13px;margin:16px 0 6px' }, 'Sources'),
+      rows(health.map(function (h) {
+        return row([h.ok ? pill('Read', 'good') : pill('Failed', 'warn'), ' ', h.name, h.repo ? el('span', { class: 'ids' }, ' ' + h.repo) : null],
+          h.ok ? (h.age_s !== null && h.age_s !== undefined ? 'Copy ' + span(h.age_s) + ' old' : null) : h.detail, h.fix ? el('span', { class: 'fix' }, 'Fix: ' + h.fix) : null);
+      }).concat((m.sources || []).map(function (s) { return row([s.exists ? pill('File', '') : pill('Missing', s.name === 'System diagram' ? '' : 'warn'), ' ', s.name], s.exists ? s.file + ', changed ' + ago(s.modified) : s.file); })))));
+  }
+  function renderNow(panel) {
+    add(panel, [sinceStrip(), staleBanner(), lands()]);
+    var grid = el('div', { class: 'grid' }, needsYou(), heldBy());
+    if (grid.children.length) add(panel, grid);
+    add(panel, [system(), production()]);
+    var g2 = el('div', { class: 'grid', style: 'margin-top:22px' }, proofOwed(), design(), codebase(), workstreams(), skills());
+    if (g2.children.length) add(panel, g2);
+    add(panel, [legacy(), problems(), machinery()]);
+  }
+
+  /* ---------- History ---------- */
+  var searchBox = el('input', { class: 'search', type: 'search', placeholder: 'Search history', 'aria-label': 'Search history' });
+  function hrow(text, under, extra, when) {
+    var r = row([dot(newAt(when)), text], under, extra);
+    r.setAttribute('data-search', (r.textContent || '').toLowerCase());
+    return r;
+  }
+  function renderHistory(panel) {
+    var h = data.history || {};
+    var blocks = [];
+    var shipped = (h.shipped || []).map(function (r) {
+      return hrow(r.title || 'Direct push', el('span', { class: 'ids' }, r.pr ? prLink(r.repo, r.pr) : String(r.sha || '').slice(0, 10), ' ', idList((r.tickets || []).map(ticket), 4)), el('div', { class: 'ladder' }, stepPills(r)), r.merged_at);
+    });
+    var pubs = (h.publications || []).filter(function (p) { return !(h.shipped || []).some(function (r) { return r.pr && r.pr === p.pr && r.repo === p.repo; }); }).map(function (p) {
+      return hrow([p.pr ? 'PR ' : 'Direct push ', p.pr ? prLink(p.repo, p.pr) : el('span', { class: 'mono' }, String(p.sha || '').slice(0, 10)), ' for ', ticket(p.ticket)],
+        [p.artifact, p.note].filter(Boolean).join(' · '), el('span', { class: 'ids' }, 'Retired ' + clock(p.at) + (p.verdict ? ' · bake ' + p.verdict : '')), p.at);
+    });
+    if (shipped.length || pubs.length) blocks.push(section('Shipped', String(shipped.length + pubs.length), rows(shipped.concat(pubs))));
+    var reached = (h.outcomes || []).map(function (o) { return hrow(o.outcome, null, el('div', { class: 'o-ids' }, (o.tickets || []).map(ticketChip))); });
+    if (reached.length) blocks.push(section('Outcomes reached', String(reached.length), rows(reached)));
+    var dec = (h.decisions || []).slice().sort(function (a, b) { return (ms(b.date) || 0) - (ms(a.date) || 0); }).map(function (d) {
+      return hrow(d.decision, d.why, el('span', { class: 'ids' }, [d.date ? clock(d.date) : null, d.by, d.supersedes ? 'replaces: ' + d.supersedes : null, d.grill].filter(Boolean).join(' · ')), d.date);
+    });
+    if (dec.length) blocks.push(section('Decisions', String(dec.length), rows(dec)));
+    var dead = (h.dead_ends || []).map(function (d) { return hrow(d.what, d.why, d.date ? el('span', { class: 'ids' }, clock(d.date)) : null, d.date); });
+    if (dead.length) blocks.push(section('Dead ends', String(dead.length), rows(dead)));
+    var inc = (h.incidents || []).map(function (d) {
+      return hrow(d.what, [d.cause ? 'Cause: ' + d.cause : null, d.fix ? 'Fix: ' + d.fix : null].filter(Boolean).join(' · '), el('span', { class: 'ids' }, [d.date ? clock(d.date) : null, d.rca ? 'RCA: ' + d.rca : 'no RCA yet'].filter(Boolean).join(' · ')), d.date);
+    });
+    if (inc.length) blocks.push(section('Incidents', String(inc.length), rows(inc)));
+    var arch = (h.architecture || []).map(function (v) {
+      var holder = el('div');
+      var det = el('details', null, el('summary', null, 'Version from ' + clock(v.updated_at || v.archived_at) + ' · ' + plural((v.views || []).length, 'view')), holder);
+      det.addEventListener('toggle', function () {
+        if (det.open && !holder.children.length) (v.views || []).forEach(function (x) { add(holder, [el('p', { class: 'goal-under' }, x.title + (x.summary ? ' · ' + changeLine(x.summary) : '')), diagramFrame(x.file, x.title, true)]); });
+      });
+      var r = el('div', { class: 'row' }, det);
+      r.setAttribute('data-search', ('architecture ' + (v.views || []).map(function (x) { return x.title; }).join(' ')).toLowerCase());
+      return r;
+    });
+    if (arch.length) blocks.push(section('Architecture over time', String(arch.length), rows(arch)));
+    var ev = h.events || [];
+    if (ev.length) {
+      var box = el('div', { class: 'rows' }), last = null;
+      ev.slice().reverse().forEach(function (e) {
+        var d = day(e.ts);
+        if (d !== last) { box.appendChild(el('div', { class: 'day' }, d)); last = d; }
+        var t = ms(e.ts);
+        box.appendChild(hrow(e.note || words(e.event), [t === null ? null : new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }), words(e.event).toLowerCase(), e.lane].filter(Boolean).join(' · '), null, e.ts));
+      });
+      blocks.push(section('Timeline', String(ev.length), box));
+    }
+    add(panel, [searchBox, h.dropped ? el('p', { class: 'history-note' }, plural(h.dropped, 'older row') + ' left out to keep this page small.') : null,
+      blocks.length ? blocks : empty('No history yet.')]);
+    searchBox.addEventListener('input', function () {
+      var q = searchBox.value.trim().toLowerCase();
+      Array.prototype.forEach.call(panel.querySelectorAll('[data-search]'), function (r) { r.classList.toggle('hide', !!q && r.getAttribute('data-search').indexOf(q) < 0); });
+      Array.prototype.forEach.call(panel.querySelectorAll('section'), function (s) {
+        var any = s.querySelectorAll('[data-search]').length, shown = s.querySelectorAll('[data-search]:not(.hide)').length;
+        s.classList.toggle('hide', !!q && any > 0 && shown === 0);
+      });
+    });
+  }
+
+  /* ---------- the index ---------- */
+  function renderIndex(panel) {
+    var list = data.rows || [];
+    var head = ['Program', 'Lands next', 'Needs you', 'Held by', 'Open', 'Merged', 'Deployed', 'Live', 'Problems', 'Rendered'];
+    add(panel, el('section', { style: 'margin-top:0' }, el('h2', null, 'Live programs', el('span', { class: 'sub' }, String(list.length))),
+      list.length ? el('div', { class: 'table-wrap' }, el('table', null, el('thead', null, el('tr', null, head.map(function (h) { return el('th', null, h); }))),
+        el('tbody', null, list.map(function (r) {
+          var unknown = (r.failed_sources || []).some(function (n) { return /Pull requests|Deploys/.test(n); });
+          function num(k) { var c = (r.counts || {})[k]; return el('td', { class: 'num' + (unknown ? ' unknown-num' : '') }, unknown && !c ? 'unknown' : String(c || 0)); }
+          return el('tr', { class: 'index-row' },
+            el('td', null, el('a', { href: r.page, class: 'np' }, r.program), r.stale ? el('span', { class: 'ids', style: 'display:block' }, 'narrative stale') : null),
+            el('td', null, r.next_landing || el('span', { class: 'empty' }, 'not written')),
+            el('td', { class: 'num' }, r.needs_you ? pill(String(r.needs_you), 'warn') : '0'),
+            el('td', null, (r.held_by || []).slice(0, 2).map(function (h) { return el('span', { class: 'ids', style: 'display:block' }, heldIndex(h)); })),
+            num('open'), num('merged'), num('deployed'), num('exposed'),
+            el('td', { class: 'num' }, r.problems ? pill(String(r.problems), 'warn') : '0'),
+            el('td', { class: r.aged ? 'unknown-num' : 'ids' }, span(r.age_s) + ' ago'));
+        })))) : empty('No program has been rendered yet.')));
+    var bl = data.blockers || [];
+    if (bl.length) add(panel, section('Between programs', String(bl.length), rows(bl.map(function (b) {
+      if (b.kind === 'overlap') return row([el('b', null, b.a), ' and ', el('b', null, b.b), ' touch the same files (advisory)'], plural(b.path_count, 'path') + ' in ' + b.repo + ': ' + b.paths.slice(0, 3).join(', '));
+      return row([el('b', null, b.a), ' is held by ', el('b', null, b.b)], 'via ' + b.id);
+    }))));
+    var quiet = data.quiet || [];
+    if (quiet.length) add(panel, el('section', null, el('details', null, el('summary', null, plural(quiet.length, 'live program') + ' not rendered in 24 h'),
+      rows(quiet.map(function (q) { return row(q.program, q.why + (q.age_s ? ', last ' + span(q.age_s) + ' ago' : '')); })))));
+  }
+  function heldIndex(h) {
+    var m = /^([A-Z_]+):(.*)$/.exec(h);
+    if (m && FLAG[m[1]]) return FLAG[m[1]] + ': ' + m[2];
+    var k = /^([a-z]+):(.*)$/.exec(h);
+    if (k && k[1] === 'overlap') return 'Same files as ' + k[2];
+    if (k && k[1] === 'hold') return 'Hold on ' + k[2];
+    if (k && k[1] === 'blocked') return 'Blocked: ' + k[2];
+    return h;
   }
 
   /* ---------- page ---------- */
-  function renderPage() {
-    var lede = el('div', { class: 'lede' }, el('p', { class: 'goal' }, data.goal || 'No goal set'),
-      view.explanation ? el('p', { class: 'explain' }, view.explanation) : null);
-    var strip = el('div', { class: 'strip' }, zoneNow(), zoneNext(), zoneAsk());
-    var main = el('div', { class: 'column' }, renderMap(), renderGraph(), renderLedger(), renderLanes(), renderLeft(), renderProblems(), renderSources());
-    var rail = el('div', { class: 'column' }, renderSteps(), renderUpcoming(), renderDecisions(), renderTimeline());
-    add(document.getElementById('page'), [lede, strip, el('div', { class: 'columns' }, main, rail)]);
+  var panels = {};
+  var currentTab = 'Now';
+  function showTab(name, persist) {
+    currentTab = name;
+    Object.keys(panels).forEach(function (k) { panels[k].hidden = k !== name; if (tabButtons[k]) tabButtons[k].setAttribute('aria-selected', String(k === name)); });
+    if (persist) { try { sessionStorage.setItem('state-viewer-tab', name); } catch (_) {} }
+  }
+  function rerender() {
+    var page = document.getElementById('page');
+    var y = window.scrollY;
+    page.textContent = '';
+    build(page);
+    showTab(currentTab, false);
+    window.scrollTo(0, y);
+  }
+  function build(page) {
+    if (data.kind === 'index') { panels = { Index: el('div', { class: 'panel' }) }; renderIndex(panels.Index); add(page, panels.Index); currentTab = 'Index'; return; }
+    panels = { Now: el('div', { class: 'panel', role: 'tabpanel' }), History: el('div', { class: 'panel', role: 'tabpanel' }) };
+    renderNow(panels.Now);
+    renderHistory(panels.History);
+    add(page, [panels.Now, panels.History]);
   }
 
-  /* ---------- ticking ---------- */
+  /* ---------- ticking, live reload, theme ---------- */
   function tick() {
     var age = (Date.now() - (ms(data.generated_at) || Date.now())) / 1000;
-    freshEl.textContent = 'Rendered ' + span(age).split(' ')[0] + ' ago';
+    freshEl.textContent = 'Rendered ' + span(age) + ' ago';
     freshEl.title = data.generated_at;
     freshEl.classList.toggle('stale', age > 3600);
-    var status = wake.status;
-    var fire = ms(wake.wake_fire_at);
-    countEl.classList.remove('over');
-    if (status === 'DONE') { countEl.textContent = 'Done'; countUnder.textContent = ''; return; }
-    if (fire !== null) {
-      var left = (fire - Date.now()) / 1000;
-      countEl.textContent = span(left);
-      countEl.classList.toggle('over', left < 0);
-      countUnder.textContent = (left < 0 ? 'Overdue since ' : 'Wakes ') + clock(wake.wake_fire_at);
-    } else if (wake.wake) {
-      countEl.textContent = 'On event';
-      countUnder.textContent = wake.wake_armed ? 'Wakes when a carrier reports' : 'Wake not armed';
-    } else if (status === 'GRILLING') {
-      countEl.textContent = 'Asking you';
-      countUnder.textContent = 'Waiting on your answers';
-    } else {
-      countEl.textContent = 'No wake';
-      countEl.classList.add('over');
-      countUnder.textContent = 'No wake set';
-    }
   }
-
-  /* A file:// page cannot ask whether it changed, so it reloads while someone is looking at it. */
   var RELOAD_MS = 60000;
   var live = true;
   function readLive() { try { live = localStorage.getItem('state-viewer-live') !== 'off'; } catch (_) {} liveBtn.setAttribute('aria-pressed', String(live)); liveBtn.textContent = live ? 'Live' : 'Paused'; }
-  function toggleLive() {
-    live = !live;
-    try { localStorage.setItem('state-viewer-live', live ? 'on' : 'off'); } catch (_) {}
-    readLive();
-  }
+  function toggleLive() { live = !live; try { localStorage.setItem('state-viewer-live', live ? 'on' : 'off'); } catch (_) {} readLive(); }
+  /* A file:// page cannot ask whether it changed, so it reloads while someone is looking at it. */
   function maybeReload() {
     if (!live || document.hidden) return;
     if (String(window.getSelection && window.getSelection()).length) return;
-    if (document.querySelector('.graph-shell.explore')) return;
-    if (document.activeElement && document.activeElement.tagName === 'IFRAME') return;
-    if (document.querySelector('details[open]')) return;
+    if (document.querySelector('.diagram.explore')) return;
+    if (document.activeElement && (document.activeElement.tagName === 'IFRAME' || document.activeElement.tagName === 'INPUT')) return;
+    if (document.querySelector('main details[open]')) return;
     location.reload();
   }
-
-  /* ---------- theme ---------- */
   function setTheme(mode, persist) {
     if (persist) { try { localStorage.setItem('state-viewer-theme', mode); } catch (_) {} }
     var dark = mode === 'dark' || (mode !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
     Object.keys(themeButtons).forEach(function (m) { themeButtons[m].setAttribute('aria-pressed', String(m === mode)); });
-    if (graphFrame) styleGraph(!!document.querySelector('.graph-shell.explore'));
   }
   function currentMode() {
     var saved = null;
@@ -730,12 +824,15 @@
     return new URLSearchParams(location.search).get('theme') || saved || 'auto';
   }
 
-  renderBar();
-  renderPage();
+  renderBar(data.kind === 'index' ? null : ['Now', 'History']);
+  build(document.getElementById('page'));
+  var savedTab = null;
+  try { savedTab = sessionStorage.getItem('state-viewer-tab'); } catch (_) {}
+  var asked = (location.hash || '').replace('#', '');
+  showTab(data.kind === 'index' ? 'Index' : (asked === 'history' ? 'History' : (savedTab === 'History' ? 'History' : 'Now')), false);
   readLive();
   setTheme(currentMode(), false);
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { setTheme(currentMode(), false); });
-  window.addEventListener('resize', function () { if (graphFrame) styleGraph(!!document.querySelector('.graph-shell.explore')); });
   tick();
   setInterval(tick, 1000);
   setInterval(maybeReload, RELOAD_MS);
