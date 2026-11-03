@@ -24,7 +24,9 @@ Resolve dependencies and scope collisions before merge. Re-run only evidence inv
 
 Post-merge work contains only proof obligations whose claim depends on merged/deployed state. Key each run by:
 
-`{obligation, deploy SHA, environment, command/journey}`
+`{obligation, deploy SHA, environment, command/journey, test identity, human-step kit, terminal assertion}`
+
+This line is the bake obligation key set's one owner: `scripts/work_state.py bake-body` reads it to write each bake ticket's body, and `test_work_state.py` pins the two equal. A merged ship's bake is its own map ticket (`work_state.py` BAKE_OWED, manager contract §The deploy seam).
 
 Run the smallest project-authorized proof against the **changed runtime seam**. Record the assertion, logs/state evidence, and safe test identity. **never rerun local suites** after merge merely because a merge happened.
 

@@ -1,0 +1,19 @@
+{
+  "schema": "work-state-tracker/1",
+  "provisional": "Hand-written from the spec's section 4 shape until the adapter's `snapshot --fixture` output exists; replace it with that generated file and delete this key. Child fields: id, title, order (map order), state {type, name}, kind (ship|bake|task|grill|null), kind_inferred, kind_error (kind_conflict|null), updated_at, blocked_by [{id, state {type}|null, kind?}], optional bake_verdict / verdict_url on a bake child.",
+  "map": {"id": "M-1", "title": "Map", "state": {"type": "started", "name": "In Progress"}},
+  "taken_at": "2026-11-03T10:00:00Z",
+  "children_count": 9,
+  "requests": [{"x_complexity": 228}],
+  "children": [
+    {"id": "T-1", "order": 1, "title": "Ship A", "state": {"type": "completed", "name": "Done"}, "kind": "ship", "kind_inferred": false, "kind_error": null, "updated_at": "2026-11-03T09:00:00Z", "blocked_by": []},
+    {"id": "T-2", "order": 2, "title": "Bake: Ship A", "state": {"type": "unstarted", "name": "Todo"}, "kind": "bake", "kind_inferred": false, "kind_error": null, "updated_at": "2026-11-03T09:01:00Z", "blocked_by": [{"id": "T-1", "state": {"type": "completed"}}]},
+    {"id": "T-3", "order": 3, "title": "Ship B (stacked on C)", "state": {"type": "backlog", "name": "Backlog"}, "kind": "ship", "kind_inferred": false, "kind_error": null, "updated_at": "2026-11-03T09:02:00Z", "blocked_by": [{"id": "T-4", "state": {"type": "started"}}]},
+    {"id": "T-4", "order": 4, "title": "Ship C", "state": {"type": "started", "name": "In Progress"}, "kind": "ship", "kind_inferred": false, "kind_error": null, "updated_at": "2026-11-03T09:03:00Z", "blocked_by": []},
+    {"id": "T-5", "order": 5, "title": "Research", "state": {"type": "unstarted", "name": "Todo"}, "kind": "task", "kind_inferred": true, "kind_error": null, "updated_at": "2026-11-03T09:04:00Z", "blocked_by": [{"id": "X-99", "state": null}]},
+    {"id": "T-6", "order": 6, "title": "Grill: a founder ruling", "state": {"type": "unstarted", "name": "Todo"}, "kind": "grill", "kind_inferred": false, "kind_error": null, "updated_at": "2026-11-03T09:05:00Z", "blocked_by": []},
+    {"id": "T-7", "order": 7, "title": "Two work labels", "state": {"type": "unstarted", "name": "Todo"}, "kind": null, "kind_inferred": false, "kind_error": "kind_conflict", "updated_at": "2026-11-03T09:06:00Z", "blocked_by": []},
+    {"id": "T-8", "order": 8, "title": "Duplicate", "state": {"type": "duplicate", "name": "Duplicate"}, "kind": "task", "kind_inferred": false, "kind_error": null, "updated_at": "2026-11-03T09:07:00Z", "blocked_by": []},
+    {"id": "T-9", "order": 9, "title": "Task after research", "state": {"type": "backlog", "name": "Backlog"}, "kind": "task", "kind_inferred": false, "kind_error": null, "updated_at": "2026-11-03T09:08:00Z", "blocked_by": [{"id": "T-5", "state": {"type": "unstarted"}}]}
+  ]
+}

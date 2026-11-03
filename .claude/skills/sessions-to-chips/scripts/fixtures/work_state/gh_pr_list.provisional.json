@@ -1,0 +1,9 @@
+{
+  "provisional": "Hand-written in the exact `gh pr list --json number,state,mergedAt,headRefName,headRefOid,statusCheckRollup,reviewDecision` row shape; replace with a de-identified real capture.",
+  "rows": [
+    {"number": 101, "state": "MERGED", "mergedAt": "2026-11-03T08:00:00Z", "headRefName": "feat/ship-a", "headRefOid": "1111111111111111111111111111111111111111", "reviewDecision": "APPROVED", "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]},
+    {"number": 102, "state": "OPEN", "mergedAt": null, "headRefName": "feat/ship-c", "headRefOid": "2222222222222222222222222222222222222222", "reviewDecision": "", "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "IN_PROGRESS", "conclusion": ""}]},
+    {"number": 103, "state": "CLOSED", "mergedAt": null, "headRefName": "feat/abandoned", "headRefOid": "3333333333333333333333333333333333333333", "reviewDecision": "", "statusCheckRollup": []},
+    {"number": 104, "state": "OPEN", "mergedAt": null, "headRefName": "feat/branch-1", "headRefOid": "4444444444444444444444444444444444444444", "reviewDecision": "", "statusCheckRollup": [{"__typename": "StatusContext", "context": "lint", "state": "SUCCESS"}]}
+  ]
+}

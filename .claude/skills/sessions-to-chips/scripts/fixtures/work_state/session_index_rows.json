@@ -1,0 +1,185 @@
+{
+ "_note": "Session-index rows captured 2026-11-03 from a live manager family by program_family.session_index(), de-identified at capture: ids, titles, branches and reports replaced; status_category, archived, timestamps and the spawnedFrom chain kept.",
+ "rows": [
+  {
+   "sessionId": "local_a000b28a-0000-4000-8000-000000000000",
+   "cliSessionId": "c0014a7c-0000-4000-8000-000000000000",
+   "title": "[Manager] Program",
+   "spawnedFrom": {
+    "sessionId": "local_a0022ace-0000-4000-8000-000000000000"
+   },
+   "isArchived": true,
+   "lastActivityAt": 1793041355404,
+   "lastAssistantUuid": "u-5e57671b",
+   "postTurnSummaryFor": "u-5e57671b",
+   "status_category": "review_ready",
+   "lastTurnReport": null,
+   "writtenBranches": [
+    "/wt/w0\u0000feat/branch-0"
+   ],
+   "prs": [
+    {
+     "prNumber": 100,
+     "repo": "owner/repo",
+     "branch": "feat/branch-0",
+     "state": "MERGED"
+    }
+   ],
+   "cwd": "/wt/w0",
+   "worktreePath": "/wt/w0"
+  },
+  {
+   "sessionId": "local_a003e358-0000-4000-8000-000000000000",
+   "cliSessionId": "c0040ebb-0000-4000-8000-000000000000",
+   "title": "Child 1",
+   "spawnedFrom": {
+    "sessionId": "local_a000b28a-0000-4000-8000-000000000000"
+   },
+   "isArchived": true,
+   "lastActivityAt": 1793041519795,
+   "lastAssistantUuid": "u-496f888c",
+   "postTurnSummaryFor": null,
+   "status_category": null,
+   "lastTurnReport": "report 53db6b4e",
+   "writtenBranches": [
+    "/wt/w1\u0000feat/branch-1"
+   ],
+   "prs": [
+    {
+     "prNumber": 101,
+     "repo": "owner/repo",
+     "branch": "feat/branch-1",
+     "state": "MERGED"
+    }
+   ],
+   "cwd": "/wt/w1",
+   "worktreePath": "/wt/w1"
+  },
+  {
+   "sessionId": "local_a0054bc4-0000-4000-8000-000000000000",
+   "cliSessionId": "c0061d4d-0000-4000-8000-000000000000",
+   "title": "Child 2",
+   "spawnedFrom": {
+    "sessionId": "local_a000b28a-0000-4000-8000-000000000000"
+   },
+   "isArchived": true,
+   "lastActivityAt": 1793041456314,
+   "lastAssistantUuid": "u-8690dcaa",
+   "postTurnSummaryFor": null,
+   "status_category": null,
+   "lastTurnReport": "report 53db6b4e",
+   "writtenBranches": [
+    "/wt/w2\u0000feat/branch-2"
+   ],
+   "prs": [
+    {
+     "prNumber": 102,
+     "repo": "owner/repo",
+     "branch": "feat/branch-2",
+     "state": "MERGED"
+    }
+   ],
+   "cwd": "/wt/w2",
+   "worktreePath": "/wt/w2"
+  },
+  {
+   "sessionId": "local_a007092a-0000-4000-8000-000000000000",
+   "cliSessionId": "c0088417-0000-4000-8000-000000000000",
+   "title": "Child 3",
+   "spawnedFrom": {
+    "sessionId": "local_a000b28a-0000-4000-8000-000000000000"
+   },
+   "isArchived": true,
+   "lastActivityAt": 1793041418851,
+   "lastAssistantUuid": "u-a15a3be9",
+   "postTurnSummaryFor": null,
+   "status_category": null,
+   "lastTurnReport": "report 53db6b4e",
+   "writtenBranches": [
+    "/wt/w3\u0000feat/branch-3"
+   ],
+   "prs": [
+    {
+     "prNumber": 103,
+     "repo": "owner/repo",
+     "branch": "feat/branch-3",
+     "state": "MERGED"
+    }
+   ],
+   "cwd": "/wt/w3",
+   "worktreePath": "/wt/w3"
+  },
+  {
+   "sessionId": "local_a0091a0d-0000-4000-8000-000000000000",
+   "cliSessionId": "c0105b59-0000-4000-8000-000000000000",
+   "title": "Child 4",
+   "spawnedFrom": {
+    "sessionId": "local_a0054bc4-0000-4000-8000-000000000000"
+   },
+   "isArchived": true,
+   "lastActivityAt": 1793041409527,
+   "lastAssistantUuid": "u-c85c2c89",
+   "postTurnSummaryFor": "u-c85c2c89",
+   "status_category": "review_ready",
+   "lastTurnReport": "report c9b82b1b",
+   "writtenBranches": [
+    "/wt/w4\u0000feat/branch-4"
+   ],
+   "prs": [
+    {
+     "prNumber": 104,
+     "repo": "owner/repo",
+     "branch": "feat/branch-4",
+     "state": "MERGED"
+    }
+   ],
+   "cwd": "/wt/w4",
+   "worktreePath": "/wt/w4"
+  },
+  {
+   "sessionId": "local_a0110e29-0000-4000-8000-000000000000",
+   "cliSessionId": "c0122f8b-0000-4000-8000-000000000000",
+   "title": "Child 5",
+   "spawnedFrom": {
+    "sessionId": "local_a000b28a-0000-4000-8000-000000000000"
+   },
+   "isArchived": true,
+   "lastActivityAt": 1793041033482,
+   "lastAssistantUuid": "u-4484abcb",
+   "postTurnSummaryFor": "u-4484abcb",
+   "status_category": "completed",
+   "lastTurnReport": "report a1c5f9b2",
+   "writtenBranches": [
+    "/wt/w5\u0000feat/branch-5"
+   ],
+   "prs": [
+    {
+     "prNumber": 105,
+     "repo": "owner/repo",
+     "branch": "feat/branch-5",
+     "state": "MERGED"
+    }
+   ],
+   "cwd": "/wt/w5",
+   "worktreePath": "/wt/w5"
+  },
+  {
+   "sessionId": "local_a013dcda-0000-4000-8000-000000000000",
+   "cliSessionId": "c0143a66-0000-4000-8000-000000000000",
+   "title": "Child 6",
+   "spawnedFrom": {
+    "sessionId": "local_a01514a9-0000-4000-8000-000000000000"
+   },
+   "isArchived": true,
+   "lastActivityAt": 1793035423384,
+   "lastAssistantUuid": "u-f802e4b4",
+   "postTurnSummaryFor": "u-f802e4b4",
+   "status_category": "review_ready",
+   "lastTurnReport": "report bf2921f1",
+   "writtenBranches": [],
+   "prs": [],
+   "cwd": "/wt/w6",
+   "worktreePath": "/wt/w6"
+  }
+ ]
+}
