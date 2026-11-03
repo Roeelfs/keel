@@ -4,11 +4,26 @@ renderings). The manager reads it at every wake and session start in place of re
 map from it, updates `## VIEW` and re-renders. Bounded to MAX_LINES; every list says how many it left out.
 Rules: ../specs/2026-11-03-manager-state-viewer.md
 """
+import re
+
 import state_story as story
 
 MAX_LINES = 60
+KIND = {"spec": "Spec", "adr": "ADR", "module": "Module"}
 FLAG = {"UNBOUND": "not started", "READY_NOT_DISPATCHED": "ready, not started",
         "STALLED": "stopped moving", "BAKE_OWED": "bake owed"}
+
+
+def _clause(text):
+    """A sentence used as a clause: no trailing full stop, so joins never read ".;"."""
+    return str(text or "").strip().rstrip(".")
+
+
+def _problem(x):
+    """One Problems item in plain words: an engine note's code reads as words, never as an id."""
+    m = re.match(r"^engine note: ([a-z_]+)(?::(.*))?$", x.get("detail") or "")
+    detail = (m.group(1).replace("_", " ") + (f" ({m.group(2)})" if m.group(2) else "")) if m else x.get("detail") or ""
+    return f"{x['source']}: {detail[:80]}"
 
 
 def _day(iso):
@@ -71,16 +86,16 @@ def brief(p):
     if not (sysv.get("current") or {}).get("views"):
         arch.append(f"no system diagram yet: author {p.get('program')}.arch.json")
     out += _section("Architecture changes", arch, cap=5)
-    out += _section("Design changes", [f"{d.get('kind') or 'change'}: {d['what']}" + (f", meaning {d['meaning']}" if d.get("meaning") else "") +
+    out += _section("Design changes", [f"{KIND.get(d.get('kind'), 'Change')}: {_clause(d['what'])}" + (f": {_clause(d['meaning'])}" if d.get("meaning") else "") +
                                        (f" ({d['ref']})" if d.get("ref") else "") for d in st.get("design") or []], cap=5)
-    out += _section("Decisions in force", [d["decision"] + (f"; why: {d['why']}" if d.get("why") else "") +
+    out += _section("Decisions in force", [_clause(d["decision"]) + (f"; why: {_clause(d['why'])}" if d.get("why") else "") +
                                            (f"; by {d['by']}" if d.get("by") else "") +
                                            (f"; replaces {d['supersedes']}" if d.get("supersedes") else "")
                                            for d in st.get("decisions") or []], st.get("decisions_more", 0), cap=5)
-    out += _section("Learned", [f["found"] + (f" ({f['outcome']})" if f.get("outcome") else "") for f in st.get("findings") or []],
+    out += _section("Learned", [_clause(f["found"]) + (f" ({f['outcome']})" if f.get("outcome") else "") for f in st.get("findings") or []],
                     st.get("findings_more", 0), cap=4)
     out += _section("Next outcomes on the map", [f"{o['outcome']} [{_ticket_states(o) or 'no tickets'}]" for o in now.get("outcomes") or []], cap=6)
-    out += _section("Needs the founder", [q["ask"] + (f"; recommended: {q['recommended']}" if q.get("recommended") else "")
+    out += _section("Needs the founder", [_clause(q["ask"]) + (f"; recommended: {_clause(q['recommended'])}" if q.get("recommended") else "")
                                           for q in now.get("needs_you") or []], cap=4)
     out += _section("Held by", [held_text(h) for h in now.get("held_by") or []], cap=6)
     out += _section("Proof owed", [f"{r['claim']} ({r.get('ticket') or 'no ticket'}, {r.get('verdict')})" for r in now.get("proof_owed") or []], cap=4)
@@ -88,7 +103,7 @@ def brief(p):
     out += ["Production: " + ", ".join(f"{c.get(k, 0)} {w}" for k, w in (("open", "PR open"), ("merged", "merged"), ("deployed", "deployed"),
                                                                           ("exposed", "live"), ("baked", "baked"))), ""]
     probs = p.get("problems") or []
-    out += [f"Problems: {len(probs)}" + (": " + "; ".join(f"{x['source']}: {x['detail'][:80]}" for x in probs[:2]) if probs else ""), ""]
+    out += [f"Problems: {len(probs)}" + (": " + "; ".join(_problem(x) for x in probs[:2]) if probs else ""), ""]
     keys = p.get("author") or []
     footer = ["Update in ## VIEW before ending the turn:"] + (["- " + k for k in keys] if keys else ["- nothing owed"])
     footer += ["Then re-render: render_state.py --program " + str(p.get("program"))]

@@ -6,6 +6,12 @@ work. Implementation is fast, so the founder's attention is the scarce resource.
 **History** keeps decisions and merged work. Page shape and the cross-program index are approved and fixed
 (brief: `state-page-v2-brief.md`). This spec settles how each fact is obtained.
 
+Founder direction 2026-11-04, on the ticket-and-lane graph: the page must make the content and actual output
+of the work understandable by reading it, not the lanes or sessions; it names the program as its manager
+session is named; and it is per-track state management, updated continuously and used as the context for the
+next wake and session, so the work always proceeds with the map in mind. See "Reads as the work" and "The
+context brief".
+
 v1 is replaced, not extended. The ticket graph (`scripts/state_graph.py`), the v1 VIEW keys and the lane
 table on the main view are deleted in the same change.
 
@@ -14,7 +20,10 @@ table on the main view are deleted in the same change.
 | File | Role |
 | --- | --- |
 | `references/state-viewer/template.html` | The ONE template for program pages and the index (`payload.kind`). Static; never per-program. |
-| `scripts/render_state.py` | `--program <slug> [--out]`. Reads owners, writes the page, its sidecar and the index. |
+| `scripts/render_state.py` | `--program <slug> [--out] [--context]`. Reads owners, writes the page, its sidecar and the index; `--context` prints the brief instead and writes nothing. |
+| `scripts/state_story.py` | The work as outcomes: joins each VIEW `done` line to the derived ladder of its PRs, marks claims, lists merged work not yet summarized. Pure. |
+| `scripts/state_brief.py` | The context brief: the same payload as bounded plain text. Pure. |
+| `scripts/test_state_story.py` | Names, the story join, claims, not-yet-summarized, the brief and its bound. |
 | `scripts/state_sources.py` | New. The derived readers below (gh, deploys, red main, overlap, skills rules). Pure functions plus one runner. |
 | `scripts/state_arch.py` | New. Validates `<slug>.arch.json`, runs Archify only when its hash changes, archives versions. |
 | `scripts/work_state_store.py` | Gains `validate_repos`, called by the renderer only, never inside `_Locked.write`. |
@@ -42,7 +51,9 @@ The manager authors only judgment. Everything else is derived on every render, s
 | File overlap with other programs | other programs' sidecars | Derived |
 | Skills worth running | the rules table over the facts above | Derived |
 | Since you last looked | payload timestamps vs `localStorage` last-seen | Derived, client side |
-| Destination, outcomes, exposure (dark/live), proof owed, design changes, workstream findings, decisions, dead ends, incidents | `## VIEW` in `<slug>.state.md` | Authored |
+| The program's name | its newest `[Manager]` session title, resolved by exact session id through `program_family.program_titles`; else manifest `title`, else the slug plus one Problems row | Derived |
+| Destination, outcomes, what was done, architecture and design changes, decisions, findings, exposure (dark/live), proof owed, dead ends, incidents | `## VIEW` in `<slug>.state.md` | Authored |
+| Which merged PRs are not yet summarized, and which `done` lines claim more than their proof | `state_story.py` over VIEW and the PR ladder | Derived |
 | The system being changed, before and after | `<slug>.arch.json` | Authored |
 | Earlier diagram versions | `<slug>.arch/<sha12>.json`, append-only | Archived by `state_arch.py` |
 
@@ -159,9 +170,11 @@ is closed; every key is optional; an unknown key, a wrong type or bad JSON goes 
   "needs_you":  [{ "ask": "...", "recommended": "...", "grill": "<grill file or chip>" }],
   "exposure":   [{ "ref": "#5073", "state": "dark", "evidence": "flag X off in prod" }],
   "proof_owed": [{ "claim": "...", "proof": "...", "org": "...", "runner": "...", "verdict": "owed" }],
-  "design":     [{ "what": "...", "kind": "spec", "ref": "#5085", "tier": "critical", "review": "<path>", "stop": "..." }],
-  "workstreams":[{ "outcome": "...", "building": "...", "found": "...", "artifact": "...", "carrier": "<id>" }],
+  "done":       [{ "date": "...", "what": "Owners can hand ownership to another member through one guarded transfer; it ships dark.", "why": "...", "refs": ["#5073"] }],
+  "architecture":[{ "date": "...", "what": "Owner changes go through one guarded transfer; a direct Owner-row edit is refused.", "refs": ["#5024", "#5073"] }],
+  "design":     [{ "what": "...", "meaning": "one line: what it means", "kind": "spec", "ref": "#5085", "tier": "critical", "review": "<path>", "stop": "...", "date": "..." }],
   "decisions":  [{ "date": "...", "decision": "...", "why": "...", "by": "founder", "supersedes": "..." }],
+  "findings":   [{ "date": "...", "outcome": "...", "found": "...", "refs": ["#5095"] }],
   "dead_ends":  [{ "date": "...", "what": "...", "why": "..." }],
   "incidents":  [{ "date": "...", "what": "...", "cause": "...", "fix": "...", "rca": "<path>" }],
   "skills_done":[{ "skill": "/spec-review", "ref": "#5085", "date": "..." }] }
@@ -173,10 +186,56 @@ row and stays on Now. A `proof_owed` row names its ticket; the derived bake verd
 Problems row, and a pass reads "ticket records pass", never "proven", since no bake artifact is read.
 `date` and `updated_at` are RFC3339; a date-only or future value is a Problems row. `kind` ∈
 `spec|adr|module`; `tier` ∈ `critical|standard|light|none`; `exposure.state` ∈ `dark|live|n/a`; `verdict` ∈
-`owed|pass|fail`.
+`owed|pass|fail`. `refs` and `tickets` are lists of ids (`"#5073"`, `"CYN-3256"`). `workstreams` is retired
+(2026-11-04): it read as session tracking; its findings go to `findings`, its output to `done`, and an old
+block shows under "not migrated" until converted.
 `needs_you` holds asks not yet in a grill file; once a grill file carries one, the manager deletes it here.
 Stop-guard safety is unchanged: a JSON line never starts with `Status:` or `Wake:`, pinned by the
 real-guard test.
+
+## Reads as the work
+
+A reader who never saw a session understands the track from the page alone. The bar names the program as its
+manager session is titled, with "[Manager] " and a "(fork)" suffix stripped ("Cynap", "Apps", "CAYP cutover
+(Access v2)"), with the map id beside it as a link; the slug never appears as a name. Now and History answer
+in this order, each in plain language:
+
+1. **What this track is achieving**: the destination, with the manifest goal under it.
+2. **What was done**: VIEW `done`, newest first, one line per delivered outcome with its PR refs after the
+   sentence and the furthest ladder step those PRs provably reached. Now shows the last 7 days (at most 6;
+   the newest 3 when none is that recent), History all. A merged PR or retired direct push that no `done`,
+   `architecture` or `design` line names is listed by its title, marked "not yet summarized", and named in
+   the `author` line.
+3. **What changed in the architecture**: one sentence per VIEW `architecture` row, then the before/after
+   diagram. Without `<slug>.arch.json`, one line asks for it; no empty panel.
+4. **What changed in the design**: VIEW `design`, each `kind: what` with its `meaning` line.
+5. **Decisions**: what, why, by whom, what they replaced; grill answers join them.
+6. **What was learned**: VIEW `findings`.
+7. Then **what is next** (outcomes on the map), **needs you**, **held by**, **proof owed**, production truth,
+   problems.
+
+Sessions, lanes, carriers and wakes never appear as a heading or the subject of a sentence above the
+collapsed machinery footer. Workers waiting on the manager, flags on a worker id rather than a ticket, the
+lane table and the raw event timeline live in the footers. A row that says only that a session is running
+is never shown.
+
+**Claims.** A `done` line whose words assert a ladder step (live, in production, rolled out → live;
+deployed, reached prod → deployed; baked, proven → baked) beyond what its PRs provably reached shows as
+"Manager's claim: proof reaches <step>". The derived proof wins. An `exposure` of `n/a` has nothing to be
+live, so it reads as deployed. The rule matches words, so it errs toward flagging; the fix is plainer
+wording, never a weaker rule.
+
+## The context brief
+
+`render_state.py --program <slug> --context` prints the payload as plain text, at most 60 lines, writing
+nothing: the name and map, when the narrative was last updated and whether it is stale, the destination,
+what was done recently (claims and not-yet-summarized marked), architecture and design changes, decisions in
+force, what was learned, next outcomes with ticket states, what needs the founder, what holds the work, the
+proof owed, production counts, the problem count, and last the keys to update and the re-render command.
+The footer always survives the bound; every cut list says how many it left out. It has no second source:
+one payload, two renderings. The manager reads it at every wake and session start in place of re-deriving
+the program, works the map from it, updates VIEW before ending the turn and re-renders. The Stop guard's
+AT-WAKE facts are unchanged.
 
 ## `<slug>.arch.json`, schema `state-arch/1`
 
@@ -236,7 +295,8 @@ including the index's reload of a page shown inside it (see Chrome tabs).
 `index.state.html` is built from every sidecar, with no network, by every program render. A program is live
 when its manifest has no `absorbed_by` and its `status` is not `done` or `closed`. A sidecar older than 24 h
 keeps its row, marked with its age, if it has open asks or PRs; otherwise it goes to a collapsed "not
-rendered in 24 h" list. One row per live program:
+rendered in 24 h" list. One row per live program, named as on its page with its map id under it (a program
+with no readable name keeps its slug, and one Problems row lists them):
 next landing (first open outcome), needs-you count, top held-by, prod-truth counts per ladder step, the
 problems count and the render age. Below the rows: cross-program blockers, meaning file overlap pairs and
 held-by rows that name another program's ticket or PR.
@@ -292,6 +352,8 @@ in their "Managers" tab group.
 
 - Template, renderer, `state_sources.py`, `state_arch.py`, tests and the contract paragraph are committed;
   `state_graph.py` is gone.
+- Both pages carry real authored `done`, `architecture`, `design`, `decisions` and `findings` content and read
+  as the work in the order above; `--context` prints a bounded brief for each.
 - `cayp-cutover.state.html` and `apps.state.html` are rendered from real data, each ≤ 200 KB, with a real
   `<slug>.arch.json` showing a before/after diagram on cayp-cutover, and `index.state.html` lists both.
 - Both pages and the index load with no console errors in dark and light themes.

@@ -177,6 +177,10 @@ owns one living map) **and `Status: GRILLING`** (a founder decision round, recom
 first; a `wrap_up` with `blocked: true` or an `AskUserQuestion` counts). Write the status line
 before you end.
 
+**Every wake prompt starts from the context brief:** "Run `render_state.py --program <slug> --context`,
+work the map from it, do <the on-fire action>, update `## VIEW`, re-render." It points at the state; it
+never re-serializes it (§State page).
+
 **These are NOT stops** — each gets ONE event-bound wake, then the turn ends:
 
 | Situation | Wake size |
@@ -380,34 +384,62 @@ it and record it on the `Wake:` line (§No stop without an armed wake); only a h
 the turn unarmed, as `Status: GRILLING`. In the final reply, list remaining actions in order, with
 owner and prerequisite where needed, or state that no requested work remains.
 
-**State page (founder, 2026-11-03).** `scripts/render_state.py --program <slug>` writes
-`<slug>.state.html` (Now looks forward, History keeps shipped work and decisions), its sidecar
-`<slug>.state.json` and the cross-program `index.state.html`. Run it on every state change and at every wake.
-Every state page lives in ONE Chrome tab, showing the index, which embeds the chosen program (founder,
-2026-11-04). Each render reloads that tab, or points the first state tab at the index and closes the other
-state tabs, or opens one unfocused (`open -g`); `RENDER_STATE_NO_OPEN=1` skips that. Never open a state page
-in its own tab. Read the one stdout line instead of opening the page:
-`{"out", "problems", "stale", "author": [...], "chrome": {...}}`. `author`
-names the exact VIEW keys to edit (at most 5); make that one small edit and nothing else.
+**State page (founder, 2026-11-03; reshaped 2026-11-04).** The page is the track's state: the content and
+output of the work, readable by someone who never saw a session, and the context every wake runs from. It names
+the program as its manager session is titled, without "[Manager] " ("Cynap", "Apps", "CAYP cutover (Access
+v2)"), with the map id beside it. Now and History answer in one order: what this track is achieving; what was
+done; what changed in the architecture; what changed in the design; the decisions; what was learned; then what
+is next, what holds it, and the proof owed. Sessions, lanes, carriers and wakes appear only in the collapsed
+machinery footer, never as a heading or the subject of a sentence above it.
+
+`scripts/render_state.py --program <slug>` writes `<slug>.state.html`, its sidecar `<slug>.state.json` and
+the cross-program `index.state.html`. Every state page lives in ONE Chrome tab, showing the index, which embeds
+the chosen program (founder, 2026-11-04). Each render reloads that tab, or points the first state tab at the
+index and closes the other state tabs, or opens one unfocused (`open -g`); `RENDER_STATE_NO_OPEN=1` skips that.
+Never open a state page in its own tab. The render prints one stdout line:
+`{"out", "problems", "stale", "author": [...], "chrome": {...}}`. `author` names the exact VIEW keys to edit
+(at most 5).
+
+**Every wake and every session start runs from the context brief.** `render_state.py --program <slug> --context`
+prints the same payload as a plain-text brief of about 60 lines: destination, what was done recently,
+architecture and design changes, decisions in force, the next outcomes on the map, what holds them, the proof
+owed, and the keys to update. It writes no page and has no second source. The loop is:
+1. Read the brief first, in place of re-deriving the program from transcripts, events or the tracker.
+2. Work the map from it: the next outcome, what holds it, the proof owed.
+3. Before ending the turn, update `## VIEW` with what the turn changed (the keys the brief's last lines name,
+   plus any new `done`, `architecture`, `design`, `decisions` or `findings` line) and set `updated_at`.
+4. Re-render with `render_state.py --program <slug>`.
+A new, resumed or forked manager session gets its state the same way: step 1 is the brief. The `## AT-WAKE`
+facts the Stop guard reads (`Status:`, `Wake:`, `Hold:`, `Mode:`) are unchanged and still required.
 
 You author only judgment. PRs, merges, deploys per surface, main health, bakes, blockers and file overlap are
 derived on every render, so never copy them into VIEW. Three owners are yours:
 - **Manifest `repos`** (validated by `work_state_store.validate_repos`): each repo the program ships to, its
   `ticket_pattern`, its `surfaces` (a `deployment` environment or a `job`, each with a `proof_step` when a green
   record can skip the real deploy, and the `paths` it serves), `red_main_cmd` (or `null` plus `red_main_unproven`),
-  and `security_paths`. No `repos` key means no production truth, shown as one Problems row.
+  and `security_paths`. No `repos` key means no production truth, shown as one Problems row. A manifest `title`
+  is the name only when no manager session title can be read.
 - **`## VIEW` in `<slug>.state.md`**, one fenced JSON block, schema `state-view/2`, last block wins:
   `updated_at` (RFC3339), `destination`, `outcomes` (in dependency order, each with its map `tickets`),
-  `needs_you`, `exposure` (`dark|live|n/a` per deployed `#PR`; without a row a deployed change reads
-  "exposure unstated", never live), `proof_owed` (each naming its `ticket`; the ticket's bake verdict wins),
-  `design`, `workstreams`, `decisions`, `dead_ends`, `incidents`, `skills_done`. A v1 key (`explanation`,
-  `next_steps`, `upcoming`, `proven`, `unproven`) shows under "not migrated" with its v2 home: convert it key by key.
+  `done` (`{date, what, why, refs}`: one line per delivered outcome, saying what changed for the product or the
+  codebase, PR refs after it; group a series of PRs into one line), `architecture` (`{date, what, refs}`: one
+  sentence per structural change), `design` (`{what, meaning, kind, ref, tier, review, stop, date}`: the spec,
+  ADR or module shape and its one-line meaning), `decisions` (`{date, decision, why, by, supersedes}`),
+  `findings` (`{date, outcome, found, refs}`: what was learned), `needs_you`, `exposure` (`dark|live|n/a` per
+  deployed `#PR`; without a row a deployed change reads "exposure unstated", never live), `proof_owed` (each
+  naming its `ticket`; the ticket's bake verdict wins), `dead_ends`, `incidents`, `skills_done`. A merged PR
+  that no `done`, `architecture` or `design` line names shows by its title, marked "not yet summarized", and
+  `author` asks for it. A `done` line whose words assert live, deployed or baked beyond what its PRs' ladder
+  reaches shows as the manager's claim: the derived proof wins. A retired key (`explanation`, `next_steps`,
+  `upcoming`, `proven`, `unproven`, `workstreams`) shows under "not migrated" with its home: convert it key by key.
 - **`<slug>.arch.json`** (schema `state-arch/1`): the product being changed, never tickets or sessions. An
   `architecture` view with `base` and `head` draws a before/after; promote `head` to `base` once the change is
   live. `state_arch.py` archives every version to `<slug>.arch/`, the one owner of architecture over time.
+  Without it, the architecture section asks for it in one line.
 
-The page is derived: never hand-edit it or vary the template per program, and fix what its Problems panel
-reports. Schema and owners: `specs/2026-11-03-manager-state-viewer.md`.
+Copy rule for every VIEW line: plain language, one line per item, no JSON, ids or internal names in the
+sentence, repeats grouped. The page is derived: never hand-edit it or vary the template per program, and fix
+what its Problems panel reports. Schema and owners: `specs/2026-11-03-manager-state-viewer.md`.
 
 ## Membership and collisions
 
