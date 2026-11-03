@@ -115,6 +115,13 @@
   .outcomes .o-text { font-size: 15px; font-weight: 500; }
   .outcomes .o-ids { margin-top: 3px; font-size: 12.5px; color: var(--faint); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 
+  .story { margin-top: 26px; }
+  .story > h2 { font: 600 15px/1.3 var(--display); }
+  .refs { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-left: 6px; font-size: 12.5px; color: var(--faint); font-weight: 400; }
+  .ask-line { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .ask-line code { font-size: 12px; }
+  .title-map { font: 400 12.5px var(--mono); color: var(--faint); }
+  .pick-slug { font: 400 11.5px var(--mono); color: var(--faint); }
   .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; }
   .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; min-width: 0; }
   .card.ask { background: linear-gradient(0deg, var(--warn-soft), var(--warn-soft)), var(--surface);
@@ -311,7 +318,8 @@
 
   /* ---------- plain words ---------- */
   var STATUS = { WORKING: ['Working', 'run'], GRILLING: ['Waiting on you', 'warn'], DONE: ['Done', 'good'] };
-  var FLAG = { UNBOUND: 'No one on it', READY_NOT_DISPATCHED: 'Ready, not started', STALLED: 'No live worker', BAKE_OWED: 'Bake owed' };
+  var FLAG = { UNBOUND: 'Not started', READY_NOT_DISPATCHED: 'Ready, not started', STALLED: 'Stopped moving', BAKE_OWED: 'Bake owed' };
+  var STEP = { open: ['PR open', 'run'], merged: ['Merged', ''], deployed: ['Deployed', 'good'], exposed: ['Live', 'good'], baked: ['Bake passed', 'good'] };
   var KIND = { merge: ['merged', 'merged'], deploy: ['reached prod', 'reached prod'], blocker: ['new blocker', 'new blockers'],
     question: ['new question for you', 'new questions for you'], closed: ['ticket closed', 'tickets closed'] };
   var SURFACE = {
@@ -349,13 +357,20 @@
     });
     return seg;
   }
+  function programName() { return data.name || data.program; }
+  function mapRef() {
+    var m = data.map || {};
+    if (!m.issue) return null;
+    var u = m.url || ticketUrl(m.issue);
+    return [' ', u ? ext(u, m.issue, 'title-map') : el('span', { class: 'title-map' }, m.issue)];
+  }
   function problemCount() { return (data.problems || []).length; }
   function renderBar(tabs) {
     var bar = document.getElementById('bar');
     var st = STATUS[String(data.status || '').toUpperCase()];
     var n = problemCount();
     add(bar, [
-      data.kind === 'index' ? el('h1', null, 'Programs') : el('h1', null, data.program),
+      data.kind === 'index' ? el('h1', null, 'Programs') : el('h1', null, programName(), mapRef()),
       data.kind === 'index' ? null : (st ? pill(st[0], st[1]) : pill('Status unknown', 'warn')),
       tabs ? el('div', { class: 'tabs', role: 'tablist' }, tabs.map(function (t) {
         tabButtons[t] = el('button', { type: 'button', role: 'tab', 'aria-selected': 'false', onclick: function () { showTab(t, true); } }, t);
@@ -365,7 +380,7 @@
         n ? plural(n, 'problem') : 'No problems'),
       el('span', { class: 'grow' }), freshEl, liveBtn, themeControl()
     ]);
-    document.title = (data.kind === 'index' ? 'Programs' : data.program) + ' state';
+    document.title = (data.kind === 'index' ? 'Programs' : programName()) + ' state';
   }
 
   /* ---------- Now ---------- */
@@ -408,23 +423,116 @@
       (data.author || []).length ? el('span', { class: 'fixes' }, 'To edit: ' + data.author.join('; ')) : null);
   }
   function lands() {
-    var n = data.now || {};
-    var list = n.outcomes || [];
-    var box = el('div', { class: 'lands' }, el('div', { class: 'eyebrow' }, 'Where this lands'),
+    return el('div', { class: 'lands' }, el('div', { class: 'eyebrow' }, 'What this track is achieving'),
       el('p', { class: 'destination' }, data.destination || data.goal || 'No destination written'),
       data.destination && data.goal && data.goal !== data.destination ? el('p', { class: 'goal-under' }, 'Goal: ' + data.goal) : null);
-    if (list.length) {
-      add(box, el('ol', { class: 'outcomes' }, list.slice(0, 6).map(function (o, i) {
-        var anyNew = (o.tickets || []).some(function (t) { return isNew('closed:' + t.id); });
-        return el('li', { class: i === 0 ? 'next' : null }, el('div', { class: 'o-text' }, dot(anyNew), o.outcome),
-          el('div', { class: 'o-ids' }, o.state === 'unknown' ? pill('tickets not on the map', 'warn') : (o.state === 'bake' ? pill('closed, bake still open', 'warn') : null),
-            (o.tickets || []).map(ticketChip)));
-      })));
-      if (list.length > 6) add(box, el('p', { class: 'goal-under' }, '+' + (list.length - 6) + ' later outcomes'));
-    } else {
-      add(box, el('p', { class: 'goal-under' }, 'No outcomes written yet.'));
-    }
+  }
+  function nextOutcomes() {
+    var list = (data.now || {}).outcomes || [];
+    var box = section('What is next', list.length ? plural(list.length, 'outcome') + ' on the map' : null);
+    box.classList.add('story');
+    if (!list.length) { add(box, empty('No outcomes written yet.')); return box; }
+    add(box, el('ol', { class: 'outcomes' }, list.slice(0, 6).map(function (o, i) {
+      var anyNew = (o.tickets || []).some(function (t) { return isNew('closed:' + t.id); });
+      return el('li', { class: i === 0 ? 'next' : null }, el('div', { class: 'o-text' }, dot(anyNew), o.outcome),
+        el('div', { class: 'o-ids' }, o.state === 'unknown' ? pill('tickets not on the map', 'warn') : (o.state === 'bake' ? pill('closed, bake still open', 'warn') : null),
+          (o.tickets || []).map(ticketChip)));
+    })));
+    if (list.length > 6) add(box, el('p', { class: 'goal-under' }, '+' + (list.length - 6) + ' later outcomes'));
     return box;
+  }
+  /* ---------- the work: done, architecture, design, decisions, learned ---------- */
+  function refNodes(refs) {
+    return (refs || []).map(function (r) {
+      if (r.pr && r.repo) return prLink(r.repo, r.pr);
+      return TICKET_RE.test(String(r.ref)) ? ticket(r.ref) : el('span', { class: 'mono' }, r.ref);
+    });
+  }
+  function doneRow(d, history) {
+    var step = STEP[d.reached];
+    var claim = d.claim ? pill('Manager\'s claim: proof reaches ' + (step ? step[0].toLowerCase() : 'nothing yet'), 'warn') : null;
+    var main = [dot(newAt(d.date)), d.what, el('span', { class: 'refs' }, refNodes(d.refs), step && !d.claim ? pill(step[0], step[1]) : null, claim)];
+    var r = row(main, d.why || null, history && d.date ? el('span', { class: 'ids' }, clock(d.date)) : null);
+    r.setAttribute('data-search', (r.textContent || '').toLowerCase());
+    return r;
+  }
+  function pendingRows(list, more) {
+    if (!list.length) return [];
+    var out = list.map(function (u) {
+      var link = u.pr ? prLink(u.repo, u.pr) : el('span', { class: 'mono' }, String(u.sha || '').slice(0, 10));
+      var r = row([dot(newAt(u.at)), u.title || 'Untitled change', el('span', { class: 'refs' }, link, pill('Not yet summarized', 'warn'))]);
+      r.setAttribute('data-search', (r.textContent || '').toLowerCase());
+      return r;
+    });
+    if (more) out.push(row(el('span', { class: 'under' }, '+' + more + ' more not yet summarized, on History')));
+    return out;
+  }
+  function doneSection(st, history) {
+    var done = st.done || [], pending = st.unsummarized || [];
+    if (!done.length && !pending.length) return section('What was done', null, empty('Nothing delivered yet.'));
+    var list = done.map(function (d) { return doneRow(d, history); });
+    if (!history && st.done_more) list.push(row(el('span', { class: 'under' }, '+' + st.done_more + ' earlier, on History')));
+    var s = section('What was done', done.length ? plural(done.length + (st.done_more || 0), 'outcome') + ' delivered' : null, rows(list.concat(pendingRows(pending, history ? 0 : st.unsummarized_more))));
+    s.classList.add('story');
+    return s;
+  }
+  function archSection(st, history) {
+    var list = (st.architecture || []).map(function (a) {
+      var r = row([a.what, el('span', { class: 'refs' }, refNodes(a.refs))], null, a.date ? el('span', { class: 'ids' }, clock(a.date)) : null);
+      r.setAttribute('data-search', (r.textContent || '').toLowerCase());
+      return r;
+    });
+    var sys = (data.now || {}).system || {};
+    var noDiagram = !sys.current;
+    if (!list.length && noDiagram && history) return null;
+    var s = section('What changed in the architecture', list.length ? plural(list.length, 'change') : null);
+    s.classList.add('story');
+    if (list.length) add(s, rows(list));
+    var ask = noDiagram ? ['No before/after diagram yet: author ', el('code', null, data.program + '.arch.json'), '.'] : null;
+    if (!list.length) add(s, el('p', { class: 'ask-line' }, 'No architecture change written yet.', ask ? [' '].concat(ask) : null));
+    else if (ask) add(s, el('p', { class: 'ask-line' }, ask));
+    else if (!history) add(s, system());
+    return s;
+  }
+  var TIER = { critical: ['Critical review', 'bad'], standard: ['Standard review', 'run'], light: ['Light review', ''], none: ['No review', 'warn'] };
+  function designSection(st) {
+    var list = st.design || [];
+    if (!list.length) return null;
+    var s = section('What changed in the design', String(list.length), rows(list.map(function (d) {
+      var t = TIER[d.tier] || (d.review ? ['Reviewed', 'good'] : null);
+      var r = row([words(d.kind || 'change') + ': ', d.what, el('span', { class: 'refs' }, d.ref ? (TICKET_RE.test(d.ref) ? ticket(d.ref) : el('span', { class: 'mono' }, d.ref)) : null, t ? pill(t[0], t[1]) : null)],
+        [d.meaning || null, d.stop ? 'Hard stop: ' + d.stop : null].filter(Boolean).join(' · ') || null);
+      r.setAttribute('data-search', (r.textContent || '').toLowerCase());
+      return r;
+    })));
+    s.classList.add('story');
+    return s;
+  }
+  function decisionsSection(list, more) {
+    if (!list.length) return null;
+    var out = list.map(function (d) {
+      var r = row([dot(newAt(d.date)), d.decision], d.why ? 'Why: ' + d.why : null,
+        el('span', { class: 'ids' }, [d.by ? 'By ' + d.by : null, d.supersedes ? 'replaces ' + d.supersedes : null, d.date ? clock(d.date) : null, d.grill || null].filter(Boolean).join(' · ')));
+      r.setAttribute('data-search', (r.textContent || '').toLowerCase());
+      return r;
+    });
+    if (more) out.push(row(el('span', { class: 'under' }, '+' + more + ' earlier, on History')));
+    var s = section('Decisions', String(list.length + (more || 0)), rows(out));
+    s.classList.add('story');
+    return s;
+  }
+  function findingsSection(list, more) {
+    if (!list.length) return null;
+    var out = list.map(function (f) {
+      var r = row([dot(newAt(f.date)), f.found, el('span', { class: 'refs' }, refNodes(f.refs))], f.outcome ? 'For: ' + f.outcome : null,
+        f.date ? el('span', { class: 'ids' }, clock(f.date)) : null);
+      r.setAttribute('data-search', (r.textContent || '').toLowerCase());
+      return r;
+    });
+    if (more) out.push(row(el('span', { class: 'under' }, '+' + more + ' earlier, on History')));
+    var s = section('What was learned', String(list.length + (more || 0)), rows(out));
+    s.classList.add('story');
+    return s;
   }
   function needsYou() {
     var list = (data.now || {}).needs_you || [];
@@ -439,7 +547,6 @@
   function heldWords(h) {
     if (h.kind === 'flag') return [FLAG[h.flag] || words(h.flag), 'warn'];
     if (h.kind === 'blocked') return ['Blocked by another ticket', ''];
-    if (h.kind === 'awaiting') return ['Worker ' + (AWAIT[h.category] || words(h.category).toLowerCase()) + ', needs the manager', 'warn'];
     return [words(h.kind), ''];
   }
   function holdText(h) {
@@ -463,7 +570,7 @@
         out.push(row([pill(m[0], m[1]), ' ', el('span', { class: 'ids' }, h.repo)], h.state === 'red' ? (owners ? 'Owned by ' + owners : 'Red, no owner') : null));
       }
     });
-    groupBy(list.filter(function (h) { return h.kind === 'flag' || h.kind === 'blocked' || h.kind === 'awaiting'; }), function (h) { return h.kind + (h.flag || '') + (h.category || ''); }).forEach(function (g) {
+    groupBy(list.filter(function (h) { return h.kind === 'flag' || h.kind === 'blocked'; }), function (h) { return h.kind + (h.flag || ''); }).forEach(function (g) {
       var w = heldWords(g[0]);
       var anyNew = g.some(function (h) { return isNew('blocker:' + h.id + ':' + h.flag); });
       if (g[0].kind === 'blocked') {
@@ -479,7 +586,7 @@
     });
     list.filter(function (h) { return h.kind === 'design'; }).forEach(function (h) { out.push(row(['Design stop: ', h.stop], h.what + (h.ref ? ' ' + h.ref : ''))); });
     list.filter(function (h) { return h.kind === 'overlap'; }).forEach(function (h) {
-      out.push(row(['Same files as ', el('b', null, h.program), ' (advisory)'],
+      out.push(row(['Same files as ', el('b', null, h.name || h.program), ' (advisory)'],
         plural(h.path_count, 'path') + ' in ' + h.repo + ': ' + h.paths.slice(0, 3).join(', ') + (h.path_count > 3 ? ' and more' : ''),
         el('span', { class: 'ids' }, 'ours ' + h.ours.map(function (x) { return x === 'bound paths' ? x : '#' + x; }).join(' ') + ' · theirs ' + h.theirs.map(function (x) { return x === 'bound paths' ? x : '#' + x; }).join(' '))));
     });
@@ -521,9 +628,9 @@
   function system() {
     var sys = (data.now || {}).system || {};
     var cur = sys.current;
-    if (!cur) return section('The system, changing', null, empty((sys.reason || 'No system diagram') + '. Author one: ' + (sys.pointer || '<slug>.arch.json') + '.'));
-    if (!cur.built) return section('The system, changing', null, empty('The diagram is being drawn; it appears on the next render.'), cur.views.map(function (v) { return v.note ? el('p', { class: 'goal-under' }, v.title + ': ' + v.note) : null; }));
-    if (!sys.sibling) return section('The system, changing', null, empty('This page was written away from its diagrams; open them from the programs folder.'));
+    if (!cur) return null;
+    if (!cur.built) return el('div', null, empty('The diagram is being drawn; it appears on the next render.'), cur.views.map(function (v) { return v.note ? el('p', { class: 'goal-under' }, v.title + ': ' + v.note) : null; }));
+    if (!sys.sibling) return el('div', null, empty('This page was written away from its diagrams; open them from the programs folder.'));
     var holder = el('div');
     var views = cur.views || [];
     function show(i) {
@@ -535,7 +642,7 @@
       wakeFrames();
     }
     var tabsEl = el('div', { class: 'view-tabs' }, views.length > 1 ? views.map(function (v, i) { return el('button', { type: 'button', onclick: function () { show(i); } }, v.title); }) : null);
-    var s = section('The system, changing', views[0] && views[0].summary ? changeLine(views[0].summary) : null, tabsEl, holder);
+    var s = el('div', { style: 'margin-top:14px' }, el('p', { class: 'goal-under', style: 'margin:0 0 8px' }, 'Before and after' + (views[0] && views[0].summary ? ' · ' + changeLine(views[0].summary) : '')), tabsEl, holder);
     if (views.length) show(0);
     return s;
   }
@@ -600,16 +707,6 @@
         r.ticket ? el('span', { class: 'ids' }, ticket(r.ticket)) : null);
     })));
   }
-  var TIER = { critical: ['Critical review', 'bad'], standard: ['Standard review', 'run'], light: ['Light review', ''], none: ['No review', 'warn'] };
-  function design() {
-    var list = (data.now || {}).design || [];
-    if (!list.length) return null;
-    return card('Design changes', String(list.length), null, rows(list.map(function (d) {
-      var t = TIER[d.tier] || (d.review ? ['Reviewed', 'good'] : ['Review tier unstated', 'warn']);
-      return row([words(d.kind || 'change') + ': ', d.what], d.stop ? 'Hard stop: ' + d.stop : (d.review ? 'Review: ' + d.review : null),
-        el('div', { class: 'ladder' }, pill(t[0], t[1]), d.ref ? el('span', { class: 'ids' }, d.ref) : null));
-    })));
-  }
   function codebase() {
     var list = (data.now || {}).codebase || [];
     if (!list.length) return null;
@@ -617,14 +714,6 @@
     return card('Codebase', 'open PRs', null, el('div', { class: 'mods' }, list.map(function (m) {
       return el('div', { class: 'mod' }, el('span', { class: 'name' }, el('span', { class: 'mono' }, m.module), el('span', { class: 'ids' }, ' ' + plural(m.files, 'file') + ' · ' + m.prs.map(function (n) { return '#' + n; }).join(' '))),
         el('div', { class: 'bar-wrap', title: (m.size || 0) + ' lines changed' }, el('div', { class: 'bar-fill', style: 'width:' + Math.max(4, Math.round(100 * (m.size || m.files) / max)) + '%' })));
-    })));
-  }
-  function workstreams() {
-    var list = (data.now || {}).workstreams || [];
-    if (!list.length) return null;
-    return card('Workstreams', String(list.length), null, rows(list.map(function (w) {
-      return row(w.outcome, [w.building ? 'Building: ' + w.building : null, w.found ? 'Found: ' + w.found : null].filter(Boolean).join(' · '),
-        el('span', { class: 'ids' }, [w.artifact, w.carrier ? '(' + w.carrier + ')' : null].filter(Boolean).join(' ')));
     })));
   }
   function skills() {
@@ -680,6 +769,7 @@
     pair('Next action', w.next_action); pair('Owner', w.owner); pair('Needs', w.prerequisite); pair('Stops at', w.stop_condition);
     pair('Wake', w.wake); pair('Map', m.map_line); pair('Founder gates', (m.gates || []).join('; '));
     pair('Holds in the state file', (w.holds || []).join('; '));
+    pair('Waiting on the manager', (m.awaiting || []).map(function (a) { return a.ticket + ' (' + (AWAIT[a.category] || words(a.category).toLowerCase()) + ')'; }).join('; '));
     return el('footer', { class: 'machinery' }, el('details', { id: 'machinery' }, el('summary', null, summary),
       el('dl', { class: 'kv' }, kv),
       lanes.length ? el('div', { class: 'table-wrap' }, el('table', null, el('thead', null, el('tr', null, ['Ticket', 'Worker', 'Live'].map(function (h) { return el('th', null, h); }))),
@@ -694,13 +784,14 @@
       }).concat((m.sources || []).map(function (s) { return row([s.exists ? pill('File', '') : pill('Missing', s.name === 'System diagram' ? '' : 'warn'), ' ', s.name], s.exists ? s.file + ', changed ' + ago(s.modified) : s.file); })))));
   }
   function renderNow(panel) {
-    add(panel, [sinceStrip(), staleBanner(), lands()]);
-    var grid = el('div', { class: 'grid' }, needsYou(), heldBy());
+    var st = (data.story || {}).now || {};
+    add(panel, [sinceStrip(), staleBanner(), lands(), doneSection(st, false), archSection(st, false), designSection(st),
+      decisionsSection(st.decisions || [], st.decisions_more), findingsSection(st.findings || [], st.findings_more), nextOutcomes()]);
+    var grid = el('div', { class: 'grid', style: 'margin-top:22px' }, needsYou(), heldBy());
     if (grid.children.length) add(panel, grid);
-    add(panel, [system(), production()]);
-    var g2 = el('div', { class: 'grid', style: 'margin-top:22px' }, proofOwed(), design(), codebase(), workstreams(), skills());
+    var g2 = el('div', { class: 'grid', style: 'margin-top:22px' }, proofOwed(), codebase(), skills());
     if (g2.children.length) add(panel, g2);
-    add(panel, [legacy(), problems(), machinery()]);
+    add(panel, [production(), legacy(), problems(), machinery()]);
   }
 
   /* ---------- History ---------- */
@@ -712,30 +803,11 @@
   }
   function renderHistory(panel) {
     var h = data.history || {};
-    var blocks = [];
-    var shipped = (h.shipped || []).map(function (r) {
-      return hrow(r.title || 'Direct push', el('span', { class: 'ids' }, r.pr ? prLink(r.repo, r.pr) : String(r.sha || '').slice(0, 10), ' ', idList((r.tickets || []).map(ticket), 4)), el('div', { class: 'ladder' }, stepPills(r)), r.merged_at);
-    });
-    var pubs = (h.publications || []).filter(function (p) { return !(h.shipped || []).some(function (r) { return r.pr && r.pr === p.pr && r.repo === p.repo; }); }).map(function (p) {
-      return hrow([p.pr ? 'PR ' : 'Direct push ', p.pr ? prLink(p.repo, p.pr) : el('span', { class: 'mono' }, String(p.sha || '').slice(0, 10)), ' for ', ticket(p.ticket)],
-        [p.artifact, p.note].filter(Boolean).join(' · '), el('span', { class: 'ids' }, 'Retired ' + clock(p.at) + (p.verdict ? ' · bake ' + p.verdict : '')), p.at);
-    });
-    if (shipped.length || pubs.length) blocks.push(section('Shipped', String(shipped.length + pubs.length), rows(shipped.concat(pubs))));
-    var reached = (h.outcomes || []).map(function (o) { return hrow(o.outcome, null, el('div', { class: 'o-ids' }, (o.tickets || []).map(ticketChip))); });
-    if (reached.length) blocks.push(section('Outcomes reached', String(reached.length), rows(reached)));
-    var dec = (h.decisions || []).slice().sort(function (a, b) { return (ms(b.date) || 0) - (ms(a.date) || 0); }).map(function (d) {
-      return hrow(d.decision, d.why, el('span', { class: 'ids' }, [d.date ? clock(d.date) : null, d.by, d.supersedes ? 'replaces: ' + d.supersedes : null, d.grill].filter(Boolean).join(' · ')), d.date);
-    });
-    if (dec.length) blocks.push(section('Decisions', String(dec.length), rows(dec)));
-    var dead = (h.dead_ends || []).map(function (d) { return hrow(d.what, d.why, d.date ? el('span', { class: 'ids' }, clock(d.date)) : null, d.date); });
-    if (dead.length) blocks.push(section('Dead ends', String(dead.length), rows(dead)));
-    var inc = (h.incidents || []).map(function (d) {
-      return hrow(d.what, [d.cause ? 'Cause: ' + d.cause : null, d.fix ? 'Fix: ' + d.fix : null].filter(Boolean).join(' · '), el('span', { class: 'ids' }, [d.date ? clock(d.date) : null, d.rca ? 'RCA: ' + d.rca : 'no RCA yet'].filter(Boolean).join(' · ')), d.date);
-    });
-    if (inc.length) blocks.push(section('Incidents', String(inc.length), rows(inc)));
+    var st = (data.story || {}).history || {};
+    var blocks = [doneSection(st, true), archSection(st, true)];
     var arch = (h.architecture || []).map(function (v) {
       var holder = el('div');
-      var det = el('details', null, el('summary', null, 'Version from ' + clock(v.updated_at || v.archived_at) + ' · ' + plural((v.views || []).length, 'view')), holder);
+      var det = el('details', null, el('summary', null, 'Diagram from ' + clock(v.updated_at || v.archived_at) + ' · ' + plural((v.views || []).length, 'view')), holder);
       det.addEventListener('toggle', function () {
         if (det.open && !holder.children.length) (v.views || []).forEach(function (x) { add(holder, [el('p', { class: 'goal-under' }, x.title + (x.summary ? ' · ' + changeLine(x.summary) : '')), diagramFrame(x.file, x.title, true)]); });
         if (det.open) wakeFrames();
@@ -744,7 +816,22 @@
       r.setAttribute('data-search', ('architecture ' + (v.views || []).map(function (x) { return x.title; }).join(' ')).toLowerCase());
       return r;
     });
-    if (arch.length) blocks.push(section('Architecture over time', String(arch.length), rows(arch)));
+    if (arch.length) blocks.push(section('Earlier diagrams', String(arch.length), rows(arch)));
+    blocks.push(designSection(st), decisionsSection((h.decisions || []).slice().sort(function (a, b) { return (ms(b.date) || 0) - (ms(a.date) || 0); }), 0),
+      findingsSection(st.findings || [], 0));
+    var reached = (h.outcomes || []).map(function (o) { return hrow(o.outcome, null, el('div', { class: 'o-ids' }, (o.tickets || []).map(ticketChip))); });
+    if (reached.length) blocks.push(section('Outcomes reached', String(reached.length), rows(reached)));
+    var dead = (h.dead_ends || []).map(function (d) { return hrow(d.what, d.why, d.date ? el('span', { class: 'ids' }, clock(d.date)) : null, d.date); });
+    if (dead.length) blocks.push(section('Dead ends', String(dead.length), rows(dead)));
+    var inc = (h.incidents || []).map(function (d) {
+      return hrow(d.what, [d.cause ? 'Cause: ' + d.cause : null, d.fix ? 'Fix: ' + d.fix : null].filter(Boolean).join(' · '), el('span', { class: 'ids' }, [d.date ? clock(d.date) : null, d.rca ? 'RCA: ' + d.rca : 'no RCA yet'].filter(Boolean).join(' · ')), d.date);
+    });
+    if (inc.length) blocks.push(section('Incidents', String(inc.length), rows(inc)));
+    var shipped = (h.shipped || []).map(function (r) {
+      return hrow(r.title || 'Direct push', el('span', { class: 'ids' }, r.pr ? prLink(r.repo, r.pr) : String(r.sha || '').slice(0, 10), ' ', idList((r.tickets || []).map(ticket), 4)), el('div', { class: 'ladder' }, stepPills(r)), r.merged_at);
+    });
+    if (shipped.length) blocks.push(el('section', null, el('details', null, el('summary', null, 'Production record: ' + plural(shipped.length, 'merged change')), rows(shipped))));
+    blocks = blocks.filter(Boolean);
     var ev = h.events || [];
     if (ev.length) {
       var box = el('div', { class: 'rows' }), last = null;
@@ -754,7 +841,7 @@
         var t = ms(e.ts);
         box.appendChild(hrow(e.note || words(e.event), [t === null ? null : new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }), words(e.event).toLowerCase(), e.lane].filter(Boolean).join(' · '), null, e.ts));
       });
-      blocks.push(section('Timeline', String(ev.length), box));
+      blocks.push(el('footer', { class: 'machinery' }, el('details', null, el('summary', null, 'Machinery log · ' + plural(ev.length, 'event')), box)));
     }
     add(panel, [searchBox, h.dropped ? el('p', { class: 'history-note' }, plural(h.dropped, 'older row') + ' left out to keep this page small.') : null,
       blocks.length ? blocks : empty('No history yet.')]);
@@ -778,7 +865,7 @@
           var unknown = (r.failed_sources || []).some(function (n) { return /Pull requests|Deploys/.test(n); });
           function num(k) { var c = (r.counts || {})[k]; return el('td', { class: 'num' + (unknown ? ' unknown-num' : '') }, unknown && !c ? 'unknown' : String(c || 0)); }
           return el('tr', { class: 'index-row index-pick', onclick: function (e) { if (!e.target.closest('a')) location.hash = pickHash(r.program); } },
-            el('td', null, el('a', { href: pickHash(r.program), class: 'np' }, r.program), r.stale ? el('span', { class: 'ids', style: 'display:block' }, 'narrative stale') : null),
+            el('td', null, el('a', { href: pickHash(r.program), class: 'np' }, r.name || r.program), (r.map || {}).issue ? el('span', { class: 'pick-slug', style: 'display:block' }, r.map.issue) : null, r.stale ? el('span', { class: 'ids', style: 'display:block' }, 'narrative stale') : null),
             el('td', null, r.next_landing || el('span', { class: 'empty' }, 'not written')),
             el('td', { class: 'num' }, r.needs_you ? pill(String(r.needs_you), 'warn') : '0'),
             el('td', null, (r.held_by || []).slice(0, 2).map(function (h) { return el('span', { class: 'ids', style: 'display:block' }, heldIndex(h)); })),
@@ -791,9 +878,10 @@
       if (b.kind === 'overlap') return row([el('b', null, b.a), ' and ', el('b', null, b.b), ' touch the same files (advisory)'], plural(b.path_count, 'path') + ' in ' + b.repo + ': ' + b.paths.slice(0, 3).join(', '));
       return row([el('b', null, b.a), ' is held by ', el('b', null, b.b)], 'via ' + b.id);
     }))));
+    if ((data.problems || []).length) add(panel, problems());
     var quiet = data.quiet || [];
     if (quiet.length) add(panel, el('section', null, el('details', null, el('summary', null, plural(quiet.length, 'live program') + ' not rendered in 24 h'),
-      rows(quiet.map(function (q) { return row(q.program, q.why + (q.age_s ? ', last ' + span(q.age_s) + ' ago' : '')); })))));
+      rows(quiet.map(function (q) { return row(q.name || q.program, q.why + (q.age_s ? ', last ' + span(q.age_s) + ' ago' : '')); })))));
   }
   function heldIndex(h) {
     var m = /^([A-Z_]+):(.*)$/.exec(h);
@@ -819,7 +907,7 @@
   function pickRow(r) {
     var held = (r.held_by || [])[0];
     return el('a', { class: 'pick', href: pickHash(r.program), 'data-program': r.program },
-      el('span', { class: 'pick-name' }, r.program, r.needs_you ? pill(String(r.needs_you), 'warn', 'Needs you') : null),
+      el('span', { class: 'pick-name' }, r.name || r.program, r.needs_you ? pill(String(r.needs_you), 'warn', 'Needs you') : null),
       el('span', { class: 'pick-line', title: r.next_landing || null }, r.next_landing || 'Next landing not written'),
       held ? el('span', { class: 'pick-line held' }, heldIndex(held)) : null);
   }
@@ -849,10 +937,11 @@
       if (place.y) q.set('y', String(place.y));
       if (place.tab) q.set('tab', place.tab);
       if (auto) q.set('auto', '1');
-      var next = el('iframe', { class: 'program', title: slug + ' state', src: encodeURIComponent(slug) + '.state.html?' + q.toString() });
+      var label = ((data.rows || []).filter(function (r) { return r.program === slug; })[0] || {}).name || slug;
+      var next = el('iframe', { class: 'program', title: label + ' state', src: encodeURIComponent(slug) + '.state.html?' + q.toString() });
       if (frame) frame.replaceWith(next); else shell.appendChild(next);
       frame = next; shown = slug; innerBusy = false;
-      document.title = slug + ' state';
+      document.title = label + ' state';
     }
     window.addEventListener('message', function (e) {
       if (!frame || e.source !== frame.contentWindow || !e.data || e.data.program !== shown) return;

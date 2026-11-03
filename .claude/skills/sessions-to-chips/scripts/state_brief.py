@@ -7,7 +7,7 @@ Rules: ../specs/2026-11-03-manager-state-viewer.md
 import state_story as story
 
 MAX_LINES = 60
-FLAG = {"UNBOUND": "not started, nothing carries it", "READY_NOT_DISPATCHED": "ready, not started",
+FLAG = {"UNBOUND": "not started", "READY_NOT_DISPATCHED": "ready, not started",
         "STALLED": "stopped moving", "BAKE_OWED": "bake owed"}
 
 

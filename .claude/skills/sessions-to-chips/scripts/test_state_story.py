@@ -72,6 +72,11 @@ class Story(unittest.TestCase):
         rows = state_story.done_rows(view, [ladder_row(7, "merged")])
         self.assertEqual([(r["claim"], r["reached"]) for r in rows], [(True, "merged"), (False, "merged")])
 
+    def test_a_change_with_nothing_to_expose_never_reads_as_live(self):
+        row = dict(ladder_row(7, "exposed"), ladder={"step": "exposed", "steps": {"exposure": {"state": "n/a"}}})
+        rows = state_story.done_rows({"done": [{"what": "It is live now", "refs": ["#7"]}]}, [row])
+        self.assertEqual((rows[0]["reached"], rows[0]["claim"]), ("deployed", True))
+
     def test_merged_work_no_line_names_is_listed_as_not_summarized(self):
         view = {"done": [{"date": "2026-11-03T10:00:00Z", "what": "x", "refs": ["#7"]}],
                 "design": [{"what": "spec", "ref": "#9"}]}

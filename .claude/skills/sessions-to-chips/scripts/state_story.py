@@ -39,13 +39,20 @@ def asserted_step(text):
     return None
 
 
+def proven_step(ladder):
+    """The ladder step as the page may say it: an `n/a` exposure has nothing to be live, so it reads as deployed."""
+    step = (ladder or {}).get("step")
+    exposure = ((ladder or {}).get("steps") or {}).get("exposure") or {}
+    return "deployed" if step == "exposed" and exposure.get("state") == "n/a" else step
+
+
 def _ref_rows(refs, by_pr):
     out = []
     for ref in refs or []:
         n = _pr_number(ref)
         row = by_pr.get(n) if n is not None else None
         out.append({"ref": f"#{n}" if n is not None else ref, "pr": n, "repo": (row or {}).get("repo"),
-                    "step": (row or {}).get("ladder", {}).get("step") if row else None})
+                    "step": proven_step(row["ladder"]) if row else None})
     return out
 
 
@@ -99,10 +106,13 @@ def story(view, change_rows, publications, decisions, now):
     """-> {now: {...}, history: {...}}: the sections that read as the work, in the founder's order."""
     done = done_rows(view, change_rows)
     pending = unsummarized(view, change_rows, publications)
-    arch = sorted(view.get("architecture") or [], key=lambda r: r.get("date") or "", reverse=True)
+    by_pr = {r["pr"]: r for r in change_rows if r.get("pr")}
+    arch = sorted((dict(a, refs=_ref_rows(a.get("refs"), by_pr)) for a in view.get("architecture") or []),
+                  key=lambda r: r.get("date") or "", reverse=True)
     design = view.get("design") or []
     decisions = sorted(decisions, key=lambda d: d.get("date") or "", reverse=True)
-    findings = sorted(view.get("findings") or [], key=lambda r: r.get("date") or "", reverse=True)
+    findings = sorted((dict(f, refs=_ref_rows(f.get("refs"), by_pr)) for f in view.get("findings") or []),
+                      key=lambda r: r.get("date") or "", reverse=True)
     now_done, done_more = recent(done, now)
     now_pending, pending_more = recent(pending, now, key="at")
     now_dec, dec_more = recent(decisions, now)
