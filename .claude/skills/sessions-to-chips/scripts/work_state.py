@@ -43,7 +43,6 @@ TRUNCATED_BLOCKER = "relations_truncated"
 WAKE_GRACE_S = 600
 FLAGS = ("UNBOUND", "READY_NOT_DISPATCHED", "STALLED", "BAKE_OWED", "STALE_OPEN", "DUPLICATE_TITLE")
 DUP_IGNORED = frozenset({"canceled", "duplicate"})
-CONTRACT = os.path.join(HERE, "..", "references", "manager-contract.md")
 LANE_UNBOUND_AGE_S = 7 * 86400
 MERGE_AND_RETIRE = os.path.join(HERE, "..", "references", "merge-and-retire.md")
 # R15: bake-exempt only when every path is docs and none sits under a behavior-bearing segment.
@@ -97,15 +96,6 @@ def bake_keys(path=MERGE_AND_RETIRE):
     sec = text.split("## Post-merge proof", 1)[1].split("\n## ", 1)[0]
     m = re.search(r"`\{([^}]+)\}`", sec)
     return [k.strip() for k in m.group(1).split(",")]
-
-
-def codex_cap(path=CONTRACT):
-    """(cap, cap during a spec-review wave), read from its one owner: the manager contract
-    §Parallel by default ("Codex fan-out ≤N (one spec-review wave of M)")."""
-    with open(path) as fh:
-        sec = fh.read().split("## Parallel by default", 1)[1].split("\n## ", 1)[0]
-    m = re.search(r"Codex fan-out ≤(\d+) \(one spec-review wave of (\d+)\)", sec)
-    return int(m.group(1)), int(m.group(2))
 
 
 def _h(*parts):
@@ -272,11 +262,6 @@ def validate_hold(h, ctx, kids, by_ticket, live_of):
         return "not_a_map_ticket"
     base, _, target = reason.partition(":")
     base = base.lower()
-    if base == "cap-codex":
-        live = [c for b in by_ticket.values() for c in b["carriers"] if c.get("runtime") == "codex" and live_of(c)]
-        base, wave = codex_cap()
-        cap = wave if any(c.get("wave") == "spec-review" for c in live) else base
-        return None if len(live) >= cap else f"cap-codex: {len(live)} live codex carriers < cap {cap}"
     if base == "file-collision":
         other = by_ticket.get(target)
         mine = [p for a in args[:1] for p in a.split(",") if p]

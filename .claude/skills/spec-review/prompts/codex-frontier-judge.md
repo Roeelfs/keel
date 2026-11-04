@@ -2,7 +2,7 @@ ROLE: codex-frontier
 
 # Codex Frontier Judgment (Astra — file-review mode)
 
-The HIGHER judgment rung, run on EVERY spec review beside the sol lanes (never instead of them; founder directive 2026-09-06). Sol attacks and verifies; Astra rules. One lane per review — its cost against the weekly Codex cap is unpublished, so it is never fanned out. Non-droppable in every profile.
+The HIGHER judgment rung, run on EVERY spec review beside the sol lanes (never instead of them; founder directive 2026-09-06). Sol attacks and verifies; Astra rules. Astra runs exactly one lane per spec review; this separate rule remains in force despite the absence of a Codex fan-out cap. Non-droppable in every profile.
 
 **Agent type:** `codex-dispatch`
 **Model:** `gpt-6-astra` (gate class `frontier`)

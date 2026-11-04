@@ -59,7 +59,7 @@ One category = one **story** (a markdown file) + one **manager** session. Units 
 | Unit | One fresh session's mission, with the mined 5-part prompt unchanged (merged units: one prompt, REMAINING STEPS = union). Each prompt ends with a pointer to the story and the manager's title. |
 | Merge | Only same ticket/artifact, strict subset/direct follow-up, or same files. Evidence recorded in the unit row. A merge never loses a `remainingWork` item; if unsure, keep separate (a wrong split costs one session, a wrong merge hides an obligation). |
 | Guard | After narration the script re-adds any incomplete member with owed work that is in no unit and in no `retired` entry, and reports it in `warnings`. |
-| Fan-out | First wave at most 5 concurrent units; later waves follow `dependsOn`. |
+| Fan-out | No Codex fan-out cap; the provider's quota wall is the only limit. Follow `dependsOn` and keep one writer per file set; overlapping lanes wait or stack. |
 | Sidebar nesting | Set by `spawnedFrom.sessionId` = the session that started it. Verified 2026-10-13 against the store: each `[Manager]` is a child of the dispatcher session and its units are children of the manager (deeper levels appear when a unit starts its own). So the manager must start its units itself. |
 | Decision tiers | Exactly one manager level. A member that itself has children is its own category (re-run `group_sessions.py --root` on it). |
 | Overlap | Two units on one artifact: the narrator merges them, or names the owner and the other prompt says "do not edit X". |

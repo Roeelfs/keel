@@ -75,10 +75,9 @@ Claude ladder above only when it says so. Two rules travel with this, both learn
   saturated repeatedly, and each blowout is a HARD failure: dispatches stop returning at all, unlike
   an expensive Claude lane that still completes. **An unknown cap counts as saturated**, and a fresh
   0% window is as often the aftermath of a blowout as it is headroom.
-- **A fan-out counts against that cap as a BLOCK, not as one item.** Measured: 8 concurrent
-  dispatches burned a weekly window from 24% to 100% in under eight minutes, and a 14-lane fan-out
-  is roughly half a week in twenty minutes. Cap concurrent second-runtime lanes at 5; a wider
-  fan-out stays on Claude rather than silently spending the week.
+- **No Codex fan-out cap.** The provider's quota wall is the only limit (founder ruling
+  2026-11-04). Dispatch independent lanes in parallel; do not route a wider wave to Claude
+  merely because of its lane count.
 
 **"Zero survived" and "zero completed" are different facts — `.filter(Boolean)` erases the
 difference.** Every template's `parallel(...).filter(Boolean)` treats a lane that THREW — session

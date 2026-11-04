@@ -392,7 +392,7 @@ Remaining: <unfinished accepted work, or none with supporting evidence>
 ## AT-WAKE
 Status: <WORKING | GRILLING | DONE>
 Wake: <ScheduleWakeup <id> | bg:<task-id> | agent:<id> | workflow:<id> | session:<local_id>> fires <ISO-8601 UTC or "on exit"> (<size>s) on <event>; on fire: <the one action it takes>
-Hold: <ticket> <cap-codex | file-collision:<ticket> <glob,glob> | completion-mode | founder-gated:<grill>> <why>
+Hold: <ticket> <file-collision:<ticket> <glob,glob> | completion-mode | founder-gated:<grill>> <why>
 Mode: <completion, only under §Completion mode override>
 Next action: <one executable action, or none when the accepted outcome is verified>
 Owner: <agent/person responsible for that action>
@@ -805,8 +805,8 @@ exception and needs a reason (a true data or ordering dependency).
 - **Find the independent set every tick:** work whose inputs are settled and whose files no other
   live lane writes. Dispatch all of it in one message: headless lanes, Codex lanes, `Agent`
   subagents, and child sessions where the human must judge.
-- **Caps, not serialization:** Codex fan-out ≤5 (one spec-review wave of 6); one writer per file
-  set (this line is the cap's one owner: `work_state.py` reads it for the `cap-codex` hold); a lane that would touch another live lane's files waits or stacks on its branch.
+- **No Codex fan-out cap:** the provider's quota wall is the only limit (founder ruling 2026-11-04).
+  Keep one writer per file set; a lane that would touch another live lane's files waits or stacks on its branch.
 - **A blocker blocks only its dependents.** Stack on the unmerged branch (§Autonomous stretches),
   dispatch the next spec lane while the last spec reviews, run research beside implementation, and grill
   open decisions while lanes run.

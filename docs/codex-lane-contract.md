@@ -37,11 +37,10 @@ CODEX_NETWORK=1 CODEX_SERVICE_TIER=fast \
   its ideal model at every level below 99%; at 99% the gate refuses outright and the caller routes
   to Claude. There is no middle band: the gate used to degrade a tier or two as the window filled,
   which meant `review`/`research` silently became `luna` above 90% used — output a review lane
-  cannot act on, arriving with a healthy-looking verdict. What guards the window instead is the
-  refuse threshold plus the **fan-out cap of 5** (8 concurrent dispatches once took a window from
-  24% to 100% in under eight minutes — the shape that saturates a cap is lane COUNT, not per-lane
-  model choice). Pace is still measured and logged in `analytics/codex-dispatch.jsonl`; it no
-  longer routes.
+  cannot act on, arriving with a healthy-looking verdict. There is no Codex fan-out cap;
+  the provider's quota wall is the only limit (founder ruling 2026-11-04). Do not hold a
+  second review because another review is running. Pace is still measured and logged in
+  `analytics/codex-dispatch.jsonl`; it no longer routes.
 - **The repo is READ-ONLY to the lane.** Measured on codex 0.153.4: with cwd in a scratch dir
   the lane reads any path and runs git in the repo, while a write there returns `Operation not
   permitted`. Writes go to its scratch dir. Do **not** "fix" a path problem by pointing `-C` at

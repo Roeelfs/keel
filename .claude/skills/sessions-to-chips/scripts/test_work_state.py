@@ -362,20 +362,6 @@ class Holds(unittest.TestCase):
         return snap(state=dict({"holds": [{"ticket": ticket, "reason": reason, "args": list(args)}]}, **kw.pop("state", {})),
                     **kw)
 
-    def test_cap_codex(self):
-        five = [binding(f"T-{i}", [carrier("lane", f"L{i}", runtime="codex", pid=i, pid_start="S")])
-                for i in (3, 9)]
-        s = self.hold("T-6", "cap-codex", bindings=five)
-        self.assertIn("T-6", flagged(s, "READY_NOT_DISPATCHED"))  # 2 < 5: invalid
-        self.assertFalse(s["holds"][0]["valid"])
-        many = [binding(f"X{i}", [carrier("lane", f"L{i}", runtime="codex", pid=i, pid_start="S")]) for i in range(1, 6)]
-        pids = {i: "S" for i in range(1, 6)}
-        s = self.hold("T-6", "cap-codex", bindings=many, pids=pids)
-        self.assertNotIn("T-6", flagged(s, "READY_NOT_DISPATCHED"))
-        many[0]["carriers"][0]["wave"] = "spec-review"  # a live spec-review wave raises the cap to 6
-        s = self.hold("T-6", "cap-codex", bindings=many, pids=pids)
-        self.assertIn("T-6", flagged(s, "READY_NOT_DISPATCHED"))
-
     def test_file_collision(self):
         other = binding("T-4", [carrier("founder", iso(-1))], paths=["src/a/**"])
         s = self.hold("T-6", "file-collision:T-4", "src/a/b.py", bindings=[other])
@@ -399,7 +385,7 @@ class Holds(unittest.TestCase):
         self.assertIn("T-3", flagged(s, "READY_NOT_DISPATCHED"))
 
     def test_non_map_ticket_and_unknown_reason_are_invalid(self):
-        s = self.hold("Z-1", "cap-codex")
+        s = self.hold("Z-1", "completion-mode")
         self.assertIn("hold_invalid:Z-1:not_a_map_ticket", s["notes"])
         s = self.hold("T-6", "heavy-lock")
         self.assertFalse(s["holds"][0]["valid"])
@@ -440,9 +426,6 @@ class Predicates(unittest.TestCase):
         keys = ws.bake_keys()
         self.assertEqual(keys, ["obligation", "deploy SHA", "environment", "command/journey", "test identity",
                                 "human-step kit", "terminal assertion"])
-
-    def test_codex_cap_is_read_from_the_contract(self):  # R23: one owner
-        self.assertEqual(ws.codex_cap(), (5, 6))
 
     def test_session_live_and_awaiting(self):  # R9, R10
         r = session_row(1)

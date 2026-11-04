@@ -561,7 +561,6 @@
     var more = String(h.text || '').replace(/^waits? on (the )?/i, '').replace(/\.$/, '');
     if (base === 'founder-gated') return ['Waiting on you: ', ticket(target), more ? ' (' + more + ')' : ''];
     if (base === 'file-collision') return ['Same files as ', ticket(target), more ? ' (' + more + ')' : ''];
-    if (base === 'cap-codex') return ['Codex at capacity', more ? ' (' + more + ')' : ''];
     if (base === 'completion-mode') return ['Held until the build group finishes'];
     return [words(base), target ? [' ', ticket(target)] : null, more ? ' (' + more + ')' : ''];
   }
