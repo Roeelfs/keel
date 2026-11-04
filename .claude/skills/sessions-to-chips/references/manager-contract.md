@@ -1009,6 +1009,7 @@ incomplete data.
 at this skill's `scripts/spawn-lane.sh`). The operator allowlists that path once; a session may not
 invoke `--permission-mode bypassPermissions` directly. Each rule below was earned by a real failure:
 
+- An implementation lane with a scriptable check passes `--proof <command> <args...>` last; a proof is targeted evidence and never replaces a bake.
 - **Repo lane hook.** `<lane-cwd>/.claude/lane-env.sh` is sourced under the spawner's
   `set -euo pipefail` with `$RUNTIME` in scope; it may export `LANE_MCP_CONFIG` (passed to a Claude
   lane as `--mcp-config`). Export it only for `RUNTIME=claude`: a codex lane refuses supplied MCP

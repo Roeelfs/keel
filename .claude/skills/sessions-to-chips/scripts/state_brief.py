@@ -12,7 +12,7 @@ MAX_LINES = 60
 KIND = {"spec": "Spec", "adr": "ADR", "module": "Module"}
 FLAG = {"UNBOUND": "not started", "READY_NOT_DISPATCHED": "ready, not started",
         "STALLED": "stopped moving", "BAKE_OWED": "bake owed", "STALE_OPEN": "landed, still open",
-        "DUPLICATE_TITLE": "duplicate title"}
+        "DUPLICATE_TITLE": "duplicate title", "PROOF_FAILED": "three or more failed proofs"}
 
 
 def _clause(text):

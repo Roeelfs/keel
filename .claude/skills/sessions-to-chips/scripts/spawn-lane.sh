@@ -7,7 +7,11 @@
 # Usage:
 #   spawn-lane.sh --mission <file|-> [--cwd <worktree>] [--worktree <name>]
 #                 [--runtime claude|codex] [--model <alias>] [--effort low|medium|high|xhigh|max] [--class <task-class>] [--mode <permission-mode>]
-#                 [--mcp-config <file>]
+#                 [--mcp-config <file>] [--ticket <id>]
+#                 [--max-turns <n>] [--max-budget-usd <x>] [--proof <command> <args...>]
+# --proof must be last; argv runs directly, without shell parsing. Use sh -c explicitly
+# for shell syntax. Proof rc 0 passes, 75 defers (launcher rc 75), other failures exit 4.
+# Heavy commands must name the project's heavy-lock wrapper in this argv.
 #
 #   --runtime codex   Spawn the lane on Codex instead of Claude. Separate billing pool.
 #                     Defaults to claude, so every existing call site is unchanged.
@@ -42,9 +46,15 @@ set -euo pipefail
 LANE_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 
 MISSION_SRC="" ; WORKTREE="" ; MODEL="" ; MODE="bypassPermissions" ; LANE_CWD="" ; MCP_CFG="" ; LANE_EFFORT="medium"
+PROOF=() ; TICKET="" ; MAX_TURNS="" ; MAX_BUDGET=""
 RUNTIME="claude" ; ALLOW_NETWORK=0 ; CLASS="standard" ; CLASS_SET=0
 while [ $# -gt 0 ]; do
   case "$1" in
+    # --proof consumes the remaining argv, without eval; put launcher options first.
+    --proof)      shift; [ $# -gt 0 ] || exit 2; PROOF=( "$@" ); break ;;
+    --ticket)     TICKET="$2"; shift 2 ;;
+    --max-turns)  MAX_TURNS="$2"; shift 2 ;;
+    --max-budget-usd) MAX_BUDGET="$2"; shift 2 ;;
     --mission)    MISSION_SRC="$2"; shift 2 ;;
     --cwd)        LANE_CWD="$2"; shift 2 ;;
     --worktree)   WORKTREE="$2"; shift 2 ;;
@@ -76,12 +86,19 @@ esac
 GUARD_STATE=""
 cleanup() { [ -z "$GUARD_STATE" ] || rm -f "$GUARD_STATE"; }
 trap cleanup EXIT
-if [ "$CLASS" = implementation ]; then
+if [ "$CLASS" = implementation ] || [ "${#PROOF[@]}" -gt 0 ]; then
   GUARD_STATE="$(mktemp "${TMPDIR:-/tmp}/lane-heads.XXXXXX")"
   python3 "$LANE_SCRIPT_DIR/lane_commit_guard.py" snapshot "$PWD" > "$GUARD_STATE"
 fi
 check_commits() {
   python3 "$LANE_SCRIPT_DIR/lane_commit_guard.py" check "$GUARD_STATE" "$PWD" "$RUNTIME"
+}
+
+# Proof failure is distinct from runtime/dead-lane errors. Exit 75 means deferred:
+# it is neither acceptance nor failure, and the worktree is always kept for salvage.
+run_proof() {
+  [ "${#PROOF[@]}" -gt 0 ] || return 0
+  python3 "$LANE_SCRIPT_DIR/lane_proof.py" "$GUARD_STATE" "$PWD" "$1" "$TICKET" "${PROOF[@]}"
 }
 
 # ---- lane row (one writer: work_state.py lane-row) --------------------------------------
@@ -105,6 +122,10 @@ if [ -r "$LANE_HOOK" ]; then . "$LANE_HOOK"; fi
 [ -z "$MCP_CFG" ] && MCP_CFG="${LANE_MCP_CONFIG:-}"
 
 if [ "$RUNTIME" = codex ]; then
+  # Codex has no equivalent turn/spend caps. Refuse explicitly rather than drop them.
+  if [ -n "$MAX_TURNS$MAX_BUDGET" ]; then
+    echo "spawn-lane.sh: --max-turns/--max-budget-usd are claude-only" >&2; exit 2
+  fi
   # ---- parity: refuse options this path cannot honor, never accept-and-drop -------------
   # Accepting a capability-bearing option and then omitting the capability is a dead-lane
   # defect: a caller asking for a restrictive --mode would get Codex's unrelated defaults,
@@ -228,7 +249,7 @@ the manager pushes after grading. If you find yourself wanting to push, you are 
   # ---- zero-commit guard (implementation lanes only) -------------------------------------
   # An implementation lane exists to commit. A clean exit with HEAD unchanged is a dead lane
   # wearing a success code. Research lanes legitimately commit nothing, so they keep exec.
-  if [ "$CLASS" != implementation ]; then
+  if [ "$CLASS" != implementation ] && [ "${#PROOF[@]}" -eq 0 ]; then
     if [ "$MISSION_SRC" = "-" ]; then
       exec env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE CYNAP_HEADLESS_LANE=1 \
         codex exec "${CARGS[@]}" "$MISSION"
@@ -245,14 +266,19 @@ the manager pushes after grading. If you find yourself wanting to push, you are 
     env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE CYNAP_HEADLESS_LANE=1 \
       codex exec "${CARGS[@]}" "$MISSION" < /dev/null || CODEX_RC=$?
   fi
+  run_proof "$LANE_KEY"
   [ "$CODEX_RC" -ne 0 ] && exit "$CODEX_RC"
-  check_commits
+  if [ "$CLASS" = implementation ]; then check_commits; fi
   exit 0
 fi
 
 case "$LANE_EFFORT" in low|medium|high|xhigh|max) ;; *) echo "spawn-lane.sh: --effort must be low|medium|high|xhigh|max (got '$LANE_EFFORT')" >&2; exit 2 ;; esac
 LANE_SESSION="$(uuidgen | tr 'A-Z' 'a-z')"
 ARGS=( --permission-mode "$MODE" --session-id "$LANE_SESSION" --model "$MODEL" --effort "$LANE_EFFORT" )
+# CLI probe (2026-11-04): --help lists --max-budget-usd. --max-turns is
+# registered with hideHelp() in the installed CLI; --help omits that supported option.
+[ -n "$MAX_TURNS" ] && ARGS+=( --max-turns "$MAX_TURNS" )
+[ -n "$MAX_BUDGET" ] && ARGS+=( --max-budget-usd "$MAX_BUDGET" )
 [ -n "$WORKTREE" ] && ARGS+=( --worktree "$WORKTREE" )
 [ -n "$MCP_CFG" ] && ARGS+=( --mcp-config "$MCP_CFG" )
 ARGS+=( -p --output-format json --permission-prompts none )
@@ -292,6 +318,7 @@ CLAUDE_RC=0
 wait "$CLAUDE_PID" || CLAUDE_RC=$?
 # A trapped signal interrupts the first wait; reap the child for its real exit status.
 if kill -0 "$CLAUDE_PID" 2>/dev/null; then wait "$CLAUDE_PID" || CLAUDE_RC=$?; fi
+run_proof "$LANE_SESSION"
 AUTH_DEAD=0
 python3 -c 'import json,sys
 try:

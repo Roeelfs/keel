@@ -16,6 +16,7 @@ import subprocess
 import time
 
 import program_family as pf
+import lane_proof
 import work_state_store as st
 
 ANALYTICS = os.environ.get("WORK_STATE_ANALYTICS") or os.path.join(st.HOME, "analytics/work-state.jsonl")
@@ -309,7 +310,7 @@ def build_ctx(slug, *, mode="snapshot", refresh=False, stdin_facts=None, program
     ctx = {"now": now, "slug": slug, "map_id": (manifest.get("map") or {}).get("issue"),
            "absorbed": bool(manifest.get("absorbed_by")), "bindings": bindings, "tracker": tracker,
            "tracker_age_s": t_age, "has_tracker_cmd": bool(tracker_cmd(manifest)[0]), "prs": prs, "gh_age_s": gh_age,
-           "sessions": rows, "cli": cli, "family_sessions": lineage, "manager_ids": mgr_ids, "lanes": lanes,
+           "sessions": rows, "cli": cli, "family_sessions": lineage, "manager_ids": mgr_ids, "lanes": lanes, "proof_failures": lane_proof.failure_counts(),
            "pids": pmap, "outfiles": outfiles, "git": git, "state": facts, "live_bg": live_bg,
            "fp_cache": cache.get("fp") or {}, "ready_since": cache.get("ready_since") or {},
            "floor": st.migration_floor(slug, programs), "pending_events": events, "notes": notes}

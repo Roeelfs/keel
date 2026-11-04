@@ -2,7 +2,7 @@
 """work_state.py — every piece of manager work is a bound map ticket with a derived state.
 
 One engine owns the binding record (ticket -> carriers), derives each map ticket's state, and
-emits six flags: UNBOUND, READY_NOT_DISPATCHED, STALLED, BAKE_OWED, STALE_OPEN, DUPLICATE_TITLE
+emits flags: UNBOUND, READY_NOT_DISPATCHED, STALLED, BAKE_OWED, STALE_OPEN, DUPLICATE_TITLE, PROOF_FAILED
 (only the first two block). It never merges, pushes,
 deploys or bakes, and it writes no tracker state. Ticket ids are opaque strings; the tracker is
 reached only through the manifest's `map.snapshot_cmd` (contract `work-state-tracker/<major>`).
@@ -41,7 +41,7 @@ LEASE = {"lane": 5400, "session": 14400, "pr_pending": 1500, "launch": 600, "car
 TRACKER_STALE_S = 7200
 TRUNCATED_BLOCKER = "relations_truncated"
 WAKE_GRACE_S = 600
-FLAGS = ("UNBOUND", "READY_NOT_DISPATCHED", "STALLED", "BAKE_OWED", "STALE_OPEN", "DUPLICATE_TITLE")
+FLAGS = ("UNBOUND", "READY_NOT_DISPATCHED", "STALLED", "BAKE_OWED", "STALE_OPEN", "DUPLICATE_TITLE", "PROOF_FAILED")
 DUP_IGNORED = frozenset({"canceled", "duplicate"})
 LANE_UNBOUND_AGE_S = 7 * 86400
 MERGE_AND_RETIRE = os.path.join(HERE, "..", "references", "merge-and-retire.md")
@@ -293,6 +293,10 @@ def derive(ctx):
     by_ticket = {b["ticket"]: b for b in bindings}
     notes, awaiting, flags = list(ctx.get("notes") or []), [], {k: [] for k in FLAGS}
     cstate = {}
+    for ticket, count in (ctx.get("proof_failures") or {}).items():
+        if count >= 3 and ticket in (set(kids) | set(by_ticket)):
+            flags["PROOF_FAILED"].append({"item": ticket, "why": f"{count} failed proofs since last pass",
+                                           "fix": "inspect proof receipts and salvage before re-dispatch"})
 
     def live_of(c):
         k = (c["type"], c["id"])
@@ -437,7 +441,7 @@ def derive(ctx):
                     "fix": f"dispatch {cid}: work_state.py bind, a tracked launch, carrier; or a valid Hold: {cid} <reason>"})
             elif cid in valid_hold:
                 new_ready[cid] = ready_since.get(cid, now)
-        for fl in ("STALLED", "BAKE_OWED", "STALE_OPEN", "DUPLICATE_TITLE"):
+        for fl in ("STALLED", "BAKE_OWED", "STALE_OPEN", "DUPLICATE_TITLE", "PROOF_FAILED"):
             if any(x["item"] == cid for x in flags[fl]):
                 f.append(fl)
         bake = _bake_child(cid, kids) if c.get("kind") == "ship" else None
@@ -466,7 +470,7 @@ def derive(ctx):
                                        for x in b["carriers"]], "publication": b.get("publication"),
                           "pr": pr_view(b.get("publication"), ctx["prs"]), "blocked_by": [],
                           "ready_since": None, "fingerprint_age_s": None, "bake_verdict": None,
-                          "predecessor_verdicts": [], "flags": [fl for fl in ("STALLED",) if
+                          "predecessor_verdicts": [], "flags": [fl for fl in ("STALLED", "PROOF_FAILED") if
                                                                  any(x["item"] == t for x in flags[fl])]})
 
     # UNBOUND carriers (R22)
@@ -686,7 +690,7 @@ def main(argv=None):
                 print(snap["map_line"])
                 for x in snap["blocking"]:
                     print(f"BLOCKING {x['flag']} {x['item']}: {x['fix']}")
-                for fl in ("STALLED", "BAKE_OWED", "STALE_OPEN", "DUPLICATE_TITLE"):
+                for fl in ("STALLED", "BAKE_OWED", "STALE_OPEN", "DUPLICATE_TITLE", "PROOF_FAILED"):
                     for x in snap["flags"][fl]:
                         print(f"{fl} {x['item']}: {x.get('why') or x.get('publication')}")
                 for n in snap["notes"]:

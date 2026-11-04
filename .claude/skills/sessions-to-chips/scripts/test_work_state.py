@@ -702,5 +702,39 @@ class Migration(unittest.TestCase):  # R36
         self.assertIn("lanes", st.read_manifest(slug2))
 
 
+class ProofFlagTests(unittest.TestCase):
+    def test_three_failures_flag_context_and_pass_clears(self):
+        import lane_proof
+        import render_state
+        import state_brief
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "proofs.jsonl")
+            for _ in range(2):
+                lane_proof.append({"ticket": "T-4", "outcome": "fail"}, path)
+            def snapshot():
+                return ws.derive(ctx(proof_failures=lane_proof.failure_counts(path)))[0]
+            self.assertEqual(snapshot()["flags"]["PROOF_FAILED"], [])
+            lane_proof.append({"ticket": "T-4", "outcome": "fail"}, path)
+            snap = snapshot()
+            self.assertEqual([x["item"] for x in snap["flags"]["PROOF_FAILED"]], ["T-4"])
+            self.assertIn("PROOF_FAILED", next(i for i in snap["items"] if i["ticket"] == "T-4")["flags"])
+            held = [r for r in render_state.flag_rows(snap)[0] if r["flag"] == "PROOF_FAILED"]
+            self.assertIn("three or more failed proofs", state_brief.held_text(held[0]))
+            lane_proof.append({"ticket": "T-4", "outcome": "deferred"}, path)
+            self.assertTrue(snapshot()["flags"]["PROOF_FAILED"])
+            lane_proof.append({"ticket": "T-4", "outcome": "pass"}, path)
+            self.assertEqual(snapshot()["flags"]["PROOF_FAILED"], [])
+
+    def test_mutation_control_wrong_threshold_is_detected(self):
+        with open(ws.__file__) as fh:
+            source = fh.read()
+        self.assertIn("count >= 3", source)
+        namespace = dict(vars(ws))
+        exec(compile(source.replace("count >= 3", "count >= 4"), ws.__file__, "exec"), namespace)
+        snap = namespace["derive"](ctx(proof_failures={"T-4": 3}))[0]
+        with self.assertRaises(AssertionError):
+            self.assertTrue(snap["flags"]["PROOF_FAILED"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

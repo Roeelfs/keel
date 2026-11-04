@@ -365,7 +365,7 @@ def flag_rows(snap):
     rows = [{"kind": "flag", "flag": x.get("flag"), "id": x.get("item"), "fix": x.get("fix")}
             for x in (snap or {}).get("blocking") or []]
     rows += [{"kind": "flag", "flag": fl, "id": x.get("item"), "fix": x.get("fix")}
-             for fl in ("STALLED", "BAKE_OWED") for x in ((snap or {}).get("flags") or {}).get(fl) or []]
+             for fl in ("STALLED", "BAKE_OWED", "PROOF_FAILED") for x in ((snap or {}).get("flags") or {}).get(fl) or []]
     on_ticket = [r for r in rows if TICKET_ID.match(str(r["id"] or ""))]
     return on_ticket, [r for r in rows if r not in on_ticket]
 

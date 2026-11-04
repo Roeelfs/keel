@@ -6,6 +6,8 @@ import io
 import json
 import os
 import unittest
+import tempfile
+from unittest.mock import patch
 from contextlib import redirect_stdout
 
 import test_render_state as T  # sets the env before the engine modules import
@@ -158,6 +160,21 @@ class Brief(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertTrue(buf.getvalue().startswith("ctx (map TKT-1)"))
         self.assertFalse(os.path.exists(page))
+
+    def test_context_shows_three_failed_proofs_and_a_pass_clears(self):
+        import lane_proof
+        T.write_program("proof-context")
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"WORK_STATE_LANE_ROWS": os.path.join(tmp, "lanes.jsonl")}):
+            for _ in range(3):
+                lane_proof.append({"ticket": "TKT-2", "outcome": "fail"})
+            def context():
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    self.assertEqual(rs.main(["--program", "proof-context", "--context"], run=T.GhFake()), 0)
+                return buf.getvalue()
+            self.assertIn("TKT-2: three or more failed proofs", context())
+            lane_proof.append({"ticket": "TKT-2", "outcome": "pass"})
+            self.assertNotIn("three or more failed proofs", context())
 
 
 class WorkerFlags(unittest.TestCase):
