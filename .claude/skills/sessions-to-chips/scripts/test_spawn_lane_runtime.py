@@ -75,7 +75,8 @@ class RuntimeTests(unittest.TestCase):
 
     def test_default_runtime_is_still_claude(self):
         # Every existing call site must be unchanged by this feature.
-        _, argv = self.spawn(self.base)
+        result, argv = self.spawn(self.base)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("-p", argv)
         self.assertIn("--output-format", argv)
         # A headless lane has no one to answer a prompt; without this a restrictive --mode hangs.
@@ -118,14 +119,14 @@ class RuntimeTests(unittest.TestCase):
                 self.assertIn("claude /login", r.stderr)
                 self.assertNotIn(text, r.stdout)
 
-    def test_a_non_auth_envelope_is_re_emitted_with_its_exit_code(self):
+    def test_a_non_auth_error_envelope_is_re_emitted_and_fails(self):
         env = json.dumps({"type": "result", "subtype": "success", "is_error": True,
                           "result": "Failed to push the branch"})
         for rc in ("0", "1"):
             with self.subTest(rc=rc):
                 self.run_env = {"STUB_RC": rc, "STUB_ENVELOPE": env}
                 r, _ = self.spawn(self.base)
-                self.assertEqual(r.returncode, int(rc), r.stderr)
+                self.assertEqual(r.returncode, 1, r.stderr)
                 self.assertEqual(r.stdout, env)
 
     def test_codex_runtime_grants_the_git_dir(self):
@@ -253,7 +254,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertEqual(argv, [])
 
-    def test_class_is_codex_only(self):
+    def test_claude_rejects_unsupported_class(self):
         r, argv = self.spawn(self.base, "--class", "security")
         self.assertEqual(r.returncode, 2)
         self.assertEqual(argv, [])

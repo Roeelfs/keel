@@ -62,12 +62,27 @@ done
 [ -n "$MISSION_SRC" ] || { echo "spawn-lane.sh: --mission <file|-> required" >&2; exit 2; }
 case "$RUNTIME" in
   claude)
-    [ "$CLASS_SET" = 0 ] || { echo "spawn-lane.sh: --class is codex-only" >&2; exit 2; }
+    case "$CLASS" in standard|research|implementation) ;;
+      *) echo "spawn-lane.sh: claude --class must be standard|research|implementation" >&2; exit 2 ;;
+    esac
     : "${MODEL:=sonnet}" ;;
   codex) : ;;
   *) echo "spawn-lane.sh: --runtime must be claude|codex (got '$RUNTIME')" >&2; exit 2 ;;
 esac
 [ -n "$LANE_CWD" ] && cd "$LANE_CWD"
+
+# Snapshot every existing worktree before dispatch. The guard resolves a newly created
+# lane worktree against its own initial HEAD, never the launching checkout's HEAD.
+GUARD_STATE=""
+cleanup() { [ -z "$GUARD_STATE" ] || rm -f "$GUARD_STATE"; }
+trap cleanup EXIT
+if [ "$CLASS" = implementation ]; then
+  GUARD_STATE="$(mktemp "${TMPDIR:-/tmp}/lane-heads.XXXXXX")"
+  python3 "$LANE_SCRIPT_DIR/lane_commit_guard.py" snapshot "$PWD" > "$GUARD_STATE"
+fi
+check_commits() {
+  python3 "$LANE_SCRIPT_DIR/lane_commit_guard.py" check "$GUARD_STATE" "$PWD" "$RUNTIME"
+}
 
 # ---- lane row (one writer: work_state.py lane-row) --------------------------------------
 # A full row (lane id, parent manager, runtime, model, pid + start time, outfile, worktree) lets
@@ -222,7 +237,6 @@ the manager pushes after grading. If you find yourself wanting to push, you are 
         codex exec "${CARGS[@]}" "$MISSION" < /dev/null
     fi
   fi
-  HEAD_BEFORE="$(git rev-parse HEAD 2>/dev/null || echo none)"
   CODEX_RC=0
   if [ "$MISSION_SRC" = "-" ]; then
     env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE CYNAP_HEADLESS_LANE=1 \
@@ -232,14 +246,7 @@ the manager pushes after grading. If you find yourself wanting to push, you are 
       codex exec "${CARGS[@]}" "$MISSION" < /dev/null || CODEX_RC=$?
   fi
   [ "$CODEX_RC" -ne 0 ] && exit "$CODEX_RC"
-  if [ "$(git rev-parse HEAD 2>/dev/null || echo none)" = "$HEAD_BEFORE" ]; then
-    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-      echo "spawn-lane.sh: DEAD LANE: codex exited 0 but committed nothing; uncommitted work is left in $(pwd), salvage before re-dispatch" >&2
-    else
-      echo "spawn-lane.sh: DEAD LANE: codex exited 0 but committed nothing and left a clean tree" >&2
-    fi
-    exit 3
-  fi
+  check_commits
   exit 0
 fi
 
@@ -266,7 +273,7 @@ ARGS+=( -p --output-format json --permission-prompts none )
 # A headless lane that is not logged in answers with envelope subtype:"success",
 # is_error:true and rc=1: indistinguishable from a work failure unless the result text is read.
 LANE_OUT="$(mktemp "${TMPDIR:-/tmp}/spawn-lane-out.XXXXXX")"
-trap 'rm -f "$LANE_OUT"' EXIT
+trap 'rm -f "$LANE_OUT"; cleanup' EXIT
 record_lane_row "$LANE_SESSION" claude "${LANE_RECORD_OUTFILE:-}"
 # Run claude as a child we can signal: with `exec` a kill of this pid killed claude, and
 # capturing the envelope must not turn a lane cancel into an orphaned, still-working lane.
@@ -298,4 +305,18 @@ if [ "$AUTH_DEAD" = 1 ]; then
   exit 3
 fi
 cat "$LANE_OUT"
-exit "$CLAUDE_RC"
+[ "$CLAUDE_RC" -eq 0 ] || exit "$CLAUDE_RC"
+if python3 -c 'import json,sys
+try:
+    e=json.load(open(sys.argv[1]))
+except (ValueError, OSError):
+    sys.exit(1)
+# --output-format json may contain init/tool events followed by the final result.
+if isinstance(e,list):
+    e=next((x for x in reversed(e) if isinstance(x,dict) and x.get("type")=="result"), {})
+sys.exit(0 if isinstance(e,dict) and e.get("is_error") is True else 1)' "$LANE_OUT"; then
+  echo "spawn-lane.sh: claude final result is_error=true" >&2
+  exit 1
+fi
+if [ "$CLASS" = implementation ]; then check_commits; fi
+exit 0
