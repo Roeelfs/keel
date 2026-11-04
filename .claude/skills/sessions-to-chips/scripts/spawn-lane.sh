@@ -105,14 +105,14 @@ if [ "$CLASS" = implementation ] || [ "${#PROOF[@]}" -gt 0 ]; then
   python3 "$LANE_SCRIPT_DIR/lane_commit_guard.py" snapshot "$PWD" > "$GUARD_STATE"
 fi
 check_commits() {
-  python3 "$LANE_SCRIPT_DIR/lane_commit_guard.py" check "$GUARD_STATE" "$PWD" "$RUNTIME"
+  python3 "$LANE_SCRIPT_DIR/lane_commit_guard.py" check "$GUARD_STATE" "$PWD" "$RUNTIME" "$WORKTREE"
 }
 
 # Proof failure is distinct from runtime/dead-lane errors. Exit 75 means deferred:
 # it is neither acceptance nor failure, and the worktree is always kept for salvage.
 run_proof() {
   [ "${#PROOF[@]}" -gt 0 ] || return 0
-  python3 "$LANE_SCRIPT_DIR/lane_proof.py" "$GUARD_STATE" "$PWD" "$1" "$TICKET" "${PROOF[@]}"
+  python3 "$LANE_SCRIPT_DIR/lane_proof.py" "$GUARD_STATE" "$PWD" "$1" "$TICKET" "$WORKTREE" "${PROOF[@]}"
 }
 
 # ---- lane row (one writer: work_state.py lane-row) --------------------------------------
@@ -280,8 +280,10 @@ the manager pushes after grading. If you find yourself wanting to push, you are 
     env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE CYNAP_HEADLESS_LANE=1 \
       codex exec "${CARGS[@]}" "$MISSION" < /dev/null || CODEX_RC=$?
   fi
-  run_proof "$LANE_KEY"
+  PROOF_RC=0
+  run_proof "$LANE_KEY" || PROOF_RC=$?
   [ "$CODEX_RC" -ne 0 ] && exit "$CODEX_RC"
+  [ "$PROOF_RC" -eq 0 ] || exit "$PROOF_RC"
   if [ "$CLASS" = implementation ]; then check_commits; fi
   exit 0
 fi
@@ -332,7 +334,8 @@ CLAUDE_RC=0
 wait "$CLAUDE_PID" || CLAUDE_RC=$?
 # A trapped signal interrupts the first wait; reap the child for its real exit status.
 if kill -0 "$CLAUDE_PID" 2>/dev/null; then wait "$CLAUDE_PID" || CLAUDE_RC=$?; fi
-run_proof "$LANE_SESSION"
+PROOF_RC=0
+run_proof "$LANE_SESSION" || PROOF_RC=$?
 AUTH_DEAD=0
 python3 -c 'import json,sys
 try:
@@ -359,5 +362,6 @@ sys.exit(0 if isinstance(e,dict) and e.get("is_error") is True else 1)' "$LANE_O
   echo "spawn-lane.sh: claude final result is_error=true" >&2
   exit 1
 fi
+[ "$PROOF_RC" -eq 0 ] || exit "$PROOF_RC"
 if [ "$CLASS" = implementation ]; then check_commits; fi
 exit 0

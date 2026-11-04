@@ -67,21 +67,21 @@ def proof_files(argv, cwd):
     return paths
 
 
-def run(before, cwd, lane, ticket, argv):
-    evidence = guard.evidence(before, cwd)
+def run(before, cwd, lane, ticket, argv, worktree_name=""):
+    evidence = guard.evidence(before, cwd, worktree_name=worktree_name)
     target = evidence["worktree"]
-    new = set(guard.worktrees(cwd)) - set(before["heads"])
-    ambiguous = len(new) > 1
-    changed = set(guard.git(target, "diff", "--name-only", evidence["head_before"], evidence["head_after"]).splitlines())
-    own = sorted(proof_files(argv, target) & changed)
-    try:
-        if ambiguous or not evidence["head_after"]:
-            raise OSError("proof worktree is ambiguous or unavailable")
-        rc = subprocess.run(argv, cwd=target, stdin=subprocess.DEVNULL,
-                            env={**os.environ, "CYNAP_HEADLESS_LANE": "1"}).returncode
-        error = None
-    except OSError as exc:
-        rc, error = 127, str(exc)
+    own = []
+    error = evidence.get("error")
+    if error:
+        rc = 75
+    else:
+        changed = set(guard.git(target, "diff", "--name-only", evidence["head_before"], evidence["head_after"]).splitlines())
+        own = sorted(proof_files(argv, target) & changed)
+        try:
+            rc = subprocess.run(argv, cwd=target, stdin=subprocess.DEVNULL,
+                                env={**os.environ, "CYNAP_HEADLESS_LANE": "1"}).returncode
+        except OSError as exc:
+            rc, error = 127, str(exc)
     outcome = "pass" if rc == 0 else "deferred" if rc == 75 else "fail"
     row = {"ticket": ticket or None, "lane": lane, "worktree": target,
            "head_before": evidence["head_before"], "head_after": evidence["head_after"],
@@ -96,4 +96,4 @@ def run(before, cwd, lane, ticket, argv):
 
 
 if __name__ == "__main__":
-    sys.exit(run(json.loads(Path(sys.argv[1]).read_text()), *sys.argv[2:5], sys.argv[5:]))
+    sys.exit(run(json.loads(Path(sys.argv[1]).read_text()), *sys.argv[2:5], sys.argv[6:], worktree_name=sys.argv[5]))

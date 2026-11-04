@@ -20,7 +20,7 @@ class ProofTests(unittest.TestCase):
     tearDown = runtime_tests.RuntimeTests.tearDown
 
     def spawn(self, *args, runtime="claude", own=False, change=False, runtime_rc=0,
-              no_commit=False, through_links=False, parent=""):
+              no_commit=False, through_links=False, parent="", named=False, foreign=0):
         scripts = self.root / "scripts"
         scripts.mkdir(exist_ok=True)
         for name in ("spawn-lane.sh", "lane_commit_guard.py", "lane_proof.py"):
@@ -55,6 +55,9 @@ class ProofTests(unittest.TestCase):
         mock = '''#!/bin/bash
 set -eu
 printf '%s\\n' "$@" > "$STUB_OUT"
+for ((i=0; i<FOREIGN; i++)); do
+  git -c core.hooksPath=/dev/null worktree add -qb "foreign-$i" "$FOREIGN_ROOT/foreign-$i" >&2
+done
 if [ "$OWN" = 1 ]; then
   git -c core.hooksPath=/dev/null worktree add -qb lane "$OWN_CWD" >&2
   cd "$OWN_CWD"
@@ -70,11 +73,12 @@ exit "$RUNTIME_RC"
                "S2C_CLAUDE_HOME": str(self.home / ".claude"), "CLAUDE_SESSION_ID": parent,
                "STUB_OUT": str(self.out), "STUB_GATE_ARGS": str(self.root / "gate-args"),
                "WORK_STATE_LANE_ROWS": str(self.root / "lane-parents.jsonl"),
-               "OWN": str(int(own)), "OWN_CWD": str((self.root / "own").resolve()),
+               "FOREIGN": str(foreign), "FOREIGN_ROOT": str(self.root),
+               "OWN": str(int(own)), "OWN_CWD": str((self.base / ".claude/worktrees/named" if named else self.root / "own").resolve()),
                "CHANGE": str(int(change)), "NO_COMMIT": str(int(no_commit)), "RUNTIME_RC": str(runtime_rc)}
         return subprocess.run([str(launcher), "--mission", str(self.mission),
                                "--cwd", str(self.base), "--runtime", runtime, "--class", "implementation",
-                               "--ticket", "T-1", *args], env=env, capture_output=True, text=True, timeout=15)
+                               "--ticket", "T-1", *(["--worktree", "named"] if named else []), *args], env=env, capture_output=True, text=True, timeout=15)
 
     def rows(self):
         p = self.root / "lane-proofs.jsonl"
@@ -146,6 +150,55 @@ exit "$RUNTIME_RC"
         self.assertFalse((self.base / "proof-ran").exists())
         head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=row["worktree"], text=True).strip()
         self.assertEqual(head, row["head_after"])
+
+    def test_named_worktree_ignores_two_foreign_worktrees(self):
+        row = self.assert_proof(0, "pass", own=True, named=True, foreign=2)
+        self.assertEqual(Path(row["worktree"]), (self.base / ".claude/worktrees/named").resolve())
+
+    def test_missing_named_worktree_does_not_borrow_single_foreign(self):
+        result = self.spawn("--proof", "python3", "proof.py", "0", named=True,
+                            foreign=1, no_commit=True)
+        self.assertEqual(result.returncode, 75, result.stderr)
+        row = self.rows()[-1]
+        self.assertEqual(row["outcome"], "deferred")
+        self.assertIsNone(row["worktree"])
+        self.assertIn("unavailable", row["error"])
+        self.assertFalse((self.root / "foreign-0/proof-ran").exists())
+        self.assertNotIn("DEAD LANE", result.stderr)
+        self.assertEqual(lane_proof.failure_counts(self.root / "lane-proofs.jsonl"), {})
+
+    def test_missing_named_commit_check_defers_without_dead_lane(self):
+        result = self.spawn(named=True, foreign=1, no_commit=True)
+        self.assertEqual(result.returncode, 75, result.stderr)
+        self.assertIn("commit check deferred", result.stderr)
+        self.assertNotIn("DEAD LANE", result.stderr)
+        self.assertIn('"type":"result"', result.stdout)
+
+    def test_unnamed_ambiguous_worktree_defers_without_failure_count(self):
+        for _ in range(2):
+            lane_proof.append({"ticket": "T-1", "outcome": "fail"},
+                              self.root / "lane-proofs.jsonl")
+        result = self.spawn("--proof", "python3", "proof.py", "0", foreign=2)
+        self.assertEqual(result.returncode, 75, result.stderr)
+        row = self.rows()[-1]
+        self.assertEqual(row["outcome"], "deferred")
+        self.assertIsNone(row["worktree"])
+        self.assertIn("ambiguous", row["error"])
+        self.assertFalse((self.base / "proof-ran").exists())
+        self.assertEqual(lane_proof.failure_counts(self.root / "lane-proofs.jsonl"), {"T-1": 2})
+
+    def test_failed_proof_prints_report(self):
+        result = self.spawn("--proof", "python3", "proof.py", "1")
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["type"], "result")
+
+    def test_runtime_failure_precedes_failed_proof_both_runtimes(self):
+        for runtime in ("claude", "codex"):
+            with self.subTest(runtime=runtime):
+                result = self.spawn("--proof", "python3", "proof.py", "1",
+                                    runtime=runtime, runtime_rc=7)
+                self.assertEqual(result.returncode, 7, result.stderr)
+                self.assertIn('"type":"result"', result.stdout)
 
     def test_own_files_advisory_does_not_fail(self):
         self.assertFalse(self.assert_proof(0, "pass")["proof_files_changed"])
