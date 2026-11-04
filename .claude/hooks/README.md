@@ -1,42 +1,38 @@
-# keel hooks — portable SEEDS, not the running copies
+# keel hooks — the one owner of every generic hook
 
-The scripts in this directory are **vendor-neutral seeds**: the smallest correct version
-of a guard, safe to drop onto any machine. They are *not* the hooks a configured machine
-actually runs.
+A hook here is the running copy, not a seed. A machine wires it by **symlink** from
+`~/.claude/hooks/<name>` to this directory, and `~/.claude/settings.json` calls the
+`~/.claude/hooks/` path. An edit here is live on the next tool call that fires it.
+One owner per file: never keep a second copy of a hook that lives here.
 
-## The relationship
+## What lives here, what stays on the machine
 
-A machine's live hooks live in `~/.claude/hooks/` and are wired from `~/.claude/settings.json`.
-Those copies routinely **diverge upward** from these seeds, because a live hook accumulates:
+- **Here:** a hook that reads the same on a stranger's machine. It may write its own log
+  under `~/.claude/analytics/`, call a sibling by `~/.claude/hooks/<name>` or its own
+  directory, and call a keel script by `~/.claude/scripts/<name>`.
+- **On the machine only:** a hook that names a repo, tracker prefix, customer, machine path
+  or operator ruling, or that cites a private evidence file. This repo is public and
+  marker-free (`AGENTS.md`), and `.githooks/pre-commit` blocks most such text. A hook that
+  needs one private rule stays private whole; it is never split into a public copy plus
+  a private delta.
+- A machine-only hook may import a keel hook's module from `~/.claude/hooks/` (the link
+  makes it a sibling), never the other way round.
 
-- **repo-scoping** — `case "$cwd" in */<repo>*)` guards that name a specific repository.
-  Those can never live here: this repo is public and marker-free, so a rule naming a
-  customer repo, tracker prefix, or machine path is a contract violation.
-- **machine-specific paths** — a project's memory dir or a local CLI.
-- **operator-private craft** — the same split that governs skills: the committed seed is
-  de-identified, the private detail stays on the machine.
+`tooling/sandbox/install-resource-hooks.py` treats a hook that already links to its keel
+source as current, so re-running it never turns a link back into a copy.
 
-Measured 2026-07-24, that divergence was real and large for the then-current resource
-serializer. That retired example remains in dated harness analytics; the live comparison
-today is `warn-if-worktree-launch.sh`, which is 49 lines here and 110 lines live.
+Hooks are still **not** auto-wired by `tooling/wire-skills.sh`: a hook can block every tool
+call on the machine, so wiring one is a deliberate act (read it, link it, register it in
+`settings.json`, run `~/.claude/scripts/replay-hook.sh syntax`).
 
-## What this means in practice
+`session-start.sh`, `session-end.sh`, `heartbeat-reaper.sh` and `serialize-heavy-ops.sh`
+are starter hooks for a new machine; nothing here requires them.
 
-- **Do NOT "sync" the two directions blindly.** Copying live → seed leaks machine and
-  customer specifics into a public repo. Copying seed → live silently deletes hard-won
-  guards and can un-wedge a real safety block.
-- **A fix that is genuinely generic belongs in BOTH** — de-identify it, land it here, and
-  apply the same change to the live copy.
-- **A fix that names a repo, path, or tenant belongs ONLY in the live copy** (or in that
-  repo's own `.claude/`).
-- Hooks are **not** auto-wired by `tooling/wire-skills.sh` — unlike skills and agents,
-  which are symlinked into the runtime roots, hooks are deliberately copied and adapted,
-  because wiring one machine-wide without reading it is how you fail closed on real work.
-
-## Before changing a live hook
+## Before changing a hook
 
 A hook can block a tool call. Replay it against the **actual transcripts** that motivated
 it — it must fire at the real friction point, stay silent on a healthy session, and emit a
 bounded number of times over a long incident. A dry-run against fixtures you invented
 proves only that the hook matches your model of the bug. See
-`.claude/skills/improve-harness/GOTCHAS.md`.
+`.claude/skills/improve-harness/GOTCHAS.md`. `hook-syntax-sentinel.py` reports a hook that
+stops parsing in the same turn, including one reached through a symlink.

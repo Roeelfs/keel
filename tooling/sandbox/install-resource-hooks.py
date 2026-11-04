@@ -123,6 +123,9 @@ def atomic_bytes(path, content, executable=False):
     temporary.chmod(0o700 if executable else 0o600); os.replace(temporary, path)
 
 def file_current(source, destination, executable=False):
+    # A destination linked to this very source is the intended state (one owner, consumed by symlink):
+    # replacing it with a copy would recreate the second copy the link exists to remove.
+    if destination.is_symlink() and destination.resolve() == source.resolve(): return True
     mode = 0o700 if executable else 0o600
     return (destination.is_file() and not destination.is_symlink()
             and destination.read_bytes() == source.read_bytes()

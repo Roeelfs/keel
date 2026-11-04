@@ -1,0 +1,13 @@
+#!/bin/zsh
+set -eu
+
+chrome_process="Google Chrome"
+chrome_binary="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+# Do not interrupt the current browsing session. Once Chrome is closed normally,
+# relaunch it with Chromium's debugger-infobar suppression switch.
+while /usr/bin/pgrep -x "$chrome_process" >/dev/null; do
+  /bin/sleep 2
+done
+
+exec "$chrome_binary" --silent-debugger-extension-api

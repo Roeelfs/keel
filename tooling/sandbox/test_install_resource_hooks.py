@@ -127,6 +127,15 @@ class InstallerTests(unittest.TestCase):
             command = json.loads((home / ".codex/hooks.json").read_text())["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
             self.assertIn("--runtime codex", command); self.assertNotIn("/Cellar/", command)
 
+    def test_a_hook_symlinked_to_its_source_is_current_and_a_copy_is_not(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "src.py"; source.write_bytes(b"x = 1\n")
+            link = Path(tmp) / "link.py"; link.symlink_to(source)
+            self.assertTrue(installer.file_current(source, link, executable=True))
+            other = Path(tmp) / "other.py"; other.write_bytes(b"x = 1\n")
+            stray = Path(tmp) / "stray.py"; stray.symlink_to(other)
+            self.assertFalse(installer.file_current(source, stray, executable=True))  # mutation control
+
     def test_missing_hook_interpreter_fails_closed(self):
         for runtime in (None, 'claude'):
             command = installer.command_for('/missing/resource-python', '/missing/resource-hook.py', runtime)
