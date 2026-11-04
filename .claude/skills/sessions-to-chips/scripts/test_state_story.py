@@ -121,6 +121,26 @@ class Brief(unittest.TestCase):
         self.assertTrue(lines[-1].startswith("Then re-render: render_state.py --program brief"))
         self.assertNotIn("{", text, "no JSON in the brief")
 
+    def test_brief_shows_an_open_draft_as_not_ready(self):
+        p = self.payload()
+        lines = state_brief.brief(p).splitlines()
+        self.assertIn("Open PRs:", lines)
+        self.assertTrue(any(ln.startswith("- #8 ") and "merge state unknown" in ln for ln in lines), lines)
+        row = next(r for r in p["now"]["production"]["rows"] if r["pr"] == 8)
+        row["readiness"] = rs.readiness(dict(state="OPEN", isDraft=True), {"readiness": "ready"})
+        self.assertIn("DRAFT, not ready", state_brief.brief(p))
+        self.assertNotIn("ready to merge", state_brief.brief(p))
+
+    def test_readiness_takes_draft_from_this_render_and_reasons_only_from_this_tick(self):
+        op = {"state": "OPEN", "isDraft": False}
+        self.assertEqual(rs.readiness(dict(op, isDraft=True), {"readiness": "ready"})["state"], "draft")
+        self.assertEqual(rs.readiness(dict(op, isDraft=None), {"readiness": "ready"})["state"], "unknown")
+        self.assertEqual(rs.readiness(op, {"readiness": "blocked", "why": "checks pending"}),
+                         {"state": "blocked", "why": "checks pending"})
+        self.assertEqual(rs.readiness(op, None)["state"], "unknown")
+        self.assertEqual(rs.readiness(op, {"readiness": "draft"})["state"], "unknown")
+        self.assertIsNone(rs.readiness(dict(op, state="MERGED", mergedAt="x"), None))
+
     def test_the_bound_keeps_the_footer(self):
         body = [f"line {i}" for i in range(200)]
         out = state_brief._bound(body, ["Update in ## VIEW before ending the turn:", "- x", "Then re-render"])

@@ -134,6 +134,54 @@ def pr_facts(row):
     return row.get("state"), pending, _h(row.get("headRefOid"), concl, row.get("reviewDecision"))
 
 
+MERGE_STATE_WHY = {"DIRTY": "merge conflict", "BEHIND": "behind its base", "BLOCKED": "branch protection (reason not named)",
+                   "UNSTABLE": "a non-required check fails", "DRAFT": "draft"}
+
+
+def pr_view(pub, prs):
+    """An open PR's merge readiness, derived again from THIS tick's gh read. A draft never reads as ready, and
+    a block reason never comes from an earlier tick: a row older than the gh TTL, or a field gh did not
+    return, reads `unknown`. -> dict | None (no PR publication)."""
+    if "pr" not in (pub or {}):
+        return None
+    row = prs.get(f"{pub.get('repo')}#{pub.get('pr')}")
+    if not row:
+        return {"pr": pub.get("pr"), "state": None, "draft": None, "readiness": "unknown", "why": "no gh row this tick"}
+    age = row.get("_age_s")
+    out = {"pr": pub.get("pr"), "state": row.get("state"), "draft": row.get("isDraft"),
+           "age_s": int(age) if age is not None else None}
+    if row.get("state") != "OPEN":
+        return dict(out, readiness=str(row.get("state") or "unknown").lower(), why=None)
+    if age is None or age >= src.TTL["gh"]:
+        return dict(out, readiness="unknown", why=f"gh read is {'of unknown age' if age is None else f'{int(age)} s old'}; "
+                                                "not derived this tick")
+    if row.get("isDraft") is None:
+        return dict(out, readiness="unknown", why="gh returned no isDraft")
+    if row.get("isDraft"):
+        return dict(out, readiness="draft", why="draft: mark it ready before any merge")
+    roll = row.get("statusCheckRollup")
+    fails = sorted({str(c.get("name") or c.get("context") or "?") for c in roll or []
+                    if str(c.get("conclusion") or c.get("state") or "").upper() in ("FAILURE", "ERROR", "TIMED_OUT",
+                                                                                   "CANCELLED", "ACTION_REQUIRED")})
+    _, pending, _ = pr_facts(row)
+    why = []
+    if fails:
+        why.append("checks failing: " + ", ".join(fails[:5]))
+    elif pending:
+        why.append("checks pending")
+    rd = row.get("reviewDecision")
+    if rd in ("CHANGES_REQUESTED", "REVIEW_REQUIRED"):
+        why.append(rd.lower().replace("_", " "))
+    ms = row.get("mergeStateStatus")
+    if ms in MERGE_STATE_WHY and not (ms in ("BLOCKED", "UNSTABLE") and why):
+        why.append(MERGE_STATE_WHY[ms])
+    if why:
+        return dict(out, readiness="blocked", why="; ".join(why))
+    if ms in ("CLEAN", "HAS_HOOKS"):
+        return dict(out, readiness="ready", why=None)
+    return dict(out, readiness="unknown", why=f"mergeStateStatus {ms or 'not returned'}")
+
+
 def wake_fire(cid, wakes):
     times = [t for w in wakes for t in w.get("times") or [] if cid in (w.get("line") or "")]
     return max((st.parse_iso(t) for t in times), default=None)
@@ -419,7 +467,8 @@ def derive(ctx):
                       "state": state, "title": c.get("title"),
                       "carriers": [{"type": x["type"], "id": x["id"], "live": cstate.get((x["type"], x["id"]), (None,))[0]}
                                    for x in (b or {}).get("carriers") or []],
-                      "publication": (b or {}).get("publication"), "blocked_by": blockers,
+                      "publication": (b or {}).get("publication"),
+                      "pr": pr_view((b or {}).get("publication"), ctx["prs"]), "blocked_by": blockers,
                       "ready_since": st.now_iso(new_ready[cid]) if cid in new_ready else None,
                       "fingerprint_age_s": int(now - fpe["since"]) if fpe else None,
                       "bake_verdict": _verdict(bake), "predecessor_verdicts": preds, "flags": f,
@@ -429,7 +478,8 @@ def derive(ctx):
         if t not in kids and t != map_id:
             items.append({"ticket": t, "kind": None, "kind_inferred": False, "state": "active", "title": None,
                           "carriers": [{"type": x["type"], "id": x["id"], "live": cstate.get((x["type"], x["id"]), (None,))[0]}
-                                       for x in b["carriers"]], "publication": b.get("publication"), "blocked_by": [],
+                                       for x in b["carriers"]], "publication": b.get("publication"),
+                          "pr": pr_view(b.get("publication"), ctx["prs"]), "blocked_by": [],
                           "ready_since": None, "fingerprint_age_s": None, "bake_verdict": None,
                           "predecessor_verdicts": [], "flags": [fl for fl in ("STALLED",) if
                                                                  any(x["item"] == t for x in flags[fl])]})

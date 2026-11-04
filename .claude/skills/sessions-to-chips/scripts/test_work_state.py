@@ -308,6 +308,55 @@ class Flags(unittest.TestCase):
                                                                   "bake_ticket": "T-2"})
 
 
+def pr_row(**kw):
+    return dict({"number": 9, "state": "OPEN", "isDraft": False, "headRefOid": "abc", "statusCheckRollup": [],
+                 "reviewDecision": "APPROVED", "mergeStateStatus": "CLEAN", "_age_s": 5.0}, **kw)
+
+
+class PrReadiness(unittest.TestCase):  # a draft never reads ready; a block reason is never carried forward
+    PUB = {"repo": "o/r", "pr": 9}
+
+    def view(self, **kw):
+        return ws.pr_view(self.PUB, {"o/r#9": pr_row(**kw)})
+
+    def test_clean_is_ready(self):
+        self.assertEqual((self.view()["readiness"], self.view()["draft"]), ("ready", False))
+
+    def test_draft_is_never_ready(self):
+        v = self.view(isDraft=True, mergeStateStatus="CLEAN")
+        self.assertEqual((v["readiness"], v["draft"]), ("draft", True))
+        self.assertEqual(self.view(isDraft=None)["readiness"], "unknown")  # not read is not "not a draft"
+
+    def test_block_reasons_are_derived_from_this_read(self):
+        v = self.view(statusCheckRollup=[{"name": "e2e", "status": "COMPLETED", "conclusion": "FAILURE"}],
+                      mergeStateStatus="BLOCKED")
+        self.assertEqual((v["readiness"], v["why"]), ("blocked", "checks failing: e2e"))
+        self.assertEqual(self.view(mergeStateStatus="DIRTY")["why"], "merge conflict")
+        self.assertEqual(self.view(reviewDecision="CHANGES_REQUESTED")["why"], "changes requested")
+        self.assertEqual(self.view(mergeStateStatus="UNKNOWN")["readiness"], "unknown")
+
+    def test_a_stale_read_says_unknown_never_the_old_reason(self):
+        v = self.view(_age_s=src.TTL["gh"] + 1, mergeStateStatus="BLOCKED",
+                      statusCheckRollup=[{"name": "e2e", "conclusion": "FAILURE", "status": "COMPLETED"}])
+        self.assertEqual(v["readiness"], "unknown")
+        self.assertNotIn("e2e", v["why"])
+        self.assertEqual(self.view(_age_s=None)["readiness"], "unknown")
+        self.assertEqual(ws.pr_view(self.PUB, {})["readiness"], "unknown")
+        self.assertIsNone(ws.pr_view({"repo": "o/r", "sha": "abc"}, {}))
+
+    def test_snapshot_items_carry_it(self):
+        b = binding("T-6", [carrier("session", "s1")], publication=dict(self.PUB))
+        s = snap(bindings=[b], prs={"o/r#9": pr_row(isDraft=True)})
+        self.assertEqual(items(s)["T-6"]["pr"]["readiness"], "draft")
+
+    def test_load_gh_stamps_each_row_with_its_read_age(self):
+        cache = {"gh": {"o/r": {"fetched_at": NOW - 900, "data": [pr_row()]}}}
+        prs, _, _ = src.load_gh("p", [binding("T-6", publication=dict(self.PUB))], cache, NOW, offline=True)
+        self.assertEqual(prs["o/r#9"]["_age_s"], 900)
+        self.assertEqual(ws.pr_view(self.PUB, prs)["readiness"], "unknown")
+        self.assertIn("isDraft", src.GH_FIELDS)
+
+
 class Holds(unittest.TestCase):
     def hold(self, ticket, reason, *args, **kw):
         return snap(state=dict({"holds": [{"ticket": ticket, "reason": reason, "args": list(args)}]}, **kw.pop("state", {})),

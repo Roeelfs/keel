@@ -63,6 +63,14 @@ def held_text(h):
     return str(h.get("id") or k)
 
 
+def open_pr_text(r):
+    """`#5113 title: draft` / `: blocked (checks pending)` / `: ready` / `: merge state unknown (why)`."""
+    rd = r["readiness"]
+    word = {"ready": "ready to merge", "draft": "DRAFT, not ready", "blocked": "blocked"}.get(rd["state"], "merge state unknown")
+    return f"#{r.get('pr')} {(r.get('title') or '')[:60]}".rstrip() + f": {word}" + \
+        (f" ({_clause(rd['why'])})" if rd.get("why") and rd["state"] != "draft" else "")
+
+
 def _ticket_states(o):
     return ", ".join(f"{t['id']} {t.get('state') or 'unknown'}" for t in o.get("tickets") or [])
 
@@ -100,6 +108,8 @@ def brief(p):
                                           for q in now.get("needs_you") or []], cap=4)
     out += _section("Held by", [held_text(h) for h in now.get("held_by") or []], cap=6)
     out += _section("Proof owed", [f"{r['claim']} ({r.get('ticket') or 'no ticket'}, {r.get('verdict')})" for r in now.get("proof_owed") or []], cap=4)
+    out += _section("Open PRs", [open_pr_text(r) for r in (now.get("production") or {}).get("rows") or []
+                                 if r.get("readiness")], cap=6)
     c = (now.get("production") or {}).get("counts") or {}
     out += ["Production: " + ", ".join(f"{c.get(k, 0)} {w}" for k, w in (("open", "PR open"), ("merged", "merged"), ("deployed", "deployed"),
                                                                           ("exposed", "live"), ("baked", "baked"))), ""]

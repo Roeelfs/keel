@@ -21,7 +21,7 @@ import work_state_store as st
 ANALYTICS = os.environ.get("WORK_STATE_ANALYTICS") or os.path.join(st.HOME, "analytics/work-state.jsonl")
 GUARD_SCRIPT = os.environ.get("WORK_STATE_GUARD_SCRIPT") or os.path.join(st.HOME, "scripts/manager_arm_guard.py")
 TTL = {"tracker": 300, "gh": 120}
-GH_FIELDS = "number,state,mergedAt,headRefName,headRefOid,statusCheckRollup,reviewDecision"
+GH_FIELDS = "number,state,isDraft,mergedAt,headRefName,headRefOid,statusCheckRollup,reviewDecision,mergeStateStatus"
 DEFAULT_RESET_S = 600
 RATE_LIMITED_RC = 4  # the tracker adapter's documented rate-limit exit code
 
@@ -178,7 +178,9 @@ def load_gh(slug, bindings, cache, now, *, refresh=False, offline=False, runner=
         tiers[repo] = {"data": rows, "fetched_at": now}
         ages.append(0.0)
         telemetry({"program": slug, "source": "gh", "repo": repo, "requests": calls})
-    prs = {f"{repo}#{row.get('number')}": row for repo, tier in tiers.items() for row in tier.get("data") or []}
+    # `_age_s` is how old this row's read is, so a reader can tell a fresh fact from one carried forward.
+    prs = {f"{repo}#{row.get('number')}": dict(row, _age_s=(now - tier["fetched_at"]) if tier.get("fetched_at") else None)
+           for repo, tier in tiers.items() for row in tier.get("data") or []}
     return prs, (max(ages) if ages else None), notes
 
 

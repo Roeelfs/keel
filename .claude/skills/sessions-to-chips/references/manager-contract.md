@@ -72,6 +72,13 @@ owner of who may author what; `../prompts/model-routing.md` carries the per-lane
 | Mechanical (mining, census, extraction, verification runs, grading against a checklist, procedural worker) | `haiku` / `sonnet`, Codex `mining` | produce reports, verdicts, receipts | author a spec or a diff |
 | Reviewer / judge | `opus` or Codex `astra`/`sol` for deep, security and final-gate review; `sonnet` for topical or coverage review | write a review artifact | edit the spec or diff it reviews (findings go back to the author lane) |
 
+**A go the founder types in a manager's own chat is in-session (founder 2026-11-04).** It is the
+go-ahead for the item it names, so the manager runs the repo's own merge verb (named in that repo's
+instructions file) in the same turn. Never send the founder to the owning child to type it again. A
+bare "go" answers the one gate the manager's last message asked about; with two or more open, ask which
+in one line. Only a go relayed by message from another session (a `SendMessage`, a child's report, a
+card) is refused: the founder types it where the merge runs.
+
 An opus spec or implementation lane needs no further justification: this policy is its
 `Model-why`. Effort stays `medium` unless the mission states a reason for more.
 
@@ -196,7 +203,11 @@ as the fallback when no session owns the event (CI, a deploy, a date).
 | Usage cap / weekly limit (spawn-lane 429 `usage_limit_reached`) | the stated reset time |
 | CI on a pushed PR (not Auto-fix-tracked) | p90 ≈ 12 min |
 | Prod deploy | p90 ≈ 27 min |
-| "Waiting on X" — untracked advancing work (a child you cannot get a note from, a preview build) | 300–600 s, doubling after an empty tick, max 2700 s |
+| An untracked event no session owns (a preview build, an external queue) | 300–600 s, doubling after an empty tick, max 2700 s |
+
+This row never covers work another session holds: that is a `SendMessage` (the rule above). A tick
+that only re-arms is a defect; the Stop guard logs `would_block:empty_rearm` after two in a row and
+`would_block:human_gate_wake` for a wake whose reason names the founder or an approval.
 
 One event-bound wake per named event is pre-approved (global CLAUDE.md "Autonomous
 Continuation", founder 2026-10-20); never ask for it, and never arm a second wake for the same
@@ -210,7 +221,10 @@ is GRILLING.
 2. Run `python3 -I ~/.claude/skills/sessions-to-chips/scripts/work_state.py snapshot --program <slug>`
    instead of re-reading the map and lane prose. It derives every map ticket's state and six flags
    (UNBOUND, READY_NOT_DISPATCHED, STALLED, BAKE_OWED, STALE_OPEN, DUPLICATE_TITLE) from the tracker,
-   the bindings, sessions, lane rows and PRs. Only UNBOUND and READY_NOT_DISPATCHED block. A ready
+   the bindings, sessions, lane rows and PRs. Each item with a PR carries `pr`: `draft` and a
+   `readiness` (`ready|draft|blocked|unknown|merged|closed`) with its `why`, derived from this tick's
+   gh read only. A draft is never ready, and a read older than the gh TTL is `unknown`: never carry a
+   block reason forward from an earlier tick. Only UNBOUND and READY_NOT_DISPATCHED block. A ready
    ticket with no kind is still READY_NOT_DISPATCHED; only a `kind_conflict` waits for a relabel.
 3. In ONE message: bind every UNBOUND (`bind`, or file the ticket first, then `bind`); run the
    bake steps (§The deploy seam) for every BAKE_OWED; dispatch every READY_NOT_DISPATCHED (§Parallel
@@ -418,7 +432,8 @@ Never open a state page in its own tab. The render prints one stdout line:
 **Every wake and every session start runs from the context brief.** `render_state.py --program <slug> --context`
 prints the same payload as a plain-text brief of about 60 lines: destination, what was done recently,
 architecture and design changes, decisions in force, the next outcomes on the map, what holds them, the proof
-owed, and the keys to update. It writes no page and has no second source. The loop is:
+owed, each open PR's merge readiness (a draft reads "DRAFT, not ready"; a reason not derived this tick reads
+"merge state unknown"), and the keys to update. It writes no page and has no second source. The loop is:
 1. Read the brief first, in place of re-deriving the program from transcripts, events or the tracker.
 2. Work the map from it: the next outcome, what holds it, the proof owed.
 3. Before ending the turn, update `## VIEW` with what the turn changed (the keys the brief's last lines name,
@@ -440,7 +455,9 @@ derived on every render, so never copy them into VIEW. Three owners are yours:
   codebase, PR refs after it; group a series of PRs into one line), `architecture` (`{date, what, refs}`: one
   sentence per structural change), `design` (`{what, meaning, kind, ref, tier, review, stop, date}`: the spec,
   ADR or module shape and its one-line meaning), `decisions` (`{date, decision, why, by, supersedes}`),
-  `findings` (`{date, outcome, found, refs}`: what was learned), `needs_you`, `exposure` (`dark|live|n/a` per
+  `findings` (`{date, outcome, found, refs}`: what was learned), `needs_you` (every founder gate the track
+  waits on, including one held in another chat, such as a child's merge go or an open grill round: name the
+  chat and the one-click approval), `exposure` (`dark|live|n/a` per
   deployed `#PR`; without a row a deployed change reads "exposure unstated", never live), `proof_owed` (each
   naming its `ticket`; the ticket's bake verdict wins), `dead_ends`, `incidents`, `skills_done`, `adopted`
   (`{refs, note}`: merged PRs that came with tickets adopted from another program; never this program's

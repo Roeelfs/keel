@@ -269,6 +269,7 @@ def production(derived, view, snap, manifest):
     bindings = manifest.get("bindings") or []
     now_rows, shipped = [], []
     counts = {"open": 0, "merged": 0, "deployed": 0, "exposed": 0, "baked": 0}
+    ready = {(i["pr"]["pr"], ((i.get("publication") or {}).get("repo"))): i["pr"] for i in items if i.get("pr")}
     for p in sorted(derived["prs"], key=lambda p: p.get("mergedAt") or p.get("updatedAt") or "", reverse=True):
         ref = str(p.get("number") or (p.get("push_sha") or "")[:12])
         bake = ss.bake_of(p.get("tickets") or [], items, bindings)
@@ -278,12 +279,28 @@ def production(derived, view, snap, manifest):
         row = {"repo": p["repo"], "pr": p.get("number"), "sha": p.get("push_sha"), "title": p.get("title"),
                "tickets": p.get("tickets") or [], "ladder": lad, "additions": p.get("additions"),
                "deletions": p.get("deletions"), "merged_at": p.get("mergedAt"), "draft": p.get("isDraft"),
+               "readiness": readiness(p, ready.get((p.get("number"), p["repo"]))),
                "files_known": p.get("files") is not None}
         done = lad["final"] or _closed_and_shipped(p, lad, items)
         if not done:
             counts[lad["step"]] = counts.get(lad["step"], 0) + 1
         (shipped if done else now_rows).append(row)
     return now_rows, shipped, counts
+
+
+def readiness(p, eng):
+    """An open PR's merge readiness for this render. Draft comes from this render's own gh read and wins; a block
+    reason comes only from this tick's engine view of the same PR, else it is unknown. -> {state, why} | None."""
+    if p.get("mergedAt") or p.get("state") != "OPEN":
+        return None
+    if p.get("isDraft"):
+        return {"state": "draft", "why": "draft: mark it ready before any merge"}
+    if p.get("isDraft") is None:
+        return {"state": "unknown", "why": "gh returned no isDraft"}
+    if eng and eng.get("readiness") not in (None, "draft"):
+        return {"state": eng["readiness"], "why": eng.get("why")}
+    return {"state": "unknown", "why": "not bound to a map ticket, so the engine read no merge state this tick"
+            if not eng else "the engine read it as a draft; this render did not: re-read next tick"}
 
 
 def _closed_and_shipped(pr, lad, items):
