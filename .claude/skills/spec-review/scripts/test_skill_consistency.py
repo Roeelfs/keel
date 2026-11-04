@@ -41,6 +41,8 @@ MANIFEST = run_dir.load_manifest()
 # delta re-review, frame.json repo/harnessOnly/floorDomain) is a Step 1/2 launcher decision; superseded text was trimmed.
 # 2026-10-27 (CYN-3222): 13950 -> 14500. Tightened liveSurface/cutover trigger wording, the tier-from-changed-surface
 # clause (docs-only is no downgrade) and the evidence-quote rule are main-loop gate decisions; superseded wording was replaced.
+# 2026-11-04 (CYN-3219): no growth (14419 -> 14498 under 14500). liveSurface narrowed to runtime behavior of a live
+# system; the full trigger list and the 40-of-40 rationale live in reference.md.
 MAX_SKILL_BYTES = 14500
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
@@ -256,6 +258,19 @@ class SkillMdTests(unittest.TestCase):
         self.assertIn("gate_evidence_errors", ref)
         self.assertIn("CYN-3023", ref)
         self.assertIn("CYN-3160", ref)
+
+    def test_live_surface_gate_is_narrowed_to_runtime_behavior(self):
+        skill = (SKILL_DIR / "SKILL.md").read_text()
+        ref = (SKILL_DIR / "reference.md").read_text()
+        self.assertIn("`liveSurface` (changes runtime behavior of a live system AND names it", skill)
+        self.assertIn("merge-is-deploy alone never fires it, nor tooling, harness, skills, docs, CI or lint", skill)
+        self.assertNotIn("changes a deployed artifact AND names it", skill)
+        self.assertIn("**Narrowed liveSurface gate (CYN-3219", ref)
+        self.assertIn("config that has no live runtime consumer", ref)
+        for name in ("live-evidence-auditor.md", "performance-architect.md"):
+            prompt = (SKILL_DIR / "prompts" / name).read_text()
+            self.assertIn("change RUNTIME BEHAVIOR of a live system", prompt, name)
+            self.assertNotIn("touching a LIVE surface", prompt, name)
 
     def test_workflow_turn_caps_mirror_lanes_json(self):
         js = (HERE / "spec-review.workflow.js").read_text(encoding="utf-8")

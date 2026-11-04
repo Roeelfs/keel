@@ -73,6 +73,11 @@ class LanePlanTests(unittest.TestCase):
             self.assertTrue(any("must quote the evidence" in e and "liveSurface" in e for e in errs), bad)
         for good in ("edits apps/backend/src/x.ts:12", "changes `handler_wrapper`", "flips runtimeWiring flag", "table org_erasure"):
             self.assertEqual(plan("standard", {**GATES_OFF, "cutover": {"run": True, "reason": good}})[1], [], good)
+        # CYN-3219: the narrowed liveSurface still needs a quoted runtime surface when fired
+        for bad in ("changes request handler behavior", "merging deploys it"):
+            _, errs = plan("standard", {**GATES_OFF, "liveSurface": {"run": True, "reason": bad}})
+            self.assertTrue(any("must quote the evidence" in e and "liveSurface" in e for e in errs), bad)
+        self.assertEqual(plan("standard", {**GATES_OFF, "liveSurface": {"run": True, "reason": "changes webhook dispatch in apps/backend/src/webhook.ts:40"}})[1], [])
         # an unfired gate needs no evidence
         self.assertEqual(plan("standard", {**GATES_OFF, "liveSurface": {"run": False, "reason": "spec-only"}})[1], [])
 

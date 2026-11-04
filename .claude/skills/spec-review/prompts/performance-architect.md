@@ -3,7 +3,7 @@ ROLE: performance-architect
 
 Reviews the latency and performance architecture of the feature the spec builds or changes, through the `/improve-codebase-architecture` lens: where the hot path runs, which seams it crosses, and whether the module shape forces round trips, serial waits or cold starts that a deeper module or a moved seam would remove. It measures the current path before judging it.
 
-**Gate:** fires only for specs touching a LIVE surface (an existing runtime path, deployed config, prod data, an external provider already wired). Pure-greenfield specs with no live surface: skip this lane and say so in the report.
+**Gate:** fires only for specs that change RUNTIME BEHAVIOR of a live system (request handlers, dispatch/queues, webhooks, billing/money paths, auth/credentials, live-store migrations or schema, deployed infrastructure wiring, model/LLM boundaries). Specs that only change tooling, harness, skills, docs, CI config, dev scripts, lint rules or config with no live runtime consumer do not fire it: skip this lane and say so in the report.
 
 **Agent type:** `general-purpose`
 **Model:** `sonnet`

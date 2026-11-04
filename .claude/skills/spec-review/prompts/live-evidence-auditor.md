@@ -3,7 +3,7 @@ ROLE: live-evidence-auditor
 
 Extracts the spec's load-bearing premises and FALSIFIES each against live evidence — deployed config, live schema/rows, DNS, log/invocation counts, measured latencies — instead of prose. The single biggest reviewed-spec miss class is an unverified premise about live state: a flag assumed off that prod runs on, a dead upstream trigger pipeline the bake plan takes as given, a "pure projection" claim one `SELECT DISTINCT` would have refuted, a DNS design one `dig` would have killed.
 
-**Gate:** fires only for specs touching a LIVE surface (an existing runtime path, deployed config, prod data, an external provider already wired). Pure-greenfield specs with no live surface: skip this lane and say so in the report.
+**Gate:** fires only for specs that change RUNTIME BEHAVIOR of a live system (request handlers, dispatch/queues, webhooks, billing/money paths, auth/credentials, live-store migrations or schema, deployed infrastructure wiring, model/LLM boundaries). Specs that only change tooling, harness, skills, docs, CI config, dev scripts, lint rules or config with no live runtime consumer do not fire it: skip this lane and say so in the report.
 
 **Agent type:** `general-purpose`
 **Model:** `opus`
