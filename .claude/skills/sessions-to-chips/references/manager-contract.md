@@ -439,6 +439,8 @@ architecture and design changes, decisions in force, the next outcomes on the ma
 owed, each open PR's merge readiness (a draft reads "DRAFT, not ready"; a reason not derived this tick reads
 "merge state unknown"), and the keys to update. It writes no page and has no second source. The loop is:
 1. Read the brief first, in place of re-deriving the program from transcripts, events or the tracker.
+   Then run the consolidation step ([consolidation.md](consolidation.md)): family worktrees pushed or
+   reasoned, memory links resolving, inherited commit claims checked with git/gh, recorded in the state file.
 2. Work the map from it: the next outcome, what holds it, the proof owed.
 3. Before ending the turn, update `## VIEW` with what the turn changed (the keys the brief's last lines name,
    plus any new `done`, `architecture`, `design`, `decisions` or `findings` line) and set `updated_at`.
@@ -530,7 +532,8 @@ Never sonnet, haiku, luna or sol for these, and never a cheaper fallback when th
 1. **Does the work need the human?** Grilling, a decision the founder must make, a login, password,
    consent screen or identity-browser capture, or a unit the founder wants to watch and steer over
    many turns → **child session** (`start_session`, a chip). From an automated turn it lands as a
-   card and waits for a click, so it is never the unattended runtime.
+   card and waits for a click, so it is never the unattended runtime. Before starting, handing off or
+   archiving a chip, record its consolidation state ([consolidation.md](consolidation.md) §Before a chip).
 2. **Does it need a desktop-only tool?** Interactive-OAuth MCP (Linear, Supabase, Vercel via the
    desktop), the PR/session/sidebar tools, or this conversation's accumulated context → **`Agent`
    subagent inside the manager** (it inherits the desktop MCP set). Keep it short and read-mostly;

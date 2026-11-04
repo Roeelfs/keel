@@ -68,7 +68,10 @@ reasons to keep one open (Manager contract: the three end states).
 
 `archive_session` on each verified `archive` / done `review` candidate. Archiving a parent
 archives its finished children too. The script never proposes a parent with a live child, but
-list the children first if you archive anything it did not propose.
+list the children first if you archive anything it did not propose. Before each archive, run
+`consolidation_check.py --worktree <its worktree> --record <program>.state.md`; a `DIRTY` or
+`UNPUSHED` worktree with no named reason is pushed to a `wip/` branch first
+([references/consolidation.md](references/consolidation.md)).
 
 ## 4. Converge (fold true duplicates)
 

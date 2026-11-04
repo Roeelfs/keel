@@ -40,6 +40,8 @@ A lane retires only when:
 2. every obligation is terminal or has a deferred owner;
 3. required post-merge changed-seam proof is recorded against the correct deploy SHA and environment;
 4. deferred work and soak observation have tracked owners;
-5. the final summary names shipped artifacts, evidence, blockers, and the next resumable action.
+5. the final summary names shipped artifacts, evidence, blockers, and the next resumable action;
+6. its consolidation block is recorded in the program state file: worktree `OK` or reasoned, cited commits
+   `CONFIRMED` ([consolidation.md](consolidation.md) §Before a chip changes hands).
 
 A completion envelope, an unexecuted plan, or a stale environment does not satisfy this gate.
