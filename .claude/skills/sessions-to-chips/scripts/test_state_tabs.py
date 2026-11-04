@@ -87,13 +87,16 @@ class ShowInChrome(unittest.TestCase):
         for p in reversed(self.patches):
             p.stop()
 
-    def fake(self, listing, rc=0):
+    def fake(self, listing, rc=0, processes=None, probe_rc=0):
         self.calls = []
 
         def run(cmd, **kw):
             self.calls.append(cmd)
-            out = listing if len(self.calls) == 1 else ""
-            return types.SimpleNamespace(returncode=rc if len(self.calls) == 1 else 0, stdout=out, stderr="boom")
+            if cmd[0] == "ps":
+                out = processes if processes is not None else "123 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n"
+                return types.SimpleNamespace(returncode=probe_rc, stdout=out, stderr="probe failed")
+            out = listing if len(self.calls) == 2 else ""
+            return types.SimpleNamespace(returncode=rc if len(self.calls) == 2 else 0, stdout=out, stderr="boom")
         return run
 
     def test_guards_skip_without_calling_anything(self):
@@ -105,21 +108,52 @@ class ShowInChrome(unittest.TestCase):
     def test_reload_closes_duplicates(self):
         listing = f"1\t10\tfile://{self.dir}/apps.state.html\n1\t11\tfile://{self.index}\n1\t12\thttps://x\n"
         self.assertEqual(rs.show_in_chrome(self.index, run=self.fake(listing)), {"action": "reloaded", "closed": 1})
-        self.assertEqual(self.calls[1][:2], ["osascript", "-e"])
-        self.assertIn("tell tab id 11 of window id 1 to reload", self.calls[1][2])
-        self.assertIn("close tab id 10 of window id 1", self.calls[1][2])
-        self.assertNotIn("id 12", self.calls[1][2])
+        self.assertEqual(self.calls[2][:2], ["osascript", "-e"])
+        self.assertIn("tell tab id 11 of window id 1 to reload", self.calls[2][2])
+        self.assertIn("close tab id 10 of window id 1", self.calls[2][2])
+        self.assertNotIn("id 12", self.calls[2][2])
 
     def test_no_state_tab_opens_one_in_the_background(self):
         self.assertEqual(rs.show_in_chrome(self.index, run=self.fake("1\t12\thttps://x\n")), {"action": "opened", "closed": 0})
-        self.assertEqual(self.calls[1], ["open", "-g", "-a", "Google Chrome", "file://" + self.index])
+        self.assertEqual(self.calls[2], ["open", "-g", "-a", "Google Chrome", "file://" + self.index])
+
+    def test_automation_chrome_skips_all_browser_access(self):
+        chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome "
+        for args in ("--remote-debugging-pipe", "--remote-debugging-port=9222", "--user-data-dir=/tmp/playwright_profile"):
+            for listing in ("1\t12\thttps://example.com\n", f"1\t11\tfile://{self.index}\n"):
+                with self.subTest(args=args, listing=listing):
+                    result = rs.show_in_chrome(self.index, run=self.fake(listing, processes=f"78315 {chrome}{args}\n"))
+                    self.assertEqual(result["action"], "skipped: automation Chrome running")
+                    self.assertEqual(self.calls, [["ps", "-axo", "pid=,command="]])
+
+    def test_unrelated_automation_does_not_block_chrome(self):
+        processes = "123 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n456 /tmp/other-browser --remote-debugging-pipe\n"
+        result = rs.show_in_chrome(self.index, run=self.fake("1\t12\thttps://example.com\n", processes=processes))
+        self.assertEqual(result["action"], "opened")
+        self.assertEqual(self.calls[-1], ["open", "-g", "-a", "Google Chrome", "file://" + self.index])
+
+    def test_failed_or_ambiguous_probe_skips_all_browser_access(self):
+        for processes, rc in (("", 0), ("not a process row", 0), ("123", 0), ("", 1)):
+            with self.subTest(processes=processes, rc=rc):
+                result = rs.show_in_chrome(self.index, run=self.fake("", processes=processes, probe_rc=rc))
+                self.assertTrue(result["action"].startswith("skipped:"))
+                self.assertEqual(self.calls, [["ps", "-axo", "pid=,command="]])
+        for error in (OSError("ps unavailable"), subprocess.TimeoutExpired("ps", 15)):
+            with self.subTest(error=error):
+                run = mock.Mock(side_effect=error)
+                self.assertTrue(rs.show_in_chrome(self.index, run=run)["action"].startswith("skipped:"))
+                self.assertEqual(run.call_count, 1)
 
     def test_closed_chrome_and_failures_are_reported(self):
         self.assertEqual(rs.show_in_chrome(self.index, run=self.fake("closed\n")), {"action": "chrome closed"})
-        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.calls), 2)
         self.assertEqual(rs.show_in_chrome(self.index, run=self.fake("", rc=1))["action"], "error")
 
+        probe = self.fake("")
+
         def boom(cmd, **kw):
+            if cmd[0] == "ps":
+                return probe(cmd, **kw)
             raise subprocess.TimeoutExpired(cmd, 15)
         self.assertEqual(rs.show_in_chrome(self.index, run=boom)["action"], "error")
 

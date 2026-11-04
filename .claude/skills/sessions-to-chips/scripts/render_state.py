@@ -742,6 +742,19 @@ def show_in_chrome(path, run=subprocess.run):
         return {"action": "skipped"}
     if os.path.dirname(os.path.abspath(path)) != REAL_PROGRAMS:
         return {"action": "skipped"}
+    # Same process signal as chrome.sh's automation_chrome_pids: these instances
+    # share Chrome's app id, so AppleScript cannot reliably target the human's tabs.
+    try:
+        probe = run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, timeout=15)
+        rows = [line.split(None, 1) for line in probe.stdout.splitlines() if line.strip()]
+        if probe.returncode != 0 or not rows or any(len(row) != 2 or not row[0].isdigit() for row in rows):
+            return {"action": "skipped: Chrome process detection uncertain"}
+        chrome_bin = "/Google Chrome.app/Contents/MacOS/Google Chrome "
+        if any(chrome_bin in command and re.search(r"--remote-debugging-(pipe|port)|playwright_", command)
+               for _, command in rows):
+            return {"action": "skipped: automation Chrome running"}
+    except (OSError, subprocess.SubprocessError):
+        return {"action": "skipped: Chrome process detection failed"}
     try:
         res = run(["osascript", "-e", LIST_TABS], capture_output=True, text=True, timeout=15)
         if res.returncode != 0:
