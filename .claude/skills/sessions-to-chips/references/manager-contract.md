@@ -201,16 +201,20 @@ is GRILLING.
 1. Take ONE snapshot of the event the wake names (the PR's checks, the deploy SHA, the reset
    time, the lane's artifact). One read, never a loop.
 2. Run `python3 -I ~/.claude/skills/sessions-to-chips/scripts/work_state.py snapshot --program <slug>`
-   instead of re-reading the map and lane prose. It derives every map ticket's state and four flags
-   (UNBOUND, READY_NOT_DISPATCHED, STALLED, BAKE_OWED) from the tracker, the bindings, sessions,
-   lane rows and PRs.
+   instead of re-reading the map and lane prose. It derives every map ticket's state and six flags
+   (UNBOUND, READY_NOT_DISPATCHED, STALLED, BAKE_OWED, STALE_OPEN, DUPLICATE_TITLE) from the tracker,
+   the bindings, sessions, lane rows and PRs. Only UNBOUND and READY_NOT_DISPATCHED block. A ready
+   ticket with no kind is still READY_NOT_DISPATCHED; only a `kind_conflict` waits for a relabel.
 3. In ONE message: bind every UNBOUND (`bind`, or file the ticket first, then `bind`); run the
    bake steps (§The deploy seam) for every BAKE_OWED; dispatch every READY_NOT_DISPATCHED (§Parallel
    by default; each dispatch is `bind`, a tracked launch, then `carrier`); answer every
    `awaiting_manager` entry; handle every STALLED: with no live carrier, salvage
    (`git status --porcelain`), retire the dead carrier and continue in the same worktree (`--cwd`), so
-   one writer exists; with a live carrier, inspect or message it, never a second writer. Founder
-   questions go into one grill round.
+   one writer exists; with a live carrier, inspect or message it, never a second writer. Resolve every
+   STALE_OPEN (its bound PR merged or its commit pushed while the ticket is not Done) citing the
+   artifact; fold every DUPLICATE_TITLE (mark it Duplicate of the named ticket, or retitle one). One
+   `wake` carrier may sit in several bindings when one wake covers several tickets; every other
+   carrier sits in one. Founder questions go into one grill round.
 4. Re-arm ONE wake per `pending_events` entry and per still-pending untracked event (doubled after
    an empty snapshot, max 2700 s); write a new `## AT-WAKE` block with `Status:`, `Wake:` and any
    `Hold:` lines; post the map `State as of` comment opening with the snapshot's `map_line`, then every
@@ -221,16 +225,16 @@ No polling loops, no `sleep`, no `Monitor` waits, no re-arm on an event that alr
 terminal state.
 
 **The guard.** `~/.claude/hooks/manager-arm-guard.sh` (logic `~/.claude/scripts/manager_arm_guard.py`)
-runs on Stop for any session titled `[Manager] …`. It finds the program ONLY by the exact
-`manager_session` id (program_family; no title fallback, so write your own session id there at
-takeover), reads the last `## AT-WAKE` block and the transcript, and blocks ONCE per turn when the
+runs on Stop for any session titled `[Manager] …`. It finds the program by the `manager_session` id,
+falling back to a title match (write your own session id there at takeover), reads the last `## AT-WAKE` block and the transcript, and blocks ONCE per turn when the
 turn would end WORKING with no recorded future/tracked wake, no wake armed in the transcript, and
 no live background task. Its message is the fix: arm one wake and record it, or write
 `Status: GRILLING|DONE`. **Flag step:** before the arm check it runs `work_state.py guard
 --program <slug>` (no network, no git, 2 s) with the parsed state facts; the engine alone decides
 flags and exemptions, and exit 4 means UNBOUND or READY_NOT_DISPATCHED is blocking. It runs in
-SHADOW today (`would_block:<flag>` is logged, nothing blocks on it); a timeout or error logs
-`flags_skipped:<why>` and is counted (fail open). Decisions log to
+SHADOW (`would_block:<flag>` is logged, nothing blocks on it, whatever `MANAGER_ARM_GUARD_FLAGS`
+says; `off` skips the step); a timeout or error logs `flags_skipped:<why>` and is counted (fail
+open). Decisions log to
 `~/.claude/analytics/manager-arm-guard.jsonl`; kill switch `MANAGER_ARM_GUARD=0`.
 
 ## Owned child continuation invariant

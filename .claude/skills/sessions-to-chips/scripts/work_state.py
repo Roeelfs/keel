@@ -2,7 +2,8 @@
 """work_state.py — every piece of manager work is a bound map ticket with a derived state.
 
 One engine owns the binding record (ticket -> carriers), derives each map ticket's state, and
-emits four flags: UNBOUND, READY_NOT_DISPATCHED, STALLED, BAKE_OWED. It never merges, pushes,
+emits six flags: UNBOUND, READY_NOT_DISPATCHED, STALLED, BAKE_OWED, STALE_OPEN, DUPLICATE_TITLE
+(only the first two block). It never merges, pushes,
 deploys or bakes, and it writes no tracker state. Ticket ids are opaque strings; the tracker is
 reached only through the manifest's `map.snapshot_cmd` (contract `work-state-tracker/<major>`).
 
@@ -40,6 +41,8 @@ LEASE = {"lane": 5400, "session": 14400, "pr_pending": 1500, "launch": 600, "car
 TRACKER_STALE_S = 7200
 TRUNCATED_BLOCKER = "relations_truncated"
 WAKE_GRACE_S = 600
+FLAGS = ("UNBOUND", "READY_NOT_DISPATCHED", "STALLED", "BAKE_OWED", "STALE_OPEN", "DUPLICATE_TITLE")
+DUP_IGNORED = frozenset({"canceled", "duplicate"})
 CONTRACT = os.path.join(HERE, "..", "references", "manager-contract.md")
 LANE_UNBOUND_AGE_S = 7 * 86400
 MERGE_AND_RETIRE = os.path.join(HERE, "..", "references", "merge-and-retire.md")
@@ -255,8 +258,7 @@ def derive(ctx):
     kids = _child_map(tracker)
     order = [c["ticket"] for c in (tracker or {}).get("children") or []]
     by_ticket = {b["ticket"]: b for b in bindings}
-    notes, awaiting, flags = list(ctx.get("notes") or []), [], {k: [] for k in
-                                                                 ("UNBOUND", "READY_NOT_DISPATCHED", "STALLED", "BAKE_OWED")}
+    notes, awaiting, flags = list(ctx.get("notes") or []), [], {k: [] for k in FLAGS}
     cstate = {}
 
     def live_of(c):
@@ -302,6 +304,12 @@ def derive(ctx):
             fps.append(pfp)
         elif pstate == "CLOSED" and not merged:
             awaiting.append({"ticket": t, "pr": pub.get("pr"), "category": "pr_closed"})
+        if merged and kid and not closed:
+            key = st.publication_key(pub)
+            flags["STALE_OPEN"].append({"item": t, "publication": key,
+                                        "why": f"bound artifact {key} landed while the ticket is "
+                                               f"{(kid.get('state') or {}).get('name')}",
+                                        "fix": f"resolve {t} this turn, citing {key}"})
         if t == map_id:
             dead = [c["id"] for c in b["carriers"] if c["type"] not in ("founder",) and not live_of(c)]
             if dead:
@@ -347,6 +355,21 @@ def derive(ctx):
                                      "fix": "no live carrier: salvage, retire the dead carrier, continue in the same "
                                             "worktree (--cwd); live carrier: inspect or message it, never a second writer"})
 
+    # DUPLICATE_TITLE: two children of one map share a normalized title and one is still open
+    by_title = {}
+    for cid in order:
+        c = kids[cid]
+        if ((c.get("state") or {}).get("type")) in DUP_IGNORED or not c.get("title"):
+            continue
+        by_title.setdefault(" ".join(re.findall(r"[a-z0-9]+", c["title"].lower())), []).append(cid)
+    for tickets in by_title.values():
+        if not any((kids[x].get("state") or {}).get("type") not in CLOSED for x in tickets):
+            continue  # every copy is already closed: nothing left to resolve
+        for cid in tickets[1:]:
+            flags["DUPLICATE_TITLE"].append({"item": cid, "duplicate_of": tickets[0],
+                                             "why": f"same title as {tickets[0]} under map {map_id}",
+                                             "fix": f"mark {cid} Duplicate of {tickets[0]}, or retitle one"})
+
     # Items, READY, UNBOUND(started)
     items, ready_since = [], dict(ctx.get("ready_since") or {})
     counts = {"done": 0, "open": 0, "blocked": 0}
@@ -373,7 +396,7 @@ def derive(ctx):
                 f.append("UNBOUND")
                 flags["UNBOUND"].append({"item": cid, "why": "tracker state started with no binding (R8b)",
                                          "fix": f"work_state.py bind --program {slug} --ticket {cid}, then carrier"})
-            elif c.get("kind") is not None and not ctx.get("absorbed") and cid not in valid_hold:
+            elif "kind_conflict" not in errs and not ctx.get("absorbed") and cid not in valid_hold:
                 f.append("READY_NOT_DISPATCHED")
                 new_ready[cid] = ready_since.get(cid, now)
                 flags["READY_NOT_DISPATCHED"].append({
@@ -381,7 +404,7 @@ def derive(ctx):
                     "fix": f"dispatch {cid}: work_state.py bind, a tracked launch, carrier; or a valid Hold: {cid} <reason>"})
             elif cid in valid_hold:
                 new_ready[cid] = ready_since.get(cid, now)
-        for fl in ("STALLED", "BAKE_OWED"):
+        for fl in ("STALLED", "BAKE_OWED", "STALE_OPEN", "DUPLICATE_TITLE"):
             if any(x["item"] == cid for x in flags[fl]):
                 f.append(fl)
         bake = _bake_child(cid, kids) if c.get("kind") == "ship" else None
@@ -628,7 +651,7 @@ def main(argv=None):
                 print(snap["map_line"])
                 for x in snap["blocking"]:
                     print(f"BLOCKING {x['flag']} {x['item']}: {x['fix']}")
-                for fl in ("STALLED", "BAKE_OWED"):
+                for fl in ("STALLED", "BAKE_OWED", "STALE_OPEN", "DUPLICATE_TITLE"):
                     for x in snap["flags"][fl]:
                         print(f"{fl} {x['item']}: {x.get('why') or x.get('publication')}")
                 for n in snap["notes"]:

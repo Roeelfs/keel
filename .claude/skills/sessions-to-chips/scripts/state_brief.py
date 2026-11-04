@@ -11,7 +11,8 @@ import state_story as story
 MAX_LINES = 60
 KIND = {"spec": "Spec", "adr": "ADR", "module": "Module"}
 FLAG = {"UNBOUND": "not started", "READY_NOT_DISPATCHED": "ready, not started",
-        "STALLED": "stopped moving", "BAKE_OWED": "bake owed"}
+        "STALLED": "stopped moving", "BAKE_OWED": "bake owed", "STALE_OPEN": "landed, still open",
+        "DUPLICATE_TITLE": "duplicate title"}
 
 
 def _clause(text):

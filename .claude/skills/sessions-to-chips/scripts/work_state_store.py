@@ -21,6 +21,8 @@ STATE_DIR = os.environ.get("WORK_STATE_DIR") or os.path.join(HOME, "state/work-s
 LANE_ROWS = os.environ.get("WORK_STATE_LANE_ROWS") or os.path.join(HOME, "state/lane-parents.jsonl")
 MANIFEST_CAP = 8192
 
+# A wake is an event, not a writer: one armed wake may carry many tickets' bindings.
+SHARED_CARRIERS = frozenset({"wake"})
 CARRIER_TYPES = ("session", "lane", "agent", "workflow", "bg", "card", "wake", "founder")
 RUNTIMES = ("claude", "codex")
 ROOT_GLOBS = {"**", "*", "/", "**/*", "/**", "./**", "."}
@@ -131,6 +133,8 @@ def validate_bindings(bindings):
         seen_t.add(b["ticket"])
         for c in b["carriers"]:
             k = (c["type"], c["id"])
+            if c["type"] in SHARED_CARRIERS:
+                continue  # one armed wake may carry several tickets
             if k in seen_c:
                 raise SchemaError(f"carrier {k} sits in two open bindings ({seen_c[k]}, {b['ticket']})")
             seen_c[k] = b["ticket"]
@@ -307,7 +311,8 @@ def bind(slug, ticket, *, children, map_id, bake="required", branch=None, worktr
 
 
 def carrier(slug, ticket, ctype, cid, *, programs=None, now=None, **fields):
-    """R2: append a launched carrier. Idempotent on (type, id); a carrier sits in at most one binding."""
+    """R2: append a launched carrier. Idempotent on (type, id); a carrier sits in at most one binding,
+    except a wake (SHARED_CARRIERS), which may carry several."""
     now = time.time() if now is None else now
     c = {"type": ctype, "id": cid, "bound_at": now_iso(now)}
     c.update({k: v for k, v in fields.items() if v is not None})

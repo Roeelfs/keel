@@ -88,8 +88,42 @@ def _children_from_cache(slug):
     return ({c["ticket"] for c in data.get("children") or []}, data) if data else (None, None)
 
 
+def _bake_owed(owed, tracker, bindings, gh_rows, unverified):
+    """Keep only owed tickets that really owe a bake: an open ship (not Done, canceled or duplicate; an
+    inferred kind is no evidence, since an unlabelled ship reads as an inferred task),
+    with no bake child already filed, whose bound PR (when the gh tier has it) is merged.
+    -> (kept, [(ticket, why skipped)]); a kept ticket with no merge evidence (no gh row, no push
+    publication) is added to `unverified`. With no tracker tier nothing can be checked: all are kept."""
+    if not tracker:
+        unverified.update(owed)
+        return list(owed), []
+    kids = {c["ticket"]: c for c in tracker.get("children") or []}
+    pub = {b["ticket"]: b.get("publication") or {} for b in bindings}
+    keep, skipped = [], []
+    for t in owed:
+        c = kids.get(t) or {}
+        stype = (c.get("state") or {}).get("type")
+        bake = [k["ticket"] for k in kids.values() if k.get("kind") == "bake"
+                and any(b.get("ticket") == t for b in k.get("blocked_by") or [])]
+        p = pub.get(t) or {}
+        row = (gh_rows or {}).get(f"{p.get('repo')}#{p.get('pr')}") if "pr" in p else None
+        why = ("not a map ticket" if not c else
+               f"kind {c.get('kind')}, not a ship" if c.get("kind") != "ship" and not c.get("kind_inferred") else
+               f"ticket already {(c.get('state') or {}).get('name')}" if stype in ("completed", "canceled", "duplicate") else
+               f"bake child {bake[0]} already filed" if bake else
+               f"PR {p.get('repo')}#{p.get('pr')} not merged" if row is not None and not row.get("mergedAt") else None)
+        if why:
+            skipped.append((t, why))
+        elif row is not None or p.get("via") == "push":
+            keep.append(t)
+        else:
+            unverified.add(t)
+            keep.append(t)
+    return keep, skipped
+
+
 def plan(slug, manifest, *, state_text="", children=None, tracker=None, live_manager=False, now=None,
-         ticket_for=None, resolved=()):
+         ticket_for=None, resolved=(), gh_rows=None):
     """Pure plan for one manifest -> {bindings, events, todo, census}."""
     now = time.time() if now is None else now
     now_iso = st.now_iso(now)
@@ -148,10 +182,14 @@ def plan(slug, manifest, *, state_text="", children=None, tracker=None, live_man
         events.append({"event": "owed-prose", "tickets": owed,
                        "note": "stale or done program: Owed/UNBAKED prose kept as an event, no bake tickets filed"})
         owed = []
+    unverified = set()
+    owed, bake_skipped = _bake_owed(owed, tracker, bindings, gh_rows, unverified)
     for t in owed:
         if f"bake:{t}" not in resolved:
+            check = ("merge UNVERIFIED: confirm it merged and its bake is still owed; if not, --resolved it"
+                     if t in unverified else "merge verified")
             todo.append({"key": f"bake:{t}", "do": f"R12 step 1 for merged ship {t}: adopt or ticket-add --kind bake "
-                         f"--blocked-by {t} (verify it merged first), then re-run with --resolved bake:{t}"})
+                         f"--blocked-by {t} ({check}), then re-run with --resolved bake:{t}"})
     for c in (tracker or {}).get("children") or []:
         if c.get("kind_inferred") and c.get("kind") == "ship" and f"label:{c['ticket']}" not in resolved:
             todo.append({"key": f"label:{c['ticket']}", "do": f"ticket-adopt --kind ship on {c['ticket']}"})
@@ -164,12 +202,15 @@ def plan(slug, manifest, *, state_text="", children=None, tracker=None, live_man
     census = {"bindings": len(bindings), "events_only": len(events),
               "tickets_to_file": sum(t["key"].startswith("ticket:") for t in todo),
               "bake_tickets_to_file": sum(t["key"].startswith("bake:") for t in todo),
+              "bake_not_owed": len(bake_skipped),
+              "bake_merge_unverified": sum(t in unverified for t in owed if f"bake:{t}" not in resolved),
               "stacked_on_edges": sum(t["key"].startswith("blocks:") for t in todo),
               "unbound": unbound, "ticket_ids_unverified": unverified, "still_over_8kb": int(size > st.MANIFEST_CAP),
               "size_after_b": size, "stale_or_done": int(stale), "has_map": int(bool(map_id)),
               "has_snapshot_cmd": int(bool((manifest.get("map") or {}).get("snapshot_cmd"))),
               "snapshot_cwd_missing": int(relative_snapshot_cmd(manifest.get("map")))}
-    return {"manifest": out, "events": events, "todo": todo, "census": census}
+    return {"manifest": out, "events": events, "todo": todo, "census": census,
+            "bake_not_owed": [{"ticket": t, "why": why} for t, why in bake_skipped]}
 
 
 def _live_manager(slug, rows, programs, now):
@@ -189,9 +230,12 @@ def migrate_program(slug, *, dry_run=False, ticket_for=None, resolved=(), progra
     rows = pf.session_index() if rows is None else rows
     m = st.read_manifest(slug, programs)
     children, tracker = _children_from_cache(slug)
+    gh = {f"{repo}#{r.get('number')}": r for repo, tier in (src.read_cache(slug).get("gh") or {}).items()
+          for r in tier.get("data") or []}
     p = plan(slug, m, state_text=_state_text(slug, programs), children=children, tracker=tracker,
-             live_manager=_live_manager(slug, rows, programs, now), now=now, ticket_for=ticket_for, resolved=resolved)
-    res = {"program": slug, "census": p["census"], "todo": p["todo"]}
+             live_manager=_live_manager(slug, rows, programs, now), now=now, ticket_for=ticket_for, resolved=resolved,
+             gh_rows=gh)
+    res = {"program": slug, "census": p["census"], "todo": p["todo"], "bake_not_owed": p["bake_not_owed"]}
     if dry_run or ("lanes" not in m and "claims" not in m and not p["events"]):
         return dict(res, written=False)
     if p["todo"]:

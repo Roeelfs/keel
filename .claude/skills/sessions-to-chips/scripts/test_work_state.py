@@ -142,6 +142,14 @@ class DerivedStates(unittest.TestCase):
         self.assertNotIn("T-7", flagged(s, "READY_NOT_DISPATCHED"))
         self.assertIn("kind_conflict:T-7", s["notes"])
 
+    def test_kind_missing_without_conflict_is_still_dispatched(self):  # K2: only kind_conflict waits
+        t = copy.deepcopy(TRACKER)
+        t["children"].append(child("T-10", 9, "Unlabelled work", "unstarted", None))
+        s = snap(tracker=t)
+        self.assertIn("T-10", flagged(s, "READY_NOT_DISPATCHED"))
+        self.assertIn("kind_missing:T-10", s["notes"])
+        self.assertNotIn("T-7", flagged(s, "READY_NOT_DISPATCHED"))
+
     def test_frontier_and_map_line(self):
         s = snap()
         self.assertEqual(s["frontier"], ["T-2", "T-3", "T-4", "T-6", "T-7"])
@@ -261,6 +269,31 @@ class Flags(unittest.TestCase):
         self.assertEqual(flagged(snap(tracker=t, bindings=[none], prs=prs), "BAKE_OWED"), [])
         push = binding("T-1", publication={"repo": "owner/keel", "sha": "a" * 40, "via": "push"})
         self.assertEqual(flagged(snap(tracker=t, bindings=[push]), "BAKE_OWED"), ["T-1"])
+
+    def test_stale_open_when_the_bound_artifact_landed(self):  # CYN-3366 Ship 2
+        merged = binding("T-4", publication={"repo": "owner/repo", "pr": 101})
+        s = snap(bindings=[merged], prs={"owner/repo#101": GH_ROWS[0]})
+        self.assertEqual(flagged(s, "STALE_OPEN"), ["T-4"])
+        self.assertIn("owner/repo#101", s["flags"]["STALE_OPEN"][0]["fix"])
+        self.assertIn("STALE_OPEN", items(s)["T-4"]["flags"])
+        self.assertNotIn("STALE_OPEN", [b["flag"] for b in s["blocking"]])  # never blocks
+        push = binding("T-4", publication={"repo": "owner/keel", "sha": "a" * 40, "via": "push"})
+        self.assertEqual(flagged(snap(bindings=[push]), "STALE_OPEN"), ["T-4"])
+        opened = binding("T-4", publication={"repo": "owner/repo", "pr": 102})
+        self.assertEqual(flagged(snap(bindings=[opened], prs={"owner/repo#102": GH_ROWS[1]}), "STALE_OPEN"), [])
+        done = binding("T-1", publication={"repo": "owner/repo", "pr": 101})  # Done ticket: not stale
+        self.assertEqual(flagged(snap(bindings=[done], prs={"owner/repo#101": GH_ROWS[0]}), "STALE_OPEN"), [])
+
+    def test_duplicate_title_under_one_map(self):
+        t = copy.deepcopy(TRACKER)
+        t["children"] += [child("T-10", 9, "ship  c", "unstarted", "ship"),
+                          child("T-11", 10, "Research", "canceled", "task")]  # canceled never counts
+        s = snap(tracker=t)
+        self.assertEqual(flagged(s, "DUPLICATE_TITLE"), ["T-10"])
+        self.assertEqual(s["flags"]["DUPLICATE_TITLE"][0]["duplicate_of"], "T-4")
+        self.assertEqual(flagged(snap(), "DUPLICATE_TITLE"), [])
+        t["children"] += [child("T-12", 11, "Ship A", "completed", "ship")]  # both copies Done: no flag
+        self.assertEqual(flagged(snap(tracker=t), "DUPLICATE_TITLE"), ["T-10"])
 
     def test_bake_verdict_from_the_bake_ticket(self):  # R17, R18
         t = copy.deepcopy(TRACKER)
@@ -481,6 +514,21 @@ class CacheAndCommands(unittest.TestCase):
         self.assertEqual((rc, r.tracker_calls()), (4, 0))
         self.assertFalse(any(c[0] in ("gh", "git") for c in r.calls))
 
+    def test_one_wake_carries_many_bindings(self):
+        kids = {c["ticket"] for c in TRACKER["children"]}
+        for t in ("T-3", "T-6"):
+            st.bind(self.slug, t, children=kids, map_id="M-1")
+            st.carrier(self.slug, t, "wake", "w-1")
+        m = st.read_manifest(self.slug)
+        self.assertEqual(sorted(b["ticket"] for b in m["bindings"] if any(c["id"] == "w-1" for c in b["carriers"])),
+                         ["T-3", "T-6"])
+        st.carrier(self.slug, "T-3", "lane", "L9")
+        with self.assertRaises(st.SchemaError):
+            st.carrier(self.slug, "T-6", "lane", "L9")  # a writer still sits in one binding
+        st.retire(self.slug, "T-3", carrier_ids=["w-1"])
+        self.assertTrue(any(c["id"] == "w-1" for b in st.read_manifest(self.slug)["bindings"]
+                            if b["ticket"] == "T-6" for c in b["carriers"]))
+
     def test_bind_refusals_and_carrier_idempotence(self):  # R2
         kids = {c["ticket"] for c in TRACKER["children"]}
         with self.assertRaises(st.SchemaError):
@@ -567,6 +615,32 @@ class Migration(unittest.TestCase):  # R36
         self.assertEqual(p["census"]["events_only"], 1)
         stale = wm.plan("p", dict(m, status="done"), children={"T-6"}, now=NOW)
         self.assertEqual((stale["census"]["bindings"], stale["census"]["events_only"]), (0, 4))
+
+    def test_bake_todo_only_for_an_open_merged_ship_without_a_bake(self):
+        t = tracker_of([child("T-1", 0, "Ship A", "completed", "ship"),
+                        child("T-3", 1, "Ship B", "started", "ship"),
+                        child("T-4", 2, "Ship C", "started", "ship"),
+                        child("T-5", 3, "Ship D", "started", "ship"),
+                        child("T-6", 4, "Research", "started", "task"),
+                        child("T-8", 6, "Unlabelled ship", "started", "task", inferred=True),
+                        child("T-7", 5, "Bake: Ship C", "unstarted", "bake", [("T-4", "started")])])
+        m = {"program": "p", "updated_at": iso(-60), "map": {"issue": "M-1"},
+             "bindings": [binding("T-5", publication={"repo": "o/r", "pr": 102})]}
+        text = "## Owed\n- bake T-1, T-3, T-4, T-5, T-6, T-8\n"
+        p = wm.plan("p", m, state_text=text, children={c["ticket"] for c in t["children"]}, tracker=t,
+                    live_manager=True, now=NOW, gh_rows={"o/r#102": GH_ROWS[1]})
+        self.assertEqual([x["key"] for x in p["todo"] if x["key"].startswith("bake:")], ["bake:T-3", "bake:T-8"])
+        why = {x["ticket"]: x["why"] for x in p["bake_not_owed"]}
+        self.assertEqual(sorted(why), ["T-1", "T-4", "T-5", "T-6"])
+        self.assertIn("Done", why["T-1"])
+        self.assertIn("T-7", why["T-4"])
+        self.assertIn("not merged", why["T-5"])
+        self.assertIn("not a ship", why["T-6"])
+        self.assertEqual(p["census"]["bake_not_owed"], 4)
+        self.assertEqual(p["census"]["bake_merge_unverified"], 2)  # open, but nothing shows the merge
+        self.assertIn("UNVERIFIED", p["todo"][[x["key"] for x in p["todo"]].index("bake:T-8")]["do"])
+        blind = wm.plan("p", m, state_text=text, children=None, live_manager=True, now=NOW)  # no tracker tier
+        self.assertEqual(blind["census"]["bake_tickets_to_file"], 6)
 
     def test_a_relative_snapshot_cmd_needs_a_cwd(self):
         base = {"program": "p", "updated_at": iso(-60), "lanes": []}
