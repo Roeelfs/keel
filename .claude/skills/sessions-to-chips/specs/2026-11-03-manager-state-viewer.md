@@ -177,7 +177,8 @@ is closed; every key is optional; an unknown key, a wrong type or bad JSON goes 
   "findings":   [{ "date": "...", "outcome": "...", "found": "...", "refs": ["#5095"] }],
   "dead_ends":  [{ "date": "...", "what": "...", "why": "..." }],
   "incidents":  [{ "date": "...", "what": "...", "cause": "...", "fix": "...", "rca": "<path>" }],
-  "skills_done":[{ "skill": "/spec-review", "ref": "#5085", "date": "..." }] }
+  "skills_done":[{ "skill": "/spec-review", "ref": "#5085", "date": "..." }],
+  "adopted":    [{ "refs": ["#4983", "#4991"], "note": "delivered by the invoice program, adopted with its tickets" }] }
 ```
 
 `outcomes` is in dependency order. An outcome moves to History only when its tickets are all closed and no
@@ -189,6 +190,10 @@ Problems row, and a pass reads "ticket records pass", never "proven", since no b
 `owed|pass|fail`. `refs` and `tickets` are lists of ids (`"#5073"`, `"CYN-3256"`). `workstreams` is retired
 (2026-11-04): it read as session tracking; its findings go to `findings`, its output to `done`, and an old
 block shows under "not migrated" until converted.
+`adopted` names merged PRs that came with tickets this program took over from another program: their delivery
+is the other program's, so the manager writes no `done` line for them. A listed PR leaves "not yet summarized"
+and the `author` line, never counts in "What was done", and shows on History as one grouped line, the `note`
+followed by its refs. A row needs both `note` and a non-empty `refs`.
 `needs_you` holds asks not yet in a grill file; once a grill file carries one, the manager deletes it here.
 Stop-guard safety is unchanged: a JSON line never starts with `Status:` or `Wake:`, pinned by the
 real-guard test.
@@ -204,8 +209,8 @@ in this order, each in plain language:
 2. **What was done**: VIEW `done`, newest first, one line per delivered outcome with its PR refs after the
    sentence and the furthest ladder step those PRs provably reached. Now shows the last 7 days (at most 6;
    the newest 3 when none is that recent), History all. A merged PR or retired direct push that no `done`,
-   `architecture` or `design` line names is listed by its title, marked "not yet summarized", and named in
-   the `author` line.
+   `architecture`, `design` or `adopted` line names is listed by its title, marked "not yet summarized", and
+   named in the `author` line. History closes the section with each `adopted` group as one line.
 3. **What changed in the architecture**: one sentence per VIEW `architecture` row, then the before/after
    diagram. Without `<slug>.arch.json`, one line asks for it; no empty panel.
 4. **What changed in the design**: VIEW `design`, each `kind: what` with its `meaning` line.

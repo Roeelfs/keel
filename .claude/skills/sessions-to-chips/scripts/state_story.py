@@ -72,8 +72,9 @@ def done_rows(view, change_rows):
 
 def unsummarized(view, change_rows, publications):
     """Merged PRs and direct pushes that no `done`, `architecture` or `design` line names, newest first: shown by
-    title, marked as not yet summarized, and listed in the `author` line."""
-    refs = [str(r).strip() for k in ("done", "architecture") for d in view.get(k) or [] for r in d.get("refs") or []]
+    title, marked as not yet summarized, and listed in the `author` line. An `adopted` ref came with a ticket this
+    program took over, delivered by another program: it is never asked for, and never counts as this one's work."""
+    refs = [str(r).strip() for k in ("done", "architecture", "adopted") for d in view.get(k) or [] for r in d.get("refs") or []]
     refs += [str(d["ref"]).strip() for d in view.get("design") or [] if d.get("ref")]  # a spec PR summarized as design
     named_prs = {n for n in map(_pr_number, refs) if n is not None}
 
@@ -110,6 +111,7 @@ def story(view, change_rows, publications, decisions, now):
     arch = sorted((dict(a, refs=_ref_rows(a.get("refs"), by_pr)) for a in view.get("architecture") or []),
                   key=lambda r: r.get("date") or "", reverse=True)
     design = view.get("design") or []
+    adopted = [dict(a, refs=_ref_rows(a.get("refs"), by_pr)) for a in view.get("adopted") or []]
     decisions = sorted(decisions, key=lambda d: d.get("date") or "", reverse=True)
     findings = sorted((dict(f, refs=_ref_rows(f.get("refs"), by_pr)) for f in view.get("findings") or []),
                       key=lambda r: r.get("date") or "", reverse=True)
@@ -121,7 +123,8 @@ def story(view, change_rows, publications, decisions, now):
         "now": {"done": now_done, "done_more": done_more, "unsummarized": now_pending, "unsummarized_more": pending_more,
                 "architecture": arch[:NOW_MAX], "design": design, "decisions": now_dec, "decisions_more": dec_more,
                 "findings": now_found, "findings_more": found_more},
-        "history": {"done": done, "unsummarized": pending, "architecture": arch, "design": design, "findings": findings},
+        "history": {"done": done, "unsummarized": pending, "architecture": arch, "design": design, "findings": findings,
+                    "adopted": adopted},
     }
 
 

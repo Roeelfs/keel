@@ -26,6 +26,7 @@ LISTS = {
     "dead_ends": ("what", {"date", "what", "why"}, {}, ("date",)),
     "incidents": ("what", {"date", "what", "cause", "fix", "rca"}, {}, ("date",)),
     "skills_done": ("skill", {"skill", "ref", "date"}, {}, ("date",)),
+    "adopted": ("note", {"refs", "note"}, {}, ()),
 }
 LIST_FIELDS = ("tickets", "refs")  # lists of ids; every other field is text
 TEXT = ("updated_at", "destination")
@@ -135,6 +136,11 @@ def read_view(text, now, problems):
             problems.append(problem("VIEW", f"`{key}` must be a list; it was not shown"))
             continue
         view[key] = [r for r in (_row(key, n, row, now, problems) for n, row in enumerate(raw[key])) if r]
+    for n, r in enumerate(view.get("adopted") or []):
+        if not r.get("refs"):
+            problems.append(problem("VIEW", f"adopted[{n}] needs `refs`, the PRs it names; it was not shown"))
+    if "adopted" in view:
+        view["adopted"] = [r for r in view["adopted"] if r.get("refs")]
     return {"view": view, "legacy": legacy}
 
 

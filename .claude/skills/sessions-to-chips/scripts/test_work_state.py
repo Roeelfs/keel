@@ -568,6 +568,18 @@ class Migration(unittest.TestCase):  # R36
         stale = wm.plan("p", dict(m, status="done"), children={"T-6"}, now=NOW)
         self.assertEqual((stale["census"]["bindings"], stale["census"]["events_only"]), (0, 4))
 
+    def test_a_relative_snapshot_cmd_needs_a_cwd(self):
+        base = {"program": "p", "updated_at": iso(-60), "lanes": []}
+        for map_, owed in (({"issue": "M-1", "snapshot_cmd": ["node", "tooling/linear-map.mjs", "snapshot", "--map", "{map}"]}, True),
+                           ({"issue": "M-1", "snapshot_cmd": "node tooling/linear-map.mjs --map {map}", "snapshot_cwd": "/r"}, False),
+                           ({"issue": "M-1", "snapshot_cmd": ["/abs/linear-map", "--map", "{map}"]}, False),
+                           ({"issue": "M-1", "snapshot_cmd": ["fake-tracker", "{map}"]}, False)):
+            p = wm.plan("p", dict(base, map=map_), now=NOW)
+            self.assertEqual(("cwd:map" in [t["key"] for t in p["todo"]], p["census"]["snapshot_cwd_missing"]),
+                             (owed, int(owed)), map_)
+        p = wm.plan("p", dict(base, map={"issue": "M-1", "snapshot_cmd": ["node", "x/y.mjs"]}), now=NOW, resolved={"cwd:map"})
+        self.assertNotIn("cwd:map", [t["key"] for t in p["todo"]])
+
     def test_real_migrate_writes_floor_event_first_and_refuses_open_todos(self):
         slug = "mig" + str(time.time_ns())
         write_manifest(slug, lanes=[{"name": "a", "status": "done"}], claims={"issues": []})

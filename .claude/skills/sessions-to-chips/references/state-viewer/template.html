@@ -469,10 +469,15 @@
   }
   function doneSection(st, history) {
     var done = st.done || [], pending = st.unsummarized || [];
-    if (!done.length && !pending.length) return section('What was done', null, empty('Nothing delivered yet.'));
+    if (!done.length && !pending.length && !(history && (st.adopted || []).length)) return section('What was done', null, empty('Nothing delivered yet.'));
     var list = done.map(function (d) { return doneRow(d, history); });
     if (!history && st.done_more) list.push(row(el('span', { class: 'under' }, '+' + st.done_more + ' earlier, on History')));
-    var s = section('What was done', done.length ? plural(done.length + (st.done_more || 0), 'outcome') + ' delivered' : null, rows(list.concat(pendingRows(pending, history ? 0 : st.unsummarized_more))));
+    var adopted = (history ? st.adopted || [] : []).map(function (a) {
+      var r = row([el('span', { class: 'under' }, a.note), el('span', { class: 'refs' }, refNodes(a.refs))]);
+      r.setAttribute('data-search', (r.textContent || '').toLowerCase());
+      return r;
+    });
+    var s = section('What was done', done.length ? plural(done.length + (st.done_more || 0), 'outcome') + ' delivered' : null, rows(list.concat(pendingRows(pending, history ? 0 : st.unsummarized_more), adopted)));
     s.classList.add('story');
     return s;
   }

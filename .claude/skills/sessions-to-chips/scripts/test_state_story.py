@@ -84,6 +84,18 @@ class Story(unittest.TestCase):
                                                   dict(ladder_row(10, "open"), merged_at=None)], [])
         self.assertEqual([p["pr"] for p in pending], [8])
 
+    def test_adopted_prs_are_not_asked_for_and_never_count_as_delivered(self):
+        view = {"done": [{"date": "2026-11-03T10:00:00Z", "what": "x", "refs": ["#7"]}],
+                "adopted": [{"refs": ["#8", "#9"], "note": "delivered by another program, adopted with the ticket"}]}
+        rows = [ladder_row(7, "merged"), ladder_row(8, "merged"), ladder_row(9, "deployed"), ladder_row(10, "merged")]
+        told = state_story.story(view, rows, [], [], self.NOW)
+        self.assertEqual([p["pr"] for p in told["history"]["unsummarized"]], [10])
+        self.assertEqual([d["what"] for d in told["history"]["done"]], ["x"])
+        self.assertEqual([[r["pr"] for r in a["refs"]] for a in told["history"]["adopted"]], [[8, 9]])
+        self.assertNotIn("adopted", told["now"])
+        author = rs.author_line(view, [], [], [], {}, [], told["history"])
+        self.assertTrue(any("#10" in a and "#8" not in a for a in author if a.startswith("done:")), author)
+
     def test_story_orders_newest_first_and_caps_now(self):
         view = {"done": [{"date": f"2026-11-0{d}T10:00:00Z", "what": f"w{d}", "refs": []} for d in range(1, 4)]}
         told = state_story.story(view, [], [], [], self.NOW)

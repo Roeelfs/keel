@@ -6,7 +6,8 @@ program only when it has nothing left for a human-run tracker step: every live l
 ticket, every `Owed:` / `UNBAKED` ship, every `stacked_on` edge and every inferred-ship back-label
 is a `todo` the manager completes with its tracker adapter, then re-runs with `--ticket-for` /
 `--resolved`. The engine itself writes no tracker state (it reaches the tracker only through
-`map.snapshot_cmd`).
+`map.snapshot_cmd`). A `snapshot_cmd` naming a relative path needs `map.snapshot_cwd`: without it the adapter
+runs from the caller's cwd and fails (`tracker_error:rc=1`), so that gap is a `todo` too.
 
 Ticket identity: a lane entry's ticket is a map child id found in its `name`, `where` or
 `artifact`; with no cached tracker tier the generic id shape is used and counted `unverified`.
@@ -15,6 +16,7 @@ import glob
 import json
 import os
 import re
+import shlex
 import time
 
 import program_family as pf
@@ -56,6 +58,15 @@ def _carrier(entry, now_iso):
         if entry.get(key):
             return {"type": typ, "id": str(entry[key]), "bound_at": now_iso}
     return None
+
+
+def relative_snapshot_cmd(map_):
+    """True when `snapshot_cmd` names a relative path and no `snapshot_cwd` anchors it."""
+    cmd = (map_ or {}).get("snapshot_cmd")
+    if not cmd or (map_ or {}).get("snapshot_cwd"):
+        return False
+    argv = shlex.split(cmd) if isinstance(cmd, str) else [str(a) for a in cmd]
+    return any("/" in a and not a.startswith(("/", "~", "-", "{")) and "://" not in a for a in argv)
 
 
 def _owed_tickets(state_text, children):
@@ -144,6 +155,9 @@ def plan(slug, manifest, *, state_text="", children=None, tracker=None, live_man
     for c in (tracker or {}).get("children") or []:
         if c.get("kind_inferred") and c.get("kind") == "ship" and f"label:{c['ticket']}" not in resolved:
             todo.append({"key": f"label:{c['ticket']}", "do": f"ticket-adopt --kind ship on {c['ticket']}"})
+    if relative_snapshot_cmd(manifest.get("map")) and "cwd:map" not in resolved:
+        todo.append({"key": "cwd:map", "do": "set map.snapshot_cwd to the checkout the relative map.snapshot_cmd "
+                     "runs from (without it the tracker read fails tracker_error:rc=1), then re-run"})
     out = {k: v for k, v in manifest.items() if k not in ("lanes", "claims")}
     out["bindings"] = bindings
     size = len((json.dumps(out, indent=2) + "\n").encode())
@@ -153,7 +167,8 @@ def plan(slug, manifest, *, state_text="", children=None, tracker=None, live_man
               "stacked_on_edges": sum(t["key"].startswith("blocks:") for t in todo),
               "unbound": unbound, "ticket_ids_unverified": unverified, "still_over_8kb": int(size > st.MANIFEST_CAP),
               "size_after_b": size, "stale_or_done": int(stale), "has_map": int(bool(map_id)),
-              "has_snapshot_cmd": int(bool((manifest.get("map") or {}).get("snapshot_cmd")))}
+              "has_snapshot_cmd": int(bool((manifest.get("map") or {}).get("snapshot_cmd"))),
+              "snapshot_cwd_missing": int(relative_snapshot_cmd(manifest.get("map")))}
     return {"manifest": out, "events": events, "todo": todo, "census": census}
 
 

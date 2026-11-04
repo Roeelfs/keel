@@ -244,7 +244,12 @@ class ViewBlock(unittest.TestCase):
                              ('{"decisions": [{"decision": "d", "date": "2026-11-03"}]}', "RFC3339"),
                              ('{"decisions": [{"decision": "d", "date": "2027-01-01T00:00:00Z"}]}', "in the future"),
                              ('{"updated_at": "2026-11-03"}', "RFC3339"),
-                             ('{"outcomes": [{"outcome": "o", "extra": 1}]}', "unknown keys ['extra']")):
+                             ('{"outcomes": [{"outcome": "o", "extra": 1}]}', "unknown keys ['extra']"),
+                             ('{"adopted": {"refs": ["#1"]}}', "`adopted` must be a list"),
+                             ('{"adopted": [{"refs": ["#1"]}]}', "adopted[0] needs a text `note`"),
+                             ('{"adopted": [{"note": "n"}]}', "adopted[0] needs `refs`"),
+                             ('{"adopted": [{"note": "n", "refs": "#1"}]}', "adopted[0].refs must be a list"),
+                             ('{"adopted": [{"note": "n", "refs": ["#1"], "by": "x"}]}', "unknown keys ['by']")):
             _, _, problems = self.read(view_block(body))
             self.assertTrue(any(needle in p for p in problems), (body, problems))
 

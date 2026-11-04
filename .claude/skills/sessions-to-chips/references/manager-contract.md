@@ -294,7 +294,7 @@ Declaring the files is every manager's first act, in either mode. A resume-mode 
   "goal": "<outcome-shaped; allowed to be fuzzy — lanes give it precision>",
   "manager_session": "<this manager instance's exact session id>",
   "map": { "issue": "<map ticket id>", "url": "", "project": "",
-           "snapshot_cmd": ["<tracker adapter argv; {map} is replaced>"], "snapshot_cwd": "<optional>",
+           "snapshot_cmd": ["<tracker adapter argv; {map} is replaced>"], "snapshot_cwd": "<required when snapshot_cmd names a relative path>",
            "bake_exempt_deny": ["<optional extra globs a docs-only bake exemption never covers>"] },
   "orgs": [ { "slug": "<org>", "surface": "operator|owner" } ],
   "ceded": [ { "item": "…", "to": "<program>" } ],
@@ -305,6 +305,10 @@ Declaring the files is every manager's first act, in either mode. A resume-mode 
   "updated_at": "YYYY-MM-DDTHH:MM:SSZ" }
 ```
 
+- **`map.snapshot_cwd` is the checkout a relative `snapshot_cmd` runs from** (e.g. `node tooling/linear-map.mjs`).
+  Without it the adapter runs from the caller's cwd, cannot find its script, and every tracker read fails
+  `tracker_error:rc=1`. `work_state_migrate.py` refuses to write such a manifest: it lists a `cwd:map` todo
+  and counts it as `snapshot_cwd_missing`.
 - **`bindings` — one per dispatched or claimed ticket, written ONLY by `work_state.py
   bind|carrier|retire|migrate`** (atomic, under flock on `<slug>.json.lock`). Its schema has one owner,
   the strict validator `validate_binding` in `scripts/work_state_store.py`: an unknown key, a missing
@@ -427,9 +431,10 @@ derived on every render, so never copy them into VIEW. Three owners are yours:
   ADR or module shape and its one-line meaning), `decisions` (`{date, decision, why, by, supersedes}`),
   `findings` (`{date, outcome, found, refs}`: what was learned), `needs_you`, `exposure` (`dark|live|n/a` per
   deployed `#PR`; without a row a deployed change reads "exposure unstated", never live), `proof_owed` (each
-  naming its `ticket`; the ticket's bake verdict wins), `dead_ends`, `incidents`, `skills_done`. A merged PR
-  that no `done`, `architecture` or `design` line names shows by its title, marked "not yet summarized", and
-  `author` asks for it. A `done` line whose words assert live, deployed or baked beyond what its PRs' ladder
+  naming its `ticket`; the ticket's bake verdict wins), `dead_ends`, `incidents`, `skills_done`, `adopted`
+  (`{refs, note}`: merged PRs that came with tickets adopted from another program; never this program's
+  delivery, shown on History as one grouped line). A merged PR that no `done`, `architecture`, `design` or
+  `adopted` line names shows by its title, marked "not yet summarized", and `author` asks for it. A `done` line whose words assert live, deployed or baked beyond what its PRs' ladder
   reaches shows as the manager's claim: the derived proof wins. A retired key (`explanation`, `next_steps`,
   `upcoming`, `proven`, `unproven`, `workstreams`) shows under "not migrated" with its home: convert it key by key.
 - **`<slug>.arch.json`** (schema `state-arch/1`): the product being changed, never tickets or sessions. An
