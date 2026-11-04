@@ -236,7 +236,10 @@ is GRILLING.
    STALE_OPEN (its bound PR merged or its commit pushed while the ticket is not Done) citing the
    artifact; fold every DUPLICATE_TITLE (mark it Duplicate of the named ticket, or retitle one). One
    `wake` carrier may sit in several bindings when one wake covers several tickets; every other
-   carrier sits in one. Founder questions go into one grill round.
+   carrier sits in one. `SendMessage` every `NOTIFY` line's message to the session it names (a waiter
+   whose blocker's ticket closed or whose bound PR merged or closed); the snapshot prints each once per
+   blocker closure and records it, so a missed line is never re-printed. Founder questions go into one
+   grill round.
 4. Re-arm ONE wake per `pending_events` entry and per still-pending untracked event (doubled after
    an empty snapshot, max 2700 s); write a new `## AT-WAKE` block with `Status:`, `Wake:` and any
    `Hold:` lines; post the map `State as of` comment opening with the snapshot's `map_line`, then every

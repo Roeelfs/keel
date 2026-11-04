@@ -2,7 +2,8 @@
 """The binding record: its strict schema, and the ONLY write path for manifest `bindings`.
 
 Owner of: the binding schema (`validate_binding`), atomic manifest writes under flock
-(`<slug>.json.lock`), bind / carrier / retire, the `<slug>.events.jsonl` append, the lane row
+(`<slug>.json.lock`), bind / carrier / retire, the `<slug>.events.jsonl` append, the told-waiter
+record (`<slug>.notices.json`, `claim_notices`), the lane row
 (`~/.claude/state/lane-parents.jsonl`) writer and its incremental reader.
 
 Every reader of `bindings` goes through work_state.py, which imports this module. Other manifest
@@ -268,6 +269,39 @@ def append_event(slug, row, programs=None):
     with open(events_path(slug, programs), "a") as fh:
         fh.write(json.dumps(row, sort_keys=True) + "\n")
     return row
+
+
+def notices_path(slug, programs=None):
+    return os.path.join(programs or PROGRAMS, f"{slug}.notices.json")
+
+
+def claim_notices(slug, closed, keep, programs=None):
+    """Once per blocker closure. `closed` maps 'waiter|blocker' -> how the blocker ended, for every edge
+    whose blocker is closed now; `keep(key, ended)` says whether an already-told edge stays told. Under an
+    exclusive lock: return the keys not told yet, append one `waiter-notice` event each, and write the
+    record (kept told keys plus `closed`). A forgotten edge (its blocker reopened) is told again on its
+    next closure."""
+    path = notices_path(slug, programs)
+    with open(path + ".lock", "a") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            with open(path) as fh:
+                told = json.load(fh)
+        except (OSError, ValueError):
+            told = {}
+        fresh = sorted(k for k in closed if k not in told)
+        for k in fresh:
+            waiter, blocker = k.split("|", 1)
+            append_event(slug, {"event": "waiter-notice", "waiter": waiter, "blocker": blocker,
+                                "ended": closed[k]}, programs)
+        record = dict({k: v for k, v in told.items() if keep(k, v)}, **closed)
+        if record != told:
+            tmp = f"{path}.{os.getpid()}.tmp"
+            with open(tmp, "w") as fh:
+                json.dump(record, fh, indent=2, sort_keys=True)
+            os.replace(tmp, path)
+        fcntl.flock(lk, fcntl.LOCK_UN)
+    return fresh
 
 
 def size_note(nbytes):

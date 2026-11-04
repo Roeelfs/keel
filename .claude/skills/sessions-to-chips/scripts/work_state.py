@@ -565,6 +565,11 @@ def run_snapshot(slug, *, mode="snapshot", refresh=False, stdin_facts=None, prog
         cache["fp"] = dict(cache.get("fp") or {}, **parts["fp"])
         cache["fp"] = {k: v for k, v in cache["fp"].items() if any(b["ticket"] == k for b in ctx["bindings"])}
         cache["ready_since"] = parts["ready_since"]
+        if ctx["tracker"] is not None:  # no tracker read: no edges, so nothing to tell and nothing to forget
+            fresh = set(st.claim_notices(slug, waiters.notice_keys(snap["waiters"]),
+                                         waiters.still_told(ctx, CLOSED), programs))
+            for w in snap["waiters"]:
+                w["notify"] = f"{w['waiter']}|{w['blocker']}" in fresh
         day = st.now_iso(ctx["now"])[:10]
         if cache.get("outcome_day") != day and ctx["tracker"] is not None:
             verdicts = [i["bake_verdict"] for i in snap["items"] if i["kind"] == "ship"]
@@ -695,6 +700,9 @@ def main(argv=None):
                 for fl in ("STALLED", "BAKE_OWED", "STALE_OPEN", "DUPLICATE_TITLE", "PROOF_FAILED"):
                     for x in snap["flags"][fl]:
                         print(f"{fl} {x['item']}: {x.get('why') or x.get('publication')}")
+                for w in snap["waiters"]:
+                    if w["notify"]:
+                        print(f"NOTIFY {w['waiter']} -> {w['tell']}: {w['message']}")
                 for n in snap["notes"]:
                     print(f"note {n}")
             return rc

@@ -26,6 +26,7 @@ import work_state as ws  # noqa: E402
 import work_state_migrate as wm  # noqa: E402
 import work_state_sources as src  # noqa: E402
 import work_state_store as st  # noqa: E402
+import work_state_waiters as waiters  # noqa: E402
 
 FIX = os.path.join(HERE, "fixtures", "work_state")
 # The producer's own de-identified `linear-map.mjs snapshot --fixture` output (contract work-state-tracker/1),
@@ -655,6 +656,76 @@ class CacheAndCommands(unittest.TestCase):
         p = subprocess.run([sys.executable, "-I", os.path.join(HERE, "work_state.py"), "guard", "--program", "nope"],
                            input="{}", capture_output=True, text=True, env=env, timeout=30)
         self.assertEqual(p.returncode, 1)
+
+
+def notice_events(slug):
+    try:
+        with open(st.events_path(slug)) as fh:
+            rows = [json.loads(x) for x in fh]
+    except OSError:
+        return []
+    return [(r["waiter"], r["blocker"]) for r in rows if r.get("event") == "waiter-notice"]
+
+
+class WaiterNotices(unittest.TestCase):  # a landed blocker tells each waiting item once per closure
+    def setUp(self):
+        self.slug = "n" + str(time.time_ns())
+        write_manifest(self.slug)
+
+    @staticmethod
+    def tracker(stype):
+        return tracker_of([child("T-1", 0, "Blocker", stype, "task"),
+                           child("T-2", 1, "Waiter A", "started", "task", [("T-1", stype)]),
+                           child("T-3", 2, "Waiter B", "started", "task", [("T-1", stype)])])
+
+    def run_with(self, stype, mode="snapshot"):
+        facts = {"state_facts": {}, "live_bg": []} if mode == "guard" else None
+        s, _ = ws.run_snapshot(self.slug, mode=mode, refresh=True, stdin_facts=facts,
+                               runner=FakeRunner(tracker=self.tracker(stype)))
+        return sorted(w["waiter"] for w in s["waiters"] if w["notify"]), s
+
+    def test_one_notice_per_waiter_per_closure(self):
+        kids = {"T-1", "T-2", "T-3"}
+        st.bind(self.slug, "T-1", children=kids, map_id="M-1")
+        st.carrier(self.slug, "T-1", "session", "upstream")
+        told, s = self.run_with("started")  # blocker still open: rows to its owner, no notice
+        self.assertEqual((told, notice_events(self.slug)), ([], []))
+        self.assertEqual(len(s["waiters"]), 2)
+        self.assertEqual(self.run_with("completed")[0], ["T-2", "T-3"])
+        self.assertEqual(sorted(notice_events(self.slug)), [("T-2", "T-1"), ("T-3", "T-1")])
+        self.assertEqual(self.run_with("completed")[0], [])  # second run: already told
+        self.assertEqual(len(notice_events(self.slug)), 2)
+        self.assertEqual(self.run_with("started")[0], [])  # reopened: nothing to tell
+        self.assertEqual(self.run_with("completed")[0], ["T-2", "T-3"])  # a new closure is a new transition
+        self.assertEqual(len(notice_events(self.slug)), 4)
+
+    def test_guard_mode_never_claims(self):
+        cache = src.read_cache(self.slug)
+        cache["tracker"] = {"data": self.tracker("completed"), "fetched_at": time.time()}
+        src.write_cache(self.slug, cache)  # guard reads cached tiers only
+        told, s = self.run_with("completed", mode="guard")
+        self.assertEqual(sorted(w["waiter"] for w in s["waiters"] if w["closed"]), ["T-2", "T-3"])
+        self.assertEqual((told, notice_events(self.slug)), ([], []))
+        self.assertEqual(self.run_with("completed")[0], ["T-2", "T-3"])
+
+    def test_a_merged_blocker_pr_tells_before_its_ticket_closes(self):
+        t = self.tracker("started")
+        bound = [binding("T-1", [carrier("session", "upstream")], publication={"repo": "o/r", "pr": 7})]
+        merged = {"o/r#7": {"state": "MERGED", "mergedAt": iso(-30)}}
+        rows = snap(tracker=t, bindings=bound, prs=merged)["waiters"]
+        self.assertTrue(all(r["closed"] and "o/r#7 merged" in r["message"] for r in rows))
+        self.assertEqual(sorted(r["waiter"] for r in rows), ["T-2", "T-3"])
+        opened = snap(tracker=t, bindings=bound, prs={"o/r#7": {"state": "OPEN"}})["waiters"]
+        self.assertFalse(any(r["closed"] for r in opened))
+
+        def claim(prs, tracker=t):
+            c = ctx(tracker=tracker, bindings=bound, prs=prs)
+            return st.claim_notices(self.slug, waiters.notice_keys(ws.derive(c)[0]["waiters"]),
+                                    waiters.still_told(c, ws.CLOSED))
+        self.assertEqual(claim(merged), ["T-2|T-1", "T-3|T-1"])
+        self.assertEqual(claim({}), [])  # gh missed the row this tick: the notice is not re-armed
+        self.assertEqual(claim(merged), [])
+        self.assertEqual(claim(merged, self.tracker("completed")), [])  # the ticket closing later is the same news
 
 
 class LaneRows(unittest.TestCase):
