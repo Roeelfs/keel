@@ -181,6 +181,20 @@ class ReviewFlowTests(unittest.TestCase):
             rc, out = scall("post-review", "--run", str(run), "--spec", "spec.md", "--final")
             self.assertEqual((rc, out["needReview2"], out["hardStop"]), (0, False, False), out)
 
+    def test_adr_and_dependency_lanes_follow_their_gates_through_finish_prepare(self):
+        """CYN-3219: unfired -> absent with its reason printed once; fired -> a review lane."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run, root = new_run(tmp, tier="critical")
+            out = full_prepare(run, root)
+            self.assertFalse({m["label"] for m in out["reviewLanes"]} & {"adr-auditor", "dependency-currency"})
+            for line in ("adr-auditor: gate: adrTouched not fired", "dependency-currency: gate: dependencyChange not fired"):
+                self.assertEqual(out["skipped"].count(line), 1, out["skipped"])
+            run, root = new_run(tmp, tier="hotfix", name="fired",
+                                fired={"adrTouched": "edits docs/adr/0036-x.md", "dependencyChange": "upgrades `zod`"})
+            out = full_prepare(run, root)
+            self.assertLessEqual({"adr-auditor", "dependency-currency"}, {m["label"] for m in out["reviewLanes"]})
+            self.assertFalse([s for s in out["skipped"] if s.startswith(("adr-auditor", "dependency-currency"))])
+
     def test_final_pass_fails_when_coverage_is_still_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             run, root = new_run(tmp)

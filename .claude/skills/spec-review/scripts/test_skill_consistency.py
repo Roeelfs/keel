@@ -101,9 +101,9 @@ class ManifestTests(unittest.TestCase):
             e = next(x for x in MANIFEST["lanes"] if x["label"] == sub)
             self.assertEqual((e["agentType"], e["model"]), ("critic", "opus"))
         hotfix = {e["label"] for e in MANIFEST["lanes"] if "hotfix" in e["profiles"]}
-        # 2026-10-22 (founder): module shape and dependency/CVE currency are checked even in a hotfix.
-        self.assertEqual(hotfix, {"codebase-verifier", "critic-hotfix", "codex-frontier",
-                                  "architecture-auditor", "dependency-currency"})
+        # 2026-10-22 (founder): module shape is checked even in a hotfix. 2026-11-04 (CYN-3219): dependency/CVE
+        # currency runs in a hotfix only when the dependencyChange gate fired.
+        self.assertEqual(hotfix, {"codebase-verifier", "critic-hotfix", "codex-frontier", "architecture-auditor"})
 
     def test_gated_lanes_use_declared_gates(self):
         for e in MANIFEST["lanes"]:
@@ -123,6 +123,14 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual((e["kind"], e["gate"], e["profiles"]), ("claude", "liveSurface", []))
         self.assertTrue((SKILL_DIR.parent / "improve-codebase-architecture" / "SKILL.md").is_file(),
                         "the lane reads the improve-codebase-architecture skill as its lens")
+
+    def test_adr_and_dependency_lanes_are_gate_only(self):
+        """CYN-3219: each runs only when its trigger fires, at every tier; SKILL.md names both gates."""
+        for label, gate in (("adr-auditor", "adrTouched"), ("dependency-currency", "dependencyChange")):
+            e = next(x for x in MANIFEST["lanes"] if x["label"] == label)
+            self.assertEqual((e["gate"], e["profiles"]), (gate, []))
+            self.assertIn(f"`{gate}`", SKILL)
+        self.assertIn("adr", run_dir.GATE_LANES["adr-auditor"])
 
     def test_legal_auditor_runs_in_every_full_review_and_by_gate_elsewhere(self):
         e = next(x for x in MANIFEST["lanes"] if x["label"] == "legal-auditor")
@@ -166,7 +174,7 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual({t: v["profile"] for t, v in MANIFEST["tiers"].items()},
                          {"critical": "full", "standard": "standard", "light": "light", "hotfix": "hotfix"})
         by = lambda p: {e["label"] for e in MANIFEST["lanes"] if p in e["profiles"]}
-        self.assertEqual(by("standard"), {"completeness-reviewer", "codebase-verifier", "edge-case-miner", "dependency-currency", "codex-frontier", "adr-auditor"})
+        self.assertEqual(by("standard"), {"completeness-reviewer", "codebase-verifier", "edge-case-miner", "codex-frontier"})
         self.assertEqual(by("light"), {"codebase-verifier", "edge-case-miner", "codex-frontier"})
         self.assertEqual({t: v["budget"]["falsifier"] for t, v in MANIFEST["tiers"].items()},
                          {"critical": "uncorroborated", "standard": "critical", "light": "off", "hotfix": "all"})

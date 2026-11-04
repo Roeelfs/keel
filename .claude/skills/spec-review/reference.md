@@ -267,10 +267,10 @@ when its `profiles` list holds the tier's profile OR its domain gate fired OR th
 
 | tier | profile | default lanes (plus every gate-fired lane) | falsifier |
 |---|---|---|---|
-| critical | `full` | the full 15-lane set (incl. adr, legal, provider-fit, observability, drift, 3 extra Codex) | every CRITICAL, plus each MAJOR only one lane raised (`uncorroborated`) |
-| standard | `standard` | completeness, codebase-verifier, edge-case, dependency-currency, codex-frontier | CRITICAL only |
+| critical | `full` | the full 13-lane set (incl. legal, provider-fit, observability, drift, 3 extra Codex) | every CRITICAL, plus each MAJOR only one lane raised (`uncorroborated`) |
+| standard | `standard` | completeness, codebase-verifier, edge-case, codex-frontier | CRITICAL only |
 | light | `light` | codebase-verifier, edge-case, codex-frontier; refused if any gate fired | off |
-| hotfix | `hotfix` | codebase-verifier, architecture, dependency-currency, critic-hotfix, codex-frontier | every CRITICAL/MAJOR (`all`) |
+| hotfix | `hotfix` | codebase-verifier, architecture, critic-hotfix, codex-frontier | every CRITICAL/MAJOR (`all`) |
 
 Findings outside the falsifier scope still appear in the report (verdict word SURVIVES with a
 "not falsified at tier" note naming why: corroborated by a second lane, outside the tier scope or ceiling stop); only the falsifier dispatch is narrowed (`run_dir.py` `FALSIFIER_MODES`). `uncorroborated` is decided per merged unit after the merge: a MAJOR unit whose members come from two or more distinct lanes skips the falsifier; any unit with a CRITICAL member is always falsified.
@@ -375,6 +375,8 @@ otherwise run `standard`, where every fired gate still adds its lane. Lanes mark
 operator-plane-architect) are skipped, with that reason, in any other repo.
 
 **Gate evidence (CYN-3222, founder 2026-10-27).** `run_dir.py plan` rejects a fired gate whose reason quotes no path, file:line, backticked token or snake_case/camelCase identifier (`gate_evidence_errors`). liveSurface fires only for a changed, named deployed artifact; cutover only for a removed/replaced owner with a stated switch-over step. Tier follows the changed surface: "docs only" is never a downgrade for a money, security, tenancy, credential or shared-infrastructure spec (a docs PR specifying a money migration stays on the floor), and a shared reader/writer used by every Lambda or process/sandbox-killing code stays critical (replay cases CYN-3023, CYN-3160).
+
+**Gated ADR and dependency lanes (CYN-3219, founder 2026-11-04).** `adr-auditor` and `dependency-currency` were always-on (critical+standard, dependency-currency also hotfix) and were among the costliest non-falsifier lanes (adr 95M, dependency 134M tokens over 36 reviews; critical reviews averaged 48.5M vs the 45M ceiling). Each now runs at any tier only when its gate fires: `adrTouched` (the spec adds, changes or supersedes an Accepted ADR or platform invariant, or edits a `docs/adr/` file) and `dependencyChange` (the spec adds, upgrades, removes or pins a package, vendor, SDK or runtime version). An unfired gate skips the lane with `gate: <name> not fired` in the plan; a fired gate makes the lane non-droppable and forbids `light`. The ADR hard stop is unchanged once the lane is planned (`founder_approval_needed` without `founder_approval_marker_present`, or a missing envelope, stops the review), so firing `adrTouched` is the main loop's duty whenever an ADR or invariant moves. The dependency lane checks installed vs latest versions, CVE/GHSA advisories joined to CISA KEV with reachability, changelogs since the installed version, current vendor docs via Context7, and workarounds a newer version removes. Falsifier policy and ceilings are unchanged.
 
 **Applied flag.** Each merged unit in `merged.json` carries `applied` (null until the fixing step records it with
 `stage.py mark-applied --ids F-1,F-3 [--status false]`), so value per token is measured, not guessed. The merge

@@ -63,8 +63,8 @@ class LanePlanTests(unittest.TestCase):
     def test_tier_default_sets_and_gate_lanes(self):
         p, errs = plan("standard", gates(security="adds authz"))
         self.assertEqual(errs, [])
-        self.assertEqual({e["label"] for e in p["run"]}, {"completeness-reviewer", "codebase-verifier", "edge-case-miner", "dependency-currency", "codex-frontier", "adr-auditor", "security-miner"})
-        self.assertEqual((p["planned"], p["plannedCodex"], p["overBudget"]), (7, 2, []))
+        self.assertEqual({e["label"] for e in p["run"]}, {"completeness-reviewer", "codebase-verifier", "edge-case-miner", "codex-frontier", "security-miner"})
+        self.assertEqual((p["planned"], p["plannedCodex"], p["overBudget"]), (5, 2, []))
         self.assertEqual(p["laneReasons"]["security-miner"], "gate security fired: adds authz (apps/x/y.ts:1)")
 
     def test_fired_gate_reason_must_quote_evidence(self):
@@ -117,9 +117,33 @@ class LanePlanTests(unittest.TestCase):
         self.assertTrue(any("non-droppable" in e for e in plan("standard", drop=["codex-frontier"], reasons={"codex-frontier": "x"})[1]))
         _, errs = plan("standard", gates(security="s"), drop=["security-miner"], reasons={"security-miner": "x"})
         self.assertTrue(any("non-droppable" in e for e in errs))
-        p, errs = plan("standard", drop=["dependency-currency"], reasons={"dependency-currency": "no deps touched"})
+        p, errs = plan("standard", drop=["edge-case-miner"], reasons={"edge-case-miner": "no edge surface"})
         self.assertEqual(errs, [])
-        self.assertIn("dependency-currency", [s["label"] for s in p["skipped"]])
+        self.assertIn("edge-case-miner", [s["label"] for s in p["skipped"]])
+        _, errs = plan("standard", gates(dependencyChange="pins `zod`"), drop=["dependency-currency"], reasons={"dependency-currency": "x"})
+        self.assertTrue(any("non-droppable" in e for e in errs))
+
+    def test_adr_and_dependency_lanes_run_only_when_their_gate_fired(self):
+        """CYN-3219 (founder 2026-11-04): adr-auditor and dependency-currency are gated, not always-on."""
+        for tier in ("critical", "standard", "hotfix"):
+            p, errs = plan(tier, floorDomain="money")
+            self.assertEqual(errs, [], tier)
+            labels = {e["label"] for e in p["run"]}
+            self.assertFalse(labels & {"adr-auditor", "dependency-currency"}, tier)
+            why = [s for s in p["skipped"] if s["label"] in ("adr-auditor", "dependency-currency")]
+            self.assertEqual(sorted((s["label"], s["reason"]) for s in why),
+                             [("adr-auditor", "gate: adrTouched not fired"), ("dependency-currency", "gate: dependencyChange not fired")], tier)
+            g = gates(adrTouched="supersedes docs/adr/0036-x.md", dependencyChange="upgrades `@libsql/client` 0.14 -> 0.15")
+            p, errs = plan(tier, g, floorDomain="money")
+            self.assertEqual(errs, [], tier)
+            self.assertLessEqual({"adr-auditor", "dependency-currency"}, {e["label"] for e in p["run"]}, tier)
+            self.assertIn("gate dependencyChange fired", p["laneReasons"]["dependency-currency"])
+        p, _ = plan("hotfix", gates(dependencyChange="pins `zod`"))
+        self.assertEqual({e["label"] for e in p["run"]} & {"adr-auditor", "dependency-currency"}, {"dependency-currency"})
+        _, errs = plan("standard", {**GATES_OFF, "adrTouched": {"run": True, "reason": "changes an ADR"}})
+        self.assertTrue(any("must quote the evidence" in e and "adrTouched" in e for e in errs))
+        _, errs = plan("light", gates(dependencyChange="pins `zod`"))
+        self.assertTrue(any("below the floor" in e for e in errs))
 
     def test_unknown_label_and_missing_reason_are_errors(self):
         self.assertTrue(any("unknown lane label" in e for e in plan("standard", add=["nope"], reasons={"nope": "x"})[1]))
@@ -152,16 +176,16 @@ class LanePlanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             run, root = Path(tmp) / "run", Path(tmp) / "root"
             (root / ".claude").mkdir(parents=True)
-            (root / ".claude" / "spec-review.lanes.json").write_text(json.dumps({"tiers": {"standard": {"budget": {"maxLanes": 4}}}}))
+            (root / ".claude" / "spec-review.lanes.json").write_text(json.dumps({"tiers": {"standard": {"budget": {"maxLanes": 3}}}}))
             frame = Path(tmp) / "frame.json"
             frame.write_text(json.dumps({"repo": "cynap-monorepo-next", "gates": GATES_OFF, "lanePlan": {"tier": "standard", "add": [], "drop": [], "reasons": {}}}))
             rc, out = call("plan", "--run", str(run), "--root", str(root), "--input", str(frame))
             self.assertEqual(rc, 0, out)
             self.assertEqual(len(out["files"]), 2)
-            self.assertEqual(out["budget"]["maxLanes"], 4)
+            self.assertEqual(out["budget"]["maxLanes"], 3)
             self.assertTrue(out["overBudget"])
             self.assertEqual(run_dir.falsifier_severities(run), ("CRITICAL",))
-            self.assertEqual(run_dir.load_manifest(run)["tiers"]["standard"]["budget"]["maxLanes"], 4)
+            self.assertEqual(run_dir.load_manifest(run)["tiers"]["standard"]["budget"]["maxLanes"], 3)
             frame.write_text(json.dumps({"gates": GATES_OFF, "lanePlan": {"tier": "bogus"}}))
             self.assertEqual(call("plan", "--run", str(run), "--root", str(root), "--input", str(frame))[0], 1)
 
@@ -570,6 +594,23 @@ class BatchingTests(unittest.TestCase):
             envelope(run, "edge-case-miner", [], [])
             out = call("summary", "--run", str(run), "--lanes", "edge-case-miner", "--planned", "edge-case-miner")[1]
             self.assertEqual((out["hardStop"], out["hardStopReasons"]), (False, []))
+
+    def test_fired_adr_gate_plans_the_lane_and_an_unapproved_adr_change_still_stops(self):
+        """CYN-3219: gating adr-auditor must not weaken the ADR hard stop once adrTouched fired."""
+        p, errs = plan("standard", gates(adrTouched="supersedes docs/adr/0036-x.md"))
+        self.assertEqual(errs, [])
+        planned = ",".join(e["label"] for e in p["run"])
+        self.assertIn("adr-auditor", planned)
+        with tempfile.TemporaryDirectory() as tmp:
+            run = make_run(tmp)
+            out = call("summary", "--run", str(run), "--lanes", "edge-case-miner", "--planned", planned)[1]
+            self.assertIn("adr-auditor-envelope-missing", out["hardStopReasons"])
+            envelope(run, "adr-auditor", [("ADR-1", "CRITICAL")], [])
+            data = json.loads((run / "envelopes" / "adr-auditor.json").read_text())
+            data.update(founder_approval_needed=True, founder_approval_marker_present=False)
+            (run / "envelopes" / "adr-auditor.json").write_text(json.dumps(data))
+            out = call("summary", "--run", str(run), "--lanes", "adr-auditor", "--planned", planned)[1]
+            self.assertEqual((out["hardStop"], out["hardStopReasons"]), (True, ["adr"]))
 
     def test_adr_and_legal_stop_together(self):
         with tempfile.TemporaryDirectory() as tmp:
