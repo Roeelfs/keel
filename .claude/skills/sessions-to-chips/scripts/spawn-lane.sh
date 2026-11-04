@@ -43,7 +43,21 @@
 # sourced below; it may export LANE_MCP_CONFIG=<path to an mcp-config json>.
 # Interactive-OAuth MCPs do not load in -p mode — only static-credential ones work.
 set -euo pipefail
-LANE_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+# Follow every link, resolving relative targets against the link's own directory.
+# macOS readlink has no -f; keep this compatible with its stock Bash 3.2.
+lane_script_dir() {
+  local source="$0" directory
+  while [ -L "$source" ]; do
+    directory="$(cd -P "$(dirname "$source")" && pwd)" || return
+    source="$(readlink "$source")" || return
+    case "$source" in
+      /*) ;;
+      *) source="$directory/$source" ;;
+    esac
+  done
+  cd -P "$(dirname "$source")" && pwd
+}
+LANE_SCRIPT_DIR="$(lane_script_dir)"
 
 MISSION_SRC="" ; WORKTREE="" ; MODEL="" ; MODE="bypassPermissions" ; LANE_CWD="" ; MCP_CFG="" ; LANE_EFFORT="medium"
 PROOF=() ; TICKET="" ; MAX_TURNS="" ; MAX_BUDGET=""

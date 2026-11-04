@@ -19,12 +19,29 @@ class ProofTests(unittest.TestCase):
     setUp = runtime_tests.RuntimeTests.setUp
     tearDown = runtime_tests.RuntimeTests.tearDown
 
-    def spawn(self, *args, runtime="claude", own=False, change=False, runtime_rc=0, no_commit=False):
+    def spawn(self, *args, runtime="claude", own=False, change=False, runtime_rc=0,
+              no_commit=False, through_links=False, parent=""):
         scripts = self.root / "scripts"
         scripts.mkdir(exist_ok=True)
         for name in ("spawn-lane.sh", "lane_commit_guard.py", "lane_proof.py"):
             shutil.copyfile(HERE / name, scripts / name)
         (scripts / "spawn-lane.sh").chmod(0o755)
+        launcher = scripts / "spawn-lane.sh"
+        if through_links:
+            # Match the installed absolute link -> repo relative link -> real script.
+            # Spaces also exercise quoting; no helper exists beside either link.
+            for helper in HERE.glob("*.py"):
+                if not helper.name.startswith("test_") and not (scripts / helper.name).exists():
+                    (scripts / helper.name).symlink_to(helper)
+            repo_bin = self.root / "repo bin"
+            caller = self.root / "caller scripts"
+            repo_bin.mkdir(exist_ok=True)
+            caller.mkdir(exist_ok=True)
+            middle = repo_bin / "spawn-lane.sh"
+            launcher = caller / "spawn-lane.sh"
+            if not launcher.is_symlink():
+                middle.symlink_to("../scripts/spawn-lane.sh")
+                launcher.symlink_to(middle)
         if getattr(self, "mutation", None):
             file, old, new = self.mutation
             p = scripts / file
@@ -50,18 +67,51 @@ exit "$RUNTIME_RC"
         for name in ("claude", "codex"):
             (self.bin / name).write_text(mock)
         env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}", "HOME": str(self.home),
-               "S2C_CLAUDE_HOME": str(self.home / ".claude"), "CLAUDE_SESSION_ID": "",
+               "S2C_CLAUDE_HOME": str(self.home / ".claude"), "CLAUDE_SESSION_ID": parent,
                "STUB_OUT": str(self.out), "STUB_GATE_ARGS": str(self.root / "gate-args"),
                "WORK_STATE_LANE_ROWS": str(self.root / "lane-parents.jsonl"),
                "OWN": str(int(own)), "OWN_CWD": str((self.root / "own").resolve()),
                "CHANGE": str(int(change)), "NO_COMMIT": str(int(no_commit)), "RUNTIME_RC": str(runtime_rc)}
-        return subprocess.run([str(scripts / "spawn-lane.sh"), "--mission", str(self.mission),
+        return subprocess.run([str(launcher), "--mission", str(self.mission),
                                "--cwd", str(self.base), "--runtime", runtime, "--class", "implementation",
                                "--ticket", "T-1", *args], env=env, capture_output=True, text=True, timeout=15)
 
     def rows(self):
         p = self.root / "lane-proofs.jsonl"
         return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+
+    def test_two_level_symlink_reaches_guard_proof_and_lane_row(self):
+        for runtime in ("claude", "codex"):
+            with self.subTest(runtime=runtime):
+                result = self.spawn("--proof", "python3", "proof.py", "0", runtime=runtime,
+                                    through_links=True, parent="symlink-manager")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.rows()[-1]["outcome"], "pass")
+                rows = [json.loads(x) for x in
+                        (self.root / "lane-parents.jsonl").read_text().splitlines()]
+                self.assertEqual(rows[-1]["parent"], "symlink-manager")
+                self.assertEqual(rows[-1]["runtime"], runtime)
+                self.assertIsInstance(rows[-1]["pid"], int)
+                self.assertIn("pid_start", rows[-1])
+                # No delivery must still be rejected by the implementation guard.
+                rejected = self.spawn(runtime=runtime, through_links=True, no_commit=True)
+                self.assertEqual(rejected.returncode, 3, rejected.stderr)
+
+    def test_mutation_control_old_dirname_breaks_two_level_symlink(self):
+        self.mutation = ("spawn-lane.sh", 'LANE_SCRIPT_DIR="$(lane_script_dir)"',
+                         'LANE_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"')
+        result = self.spawn("--proof", "python3", "proof.py", "0", through_links=True)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("lane_commit_guard.py", result.stderr)
+        self.assertIn("can't open file", result.stderr)
+        self.assertFalse(self.out.exists(), "mutant must fail before runtime dispatch")
+        # With no guard/proof to stop dispatch, the same bad path silently loses rows.
+        result = self.spawn("--class", "research", through_links=True,
+                            parent="symlink-manager", no_commit=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.out.exists())
+        self.assertEqual(result.stderr, "")
+        self.assertFalse((self.root / "lane-parents.jsonl").exists())
 
     def assert_proof(self, rc, outcome, runtime="claude", **kw):
         r = self.spawn("--proof", "python3", "proof.py", str(rc), runtime=runtime, **kw)
