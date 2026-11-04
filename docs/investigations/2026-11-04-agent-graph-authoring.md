@@ -1,4 +1,5 @@
 > Grounded 2026-11-04 against sources current as of 2026-11-04 (Claude Code docs and changelog through 2.1.318, Anthropic essays, GitHub issue states, and local code); supersede on re-investigation of this slug
+> Superseded in part by [2026-11-04-karpathy-graph-engineering.md](2026-11-04-karpathy-graph-engineering.md): the founder meant Andrej Karpathy, and that file holds the current ranking and retractions.
 
 # Investigation: authoring graphs of agents that manage agents, compared with this harness
 
