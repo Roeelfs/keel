@@ -15,9 +15,9 @@ before any new work (a catch-up, a handoff, a new unit or child) clear every fam
 
 **Taking a program over (account switch, absorbed manager, catch-up).** The order is fixed:
 (1) backlog first, (2) salvage unpushed work (`git status --porcelain`, one push of your own
-branches; a RUNNING child's worktree is pushed by that child), (3) record the standing rulings
-the catch-up lists in your state file and repoint anything that contradicts them (a model
-ceiling is cross-cutting: it belongs in every program's state), (4) fix each numbered sweep gap,
+branches; a RUNNING child's worktree is pushed by that child), (3) read the standing rulings in
+[`rulings-ledger.md`](rulings-ledger.md) (every `--context` wake brief prints the new ones; never copy them
+into your state file) and repoint anything that contradicts them, (4) fix each numbered sweep gap,
 (5) only then new children. Own your program's absorbed scope: if you absorbed another manager
 (`absorbs` in your manifest), its live children and decisions are yours; acknowledge its
 `Taking over from ...` message by session id, bind each child to its map ticket (`work_state.py bind`,
@@ -68,7 +68,7 @@ owner of who may author what; `../prompts/model-routing.md` carries the per-lane
 | Manager (Claude `[Manager]`) | `start_session` `model: sonnet`, `effort: medium` | read, probe, dispatch, grade, integrate (push a graded lane branch, merge on the go-ahead), state files, tracker | write spec prose or a code diff; run review panels |
 | Manager (Codex root) | gate class `standard` | the same as above | the same as above |
 | Spec author (spec, design, proof ledger, ADR) | Claude `opus` lane, or a Codex lane through the gate | write and revise the spec from review findings | — |
-| Implementer (code, tests, migrations, config, review fixes) | Codex headless lane first (`spawn-lane.sh --runtime codex`, gated by `codex-headroom.sh`); Claude `opus` lane where Codex does not fit (Lane runtimes Q5) | commit diffs in its worktree | push without grading |
+| Implementer (code, tests, migrations, config, review fixes) | Codex headless lane first whenever it qualifies (`spawn-lane.sh --runtime codex`; `codex-headroom.sh` picks the model and always dispatches, no fan-out cap, the quota wall is the only limit); Claude `opus` lane where Codex does not fit (Lane runtimes Q5) | commit diffs in its worktree | push without grading |
 | Mechanical (mining, census, extraction, verification runs, grading against a checklist, procedural worker) | `haiku` / `sonnet`, Codex `mining` | produce reports, verdicts, receipts | author a spec or a diff |
 | Reviewer / judge | `opus` or Codex `astra`/`sol` for deep, security and final-gate review; `sonnet` for topical or coverage review | write a review artifact | edit the spec or diff it reviews (findings go back to the author lane) |
 
@@ -182,7 +182,8 @@ nothing armed, so no event ever re-invoked them and maps stopped completing unti
 **Only two states end a turn without one: `Status: DONE`** (Destination verified, §Every manager
 owns one living map) **and `Status: GRILLING`** (a founder decision round, recommended answer
 first; a `wrap_up` with `blocked: true` or an `AskUserQuestion` counts). Write the status line
-before you end.
+before you end. An approval clicked on such a question IS an in-session merge go only when the question
+names the exact PR and action; a generic Done/Continue button never is (founder 2026-11-04, rulings ledger).
 
 **Every wake prompt starts from the context brief:** "Run `render_state.py --program <slug> --context`,
 work the map from it, do <the on-fire action>, update `## VIEW`, re-render." It points at the state; it

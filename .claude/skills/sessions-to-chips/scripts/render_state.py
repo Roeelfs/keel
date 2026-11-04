@@ -92,7 +92,10 @@ def read_at_wake(text, now, problems):
         return {}
     tail = guard.at_wake_tail(text)
     holds = [m.group(1).strip() for m in re.finditer(r"^\s*[-*]?\s*\**Hold\**:\s*(.+)$", tail, re.M | re.I)]
+    stamp = re.match(r"^##\s+AT-WAKE\b[^\n]*?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z)", tail) or \
+        re.search(r"^\s*[-*]?\s*\**Updated\**:\s*\**\s*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z)", tail, re.M | re.I)
     return dict(_fields(tail, AT_WAKE_FIELDS), status=facts.get("status"), wake=facts.get("wake"),
+                at=stamp.group(1) if stamp else None,
                 wake_armed=bool(facts.get("wake_armed")), holds=holds)
 
 
@@ -559,7 +562,7 @@ def build_payload(slug, now, run=subprocess.run, deadline=None):
     payload = {
         "schema": SCHEMA, "kind": "program", "program": slug, "name": name, "generated_at": utc(now), "goal": manifest.get("goal"),
         "map": manifest.get("map"), "destination": view.get("destination"), "updated_at": view.get("updated_at"),
-        "status": at_wake.get("status"),
+        "status": at_wake.get("status"), "at_wake_at": at_wake.get("at"),
         "now": {"outcomes": out_now, "needs_you": needs_you(view, grills, snap),
                 "held_by": held_by(snap, derived, overlap_rows, view), "overlap": overlap_rows,
                 "system": arch, "production": {"rows": prod_rows, "counts": counts,
@@ -787,7 +790,7 @@ def main(argv=None, run=subprocess.run):
         print(f"render_state: cannot read program {args.program!r}: {exc}", file=sys.stderr)
         return 1
     if args.context:
-        print(state_brief.brief(payload))
+        print(state_brief.brief(payload, wake=state_brief.wake_lines(payload.get("at_wake_at"))))
         return 0
     base = st.manifest_path(args.program)[:-5]
     out = os.path.abspath(args.out or base + ".state.html")

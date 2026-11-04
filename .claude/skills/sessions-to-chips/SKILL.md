@@ -170,7 +170,7 @@ show as `Remote Control · offline` and a message to one is queued to nowhere. N
 **Converge.** Do not poll. Append each one-line reply to `relay/<date>-replies.md`. A program is
 converged when its manager replied to the catch-up (archived N, live children X, decisions held)
 and to backlog-first (before → after), confirmed its sweep fixes (fixed N of M) and worktree rows,
-recorded the standing rulings in its state file with a fresh `updated_at`, and its Linear map has a
+repointed anything contradicting the rulings ledger, has a fresh `updated_at`, and its Linear map has a
 `State as of` comment newer than the catch-up. `pending-sends.md` must be empty or listed to the
 human. Close with which managers hold open founder decisions and a link to each.
 

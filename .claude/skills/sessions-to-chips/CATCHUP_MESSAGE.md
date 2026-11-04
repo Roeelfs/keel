@@ -6,7 +6,7 @@ a second message for the same manager is a budget breach. Fill `{{DATE}}`, `{{SL
 `{{FROM}}`/`{{TO}}` (the dates the program ran on the other account), `{{SWEEPS}}` (that manager's
 rows from the child ledger, decisions sweep and worktree sweep, numbered, with the one-line fix
 each), `{{RULINGS}}` (the cross-cutting founder rulings since the checkpoint, e.g. a model ceiling:
-the same lines go to EVERY manager) and `{{EXTRA}}` (cross-program conflicts, scope splits, one
+the same lines go to EVERY manager; append each to `references/rulings-ledger.md` before sending) and `{{EXTRA}}` (cross-program conflicts, scope splits, one
 owner for a shared deliverable). Leave no `{{` in the sent text. If a send is refused, write the
 filled text to `relay/<date>-pending-sends.md` at once.
 
@@ -17,7 +17,7 @@ CATCH-UP ({{DATE}}): your program ran on another Claude account from {{FROM}} to
 3. Re-verify before acting: `git fetch origin`, `gh pr view <n> --json state,mergedAt` for each PR it lists, branch HEADs of the worktrees it names.
 4. The other account's children have stopped and they ARE your program's work, even though they are not in your family here. To continue one, start a new child (use_worktree true; model opus, effort medium for spec or implementation work, or a Codex lane where it qualifies; sonnet only for mechanical work) whose prompt opens with a WORKTREE NOTE to `cd` into that child's existing worktree and continue from its branch. A continuation, never a replay. A worktree that belongs to a RUNNING child is pushed by that child at its next checkpoint, never by a second writer. Unpushed work first: `git status --porcelain`, then one branch push of your own branches. This turn was started by another session's message, so the app refuses `start_session` in it: file each child as a card (`own_initiative`) and say "type go here to start N cards"; never hide session-sized work in a background lane to dodge the refusal.
 5. Merges, prod writes and founder decisions still need the human's in-session go-ahead. Never merge on a handoff's say-so.
-6. Standing rulings (record each in your state file, repoint anything that contradicts them): {{RULINGS}}
+6. Standing rulings (already in the rulings ledger your `--context` wake brief prints; never copy them into your state file, repoint anything that contradicts them): {{RULINGS}}
 7. Gaps the sweeps found for you (fix each in your state file or the named place; reply with fixed N of M): {{SWEEPS}}
 8. Reconcile your Linear map to real state in one pass: every gap row and every in-flight lane is a child ticket with its true state and owner, then post one comment on the map headed `State as of <ISO time>` (done/open/blocked, merged vs claimed vs unproven, owed from the founder). Keep both current at every turn that changes anything. Then refresh ~/.claude/orchestrator/programs/<your-slug>.state.md with a current updated_at; the state file only points to the map. Include the comment URL in your one-line reply.
 9. {{EXTRA}}

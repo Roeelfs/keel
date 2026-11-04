@@ -315,6 +315,8 @@ class EndToEnd(unittest.TestCase):
         with redirect_stdout(output):
             self.assertEqual(rs.main(["--program", "waiter-page", "--context"], run=GhFake()), 0)
         self.assertIn("TKT-4 waits on TKT-2; tell local_x:", output.getvalue())
+        self.assertRegex(output.getvalue(), r"\n(Rulings in force|Rulings ledger unreadable)")
+        self.assertIn("Instruction changes (", output.getvalue())
         self.assertIn(row["message"], output.getvalue())
         self.assertNotIn("blocked_by", output.getvalue())
         # Mutation control: dropping the relation drops the message in both renderings.
@@ -509,6 +511,13 @@ class RealGuard(unittest.TestCase):
         self.assertEqual(problems, [])
         self.assertEqual((out["status"], out["next_action"], out["owner"]), ("WORKING", "grade the lane", "manager"))
         self.assertTrue(out["wake_armed"])
+
+    def test_at_wake_stamp_is_the_last_blocks_heading_or_updated_line(self):
+        stamped = "## AT-WAKE (2026-11-04T09:00Z)\nStatus: WORKING\n\n## AT-WAKE (2026-11-04T16:40:00Z)\nStatus: WORKING\n"
+        self.assertEqual(rs.read_at_wake(stamped, NOW, [])["at"], "2026-11-04T16:40:00Z")
+        self.assertEqual(rs.read_at_wake("## AT-WAKE\nUpdated: 2026-11-04T10:05Z\nStatus: WORKING\n", NOW, [])["at"],
+                         "2026-11-04T10:05Z")
+        self.assertIsNone(rs.read_at_wake(AT_WAKE, NOW, [])["at"])
 
     def test_a_view_block_after_at_wake_changes_no_guard_fact(self):
         """The guard's tail runs to EOF, so a VIEW block sits inside it. Hostile values included."""

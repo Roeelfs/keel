@@ -3,11 +3,23 @@
 renderings). The manager reads it at every wake and session start in place of re-deriving the program, works the
 map from it, updates `## VIEW` and re-renders. Bounded to MAX_LINES; every list says how many it left out.
 Rules: ../specs/2026-11-03-manager-state-viewer.md
+`wake_lines` adds what changed in the manager's instructions since its last AT-WAKE stamp: the rulings ledger
+lines, the instruction-file commits, and whether this session runs on config older than disk. Fails soft and
+visibly, never silently.
 """
+import datetime as dt
+import os
 import re
+import subprocess
 
 import state_story as story
 
+HERE = os.path.dirname(os.path.realpath(__file__))
+LEDGER = os.path.join(os.path.dirname(HERE), "references", "rulings-ledger.md")
+CONTRACT = os.path.join(os.path.dirname(HERE), "references", "manager-contract.md")
+GLOBAL_RULES = os.path.join(os.path.expanduser("~"), ".claude", "CLAUDE.md")
+LEDGER_CAP, LOG_CAP = 14, 6
+RULING = re.compile(r"^-\s+(\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?Z)?)\s*\|\s*(.+)$")
 MAX_LINES = 60
 KIND = {"spec": "Spec", "adr": "ADR", "module": "Module"}
 FLAG = {"UNBOUND": "not started", "READY_NOT_DISPATCHED": "ready, not started",
@@ -77,9 +89,113 @@ def _ticket_states(o):
     return ", ".join(f"{t['id']} {t.get('state') or 'unknown'}" for t in o.get("tickets") or [])
 
 
-def brief(p):
+def parse_when(s):
+    """`2026-11-04`, `2026-11-04T16:22Z` or `2026-11-04T16:22:00Z` -> aware datetime, else None."""
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?Z)?$", str(s or "").strip())
+    if not m:
+        return None
+    d = dt.datetime.strptime(m.group(1), "%Y-%m-%d").replace(tzinfo=dt.timezone.utc)
+    return d.replace(hour=int(m.group(2)), minute=int(m.group(3)), second=int(m.group(4) or 0)) if m.group(2) else d
+
+
+def _newer(stamp, since):
+    """A date-only ruling shows to every wake stamped that day; a timed one is exact."""
+    if since is None:
+        return True
+    when = parse_when(stamp)
+    return when > since if "T" in stamp else when.date() >= since.date()
+
+
+def ruling_lines(since, path=LEDGER):
+    """The ledger lines newer than `since` (a datetime, or None for all), capped, with a visible failure line."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rows = [m.groups() for m in map(RULING.match, fh.read().splitlines()) if m]
+    except OSError as exc:
+        return [f"Rulings ledger unreadable: {path} ({exc.strerror or exc}); read it by hand before acting"]
+    if not rows:
+        return [f"Rulings ledger unreadable: {path} has no dated `- <date> | <rule> | <source>` lines"]
+    new = [f"- {d} {rule}" for d, rule in rows if _newer(d, since)]
+    if since is None:
+        head = f"Rulings in force ({len(rows)}; no AT-WAKE stamp, so all; stamp `## AT-WAKE (<UTC ISO>)` to see only new ones):"
+    elif not new:
+        return [f"Rulings: none new since {since:%Y-%m-%dT%H:%MZ} ({len(rows)} in force: {path})"]
+    else:
+        head = f"Rulings new since your last wake {since:%Y-%m-%dT%H:%MZ} ({len(new)} of {len(rows)}):"
+    return [head] + new[:LEDGER_CAP] + ([f"- +{len(new) - LEDGER_CAP} more in {path}"] if len(new) > LEDGER_CAP else [])
+
+
+def instruction_changes(since, files=None, run=subprocess.run):
+    """One line per commit to each instruction file since `since` (the last LOG_CAP when None), deduplicated."""
+    files = files or (("global", GLOBAL_RULES), ("contract", CONTRACT), ("ledger", LEDGER))
+    window = [f"--since={since:%Y-%m-%dT%H:%M:%SZ}"] if since else [f"-n{LOG_CAP}"]
+    lines, seen, errors = [], set(), []
+    for label, path in files:
+        real = os.path.realpath(path)
+        try:
+            res = run(["git", "-C", os.path.dirname(real), "log", "--oneline", *window, "--", real],
+                      capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError) as exc:
+            errors.append(f"{label} ({exc})")
+            continue
+        if res.returncode != 0:
+            errors.append(f"{label} ({(res.stderr or '').strip()[:80] or 'git log failed'})")
+            continue
+        for row in res.stdout.splitlines():
+            if row and row.split(" ", 1)[0] not in seen:
+                seen.add(row.split(" ", 1)[0])
+                lines.append(f"- {label}: {row[:110]}")
+    scope = f"since {since:%Y-%m-%dT%H:%MZ}" if since else f"last {LOG_CAP} per file, no AT-WAKE stamp"
+    out = [f"Instruction changes ({scope}): " + ("none" if not lines else f"{len(lines)}" + ("; Read the changed files" if since else ""))]
+    out += lines[:LOG_CAP] + ([f"- +{len(lines) - LOG_CAP} more"] if len(lines) > LOG_CAP else [])
+    return out + ([f"Instruction log unreadable: {'; '.join(errors)}"] if errors else [])
+
+
+def _session_start(run=subprocess.run):
+    """Start time (epoch) of the nearest ancestor Claude CLI process, else None."""
+    pid = os.getppid()
+    for _ in range(8):
+        res = run(["ps", "-o", "ppid=,lstart=,command=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
+        m = re.match(r"\s*(\d+)\s+(\w{3} \w{3}\s+\d+ [\d:]+ \d{4})\s+(.*)$", res.stdout or "")
+        if not m:
+            return None
+        if "disclaimer" not in m.group(3) and re.search(r"(^|/)claude(\s|$)", m.group(3)):
+            return dt.datetime.strptime(" ".join(m.group(2).split()), "%a %b %d %H:%M:%S %Y").timestamp()
+        pid = int(m.group(1))
+        if pid <= 1:
+            return None
+    return None
+
+
+def freshness_line():
+    """config_freshness.py's verdict for THIS session: instruction/settings commits after its CLI started."""
+    try:
+        import config_freshness as cf
+        start = _session_start()
+        if start is None:
+            return "Config freshness: unknown (no ancestor Claude CLI process; a Codex host or a test run)"
+        reread = cf.git_changes(cf.CLAUDE, start, ["CLAUDE.md", "output-styles"])
+        reread += cf.git_changes(os.path.dirname(os.path.dirname(cf.KEEL_SKILLS)), start, [".claude/skills"])
+        restart = cf.settings_restart_changes(start)
+    except (OSError, ImportError, ValueError, subprocess.SubprocessError) as exc:
+        return f"Config freshness: unreadable ({exc})"
+    since = dt.datetime.fromtimestamp(start).strftime("%Y-%m-%d %H:%M")
+    if restart:
+        return f"Config freshness: STALE-RESTART since session start {since} ({len(restart)} settings change(s)); end the CLI when idle"
+    if reread:
+        return f"Config freshness: STALE-REREAD since session start {since} ({len(reread)} commit(s)); Read the changed files"
+    return f"Config freshness: FRESH since session start {since}"
+
+
+def wake_lines(at_wake_at):
+    """The block every wake starts with: rulings, instruction commits, config freshness."""
+    since = parse_when(at_wake_at)
+    return ruling_lines(since) + instruction_changes(since) + [freshness_line()]
+
+
+def brief(p, wake=None):
     """-> text. Sections in the founder's order: destination, done, architecture, design, decisions, next, holds,
-    proof owed, then the keys to update."""
+    proof owed, then the keys to update. `wake` (from wake_lines) follows the head lines, outside the MAX_LINES bound."""
     now, st = p.get("now") or {}, p.get("story", {}).get("now") or {}
     stale = p.get("stale") or {}
     head = f"{p.get('name') or p.get('program')} (map {(p.get('map') or {}).get('issue') or 'none'}), state at {p.get('generated_at')}"
@@ -120,7 +236,8 @@ def brief(p):
     keys = p.get("author") or []
     footer = ["Update in ## VIEW before ending the turn:"] + (["- " + k for k in keys] if keys else ["- nothing owed"])
     footer += ["Then re-render: render_state.py --program " + str(p.get("program"))]
-    return "\n".join(_bound(out, footer))
+    lines = _bound(out, footer)
+    return "\n".join(lines[:2] + ([""] + list(wake) if wake else []) + lines[2:])
 
 
 def _bound(body, footer):
