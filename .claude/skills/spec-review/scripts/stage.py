@@ -670,7 +670,8 @@ def cmd_falsify_prep(a):
             rd.write(run / "merged.json", json.dumps({"units": units}, indent=1))
             note_stopped(run, [f"falsify:{i}" for i in skipped])
             notes.append(f"MAJOR unit(s) {', '.join(skipped)} not falsified at the ceiling stop (CRITICAL falsification is exempt)")
-    corroborated = [u["id"] for u in units if not u.get("falsify") and not u.get("stopSkipped")]
+    mode = rd.falsifier_mode(run)
+    corroborated = [u["id"] for u in units if not u.get("falsify") and not u.get("stopSkipped")] if mode == "uncorroborated" else []
     if corroborated:
         notes.append(f"{len(corroborated)} MAJOR unit(s) corroborated by a second lane skip the falsifier: {', '.join(corroborated)}")
     rc, fp = sub(rd.cmd_falsify_plan, run=a.run, lanes=",".join(ok), spec=a.spec, max_batches=str(a.max_batches or 6), dry=False)
@@ -724,7 +725,11 @@ def report_prompt(run, plan, st, sp, a):
         "ROLE: synthesis-writer",
         f"You write the final spec-review report. Write it to {run}/report.md following the template {rd.SKILL_DIR}/report-template.md exactly (section order, one canonical Falsifier wave line, F-N ids assigned once). Do not read the spec's design discussion; read evidence only.",
         f"Spec: {a.spec}. Tier: {P['tier']} (profile {P['profile']}). Run dir: {run}. Investigation brief: {a.investigation or 'none (no investigation Workflow ran)'}.",
-        f"Inputs: every {run}/envelopes/*.json (ids + severities per lane); full findings in {run}/lanes/*.md and {run}/codex/*.out.md; the merged units in {run}/merged.json (use its F-N ids and member lists as the report's F-N ids); falsifier verdicts per F-N in {run}/falsifiers/F-*.json (+ batch-*.md reasoning; a unit's verdict is every member's verdict); ground truth in {run}/dossier.md and {run}/decisions.json; LEARNINGS paths (read the parts that apply; never edit): {run}/inputs/learnings.txt lists them.",
+        f"Inputs: every {run}/envelopes/*.json (ids + severities per lane); full findings in {run}/lanes/*.md and {run}/codex/*.out.md; the merged units in {run}/merged.json (use its F-N ids and member lists as the report's F-N ids); falsifier verdicts per F-N in {run}/falsifiers/F-*.json (+ batch-*.md reasoning; a unit's verdict is every member's verdict)"
+        + ("." if sp["stop"] else f"; ground truth in {run}/dossier.md and {run}/decisions.json; LEARNINGS paths (read the parts that apply; never edit): {run}/inputs/learnings.txt lists them."),
+        "Cost (every turn re-reads your whole context): Read each input file ONCE with Read, never several files through one Bash cat (an oversized output is persisted and read again). "
+        "Do not read this skill's scripts, validators or tests: the hard rules below are the whole contract, and report-check validates the report after you."
+        + (" SPEND STOP is in force: read the envelopes, merged.json, falsifier verdicts and lane files only; skip the dossier, decisions and LEARNINGS." if sp["stop"] else ""),
         "Hard rules the pipeline checks mechanically after you finish:",
         f"- EVERY CRITICAL/MAJOR id in ANY envelope appears in report.md, each on a line carrying its verdict word (REFUTED or SURVIVES from its falsifier verdict; SURVIVES-BUT-FIX-REJECTED and NEEDS-LIVE-EVIDENCE count as SURVIVES with the note). Keep each lane's own ids (EC-N, Sec-N, Obs-N, LE-N, DRIFT-N, COMP-N ...). Consensus / Codex-only / Claude-only entries get an F-N id AND list the lane ids they merge.",
         "- Right after the Profile line reproduce this block VERBATIM (it carries the planned-vs-actual lane count, the spend against the ceiling and the per-lane reasons):", *plan_block,

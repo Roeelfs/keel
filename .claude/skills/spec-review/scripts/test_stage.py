@@ -6,6 +6,7 @@ import io
 import json
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -388,6 +389,52 @@ class AppliedTests(unittest.TestCase):
             self.assertEqual(scall("mark-applied", "--run", str(run), "--ids", "F-99")[0], 1)
 
 
+    def test_light_tier_merges_every_finding_so_mark_applied_records_it(self):
+        # Regression (spec-review-state-page-v2): light runs falsifier "off"; the merge was scoped to the
+        # falsifier, so merged.json held 0 units over 25 real findings and mark-applied refused every id.
+        with tempfile.TemporaryDirectory() as tmp:
+            run = FalsifierScopeTests().merged_run(tmp, tier="light")
+            self.assertEqual(run_dir.falsifier_mode(run), "off")
+            lanes = "edge-case-miner,security-miner"
+            rc, out = rcall("merge-check", "--run", str(run), "--lanes", lanes)
+            self.assertEqual((rc, out["totalIds"], out["clusters"]), (0, 5, 4), out)
+            units = json.loads((run / "merged.json").read_text())["units"]
+            self.assertFalse(any(u["falsify"] for u in units), "falsifier off: no unit is falsified")
+            stage.save_state(run, {"synth": {"ok": lanes.split(",")}})
+            rc, out = scall("falsify-prep", "--run", str(run), "--spec", "s.md")
+            self.assertEqual((rc, out["falsifyNeeded"]), (0, False), out)
+            self.assertFalse(any("corroborated" in n for n in out["notes"]), out["notes"])
+            self.assertEqual(run_dir.falsified_ids(run, lanes.split(",")), [])
+            rc, out = scall("mark-applied", "--run", str(run), "--ids", "F-1,F-2,F-3")
+            self.assertEqual((rc, out["applied"], out["unmarked"]), (0, 3, 1), out)
+
+    def test_critical_mode_merges_majors_but_falsifies_critical_units_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = FalsifierScopeTests().merged_run(tmp, tier="standard")
+            lanes = "edge-case-miner,security-miner"
+            rc, out = rcall("merge-check", "--run", str(run), "--lanes", lanes)
+            self.assertEqual((rc, out["clusters"]), (0, 4), out)
+            units = {u["id"]: u["falsify"] for u in json.loads((run / "merged.json").read_text())["units"]}
+            self.assertEqual(units, {"F-1": True, "F-2": False, "F-3": False, "F-4": False})
+            rc, fp = rcall("falsify-plan", "--run", str(run), "--spec", "s.md", "--lanes", lanes)
+            self.assertEqual(sorted(i for b in fp["plan"] for i in b["ids"]), ["F-1"])
+
+
+class LaneCostTests(unittest.TestCase):
+    def test_every_lane_gets_cost_rules_and_light_caps_findings(self):
+        # Regression (spec-review-state-page-v2): a light edge-case miner wrote 53 rows (floor 18) and
+        # read whole source files; the run contract now caps findings at light and asks for ranged reads.
+        for tier, capped in (("light", True), ("standard", False)):
+            with self.subTest(tier=tier), tempfile.TemporaryDirectory() as tmp:
+                run, root = new_run(tmp, tier=tier)
+                full_prepare(run, root)
+                prompt = (run / "prompts" / "edge-case-miner.md").read_text()
+                self.assertIn("Write each deliverable file ONCE", prompt)
+                self.assertIn("by line range", prompt)
+                self.assertEqual(f"at most {run_dir.LANE_FINDING_CAP['light']} findings" in prompt, capped)
+                self.assertEqual(run_dir.find_placeholders(prompt), [])
+
+
 class DeltaReviewTests(unittest.TestCase):
     def prior_run(self, tmp):
         run, root = new_run(tmp, name="prior")
@@ -564,6 +611,13 @@ class SynthesizeTests(unittest.TestCase):
             self.assertIn("token ceiling 22000000", brief)
             self.assertIn("| codebase-verifier | run |", brief)
             self.assertEqual(run_dir.find_placeholders(brief), [])
+            self.assertIn("Do not read this skill's scripts", brief)
+            self.assertIn("dossier.md", brief, "no spend stop: ground truth stays an input")
+            stop = {"total": 3, "claudeTotal": 3, "codexTotal": 0, "ratio": 1.9, "tokenCeiling": 2, "warn": True, "stop": True}
+            lean, _ = stage.report_prompt(run, stage.load_plan(run), stage.load_state(run), stop,
+                                          types.SimpleNamespace(spec="spec.md", investigation=""))
+            self.assertIn("SPEND STOP is in force", lean)
+            self.assertNotIn("dossier.md", lean, "at a spend stop the writer skips the dossier")
             manifest = ",".join(stage.load_state(run)["manifestLabels"])
             skipped = set(stage.load_state(run)["skippedLabels"])
             labels = "\n".join(f"| {l} | SKIPPED (gate: n/a) | - |" if l in skipped else f"| {l} | run | x |" for l in stage.load_state(run)["manifestLabels"])

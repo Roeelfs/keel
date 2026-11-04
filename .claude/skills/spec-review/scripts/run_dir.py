@@ -261,7 +261,30 @@ def learnings_paths(skill_dir=SKILL_DIR, home=None):
     return out
 
 
+# Findings cap per lane at a tier, overriding a brief's minimum row count. Measured on a light run
+# (spec-review-state-page-v2): the edge-case miner wrote 53 rows against an 18-row floor, a 27k-char
+# lane file it emitted three times, and the synthesis writer read it all back.
+LANE_FINDING_CAP = {"light": 12}
+
+
+def lane_cost_rules(run):
+    """The cost block every review lane gets: each turn re-reads the whole context, so a lane's spend is
+    turns x context. Light adds a findings cap."""
+    plan = read_json(Path(run) / "plan.json")
+    tier = plan.get("tier") if isinstance(plan, dict) else None
+    cap = LANE_FINDING_CAP.get(tier)
+    lines = ["- Cost (every turn re-reads your whole context, so spend is turns x context):",
+             "  read source files by line range (offset/limit) around the lines a finding cites, never a whole file over 300 lines;",
+             "  put independent reads in ONE turn; run a live command (gh, a renderer, a script) only when a finding needs a value no file gives.",
+             "  Write each deliverable file ONCE. If a Write is denied or times out, retry it once with Write; never re-emit the file through a Bash heredoc."]
+    if cap:
+        lines.append(f"- Tier {tier} findings cap: at most {cap} findings in your file, CRITICAL and MAJOR first, MINOR only if room is left."
+                     " This overrides any minimum row count above; skip N/A rows.")
+    return "\n".join(lines)
+
+
 def run_contract(run, entry, questions, label=None, ids_note=None):
+    cost = lane_cost_rules(run)
     run = str(run)
     qlines = "\n".join(f"  - {q['id']} [{q.get('lane', '')}]: {q['text']}" for q in questions) or "  (none assigned)"
     prefix = entry.get("idPrefix", "F")
@@ -282,6 +305,7 @@ def run_contract(run, entry, questions, label=None, ids_note=None):
 - Assigned review questions -- answer EVERY one, citing its Q-id in your findings file:
 {qlines}
 - Independence: you read no other lane's output. You are a leaf agent -- spawn no sub-agents or Workflows.
+{cost}
 - Delivery:
   1. Write your COMPLETE output, in the format your brief above specifies, to {run}/lanes/{label}.md.
   2. Write {run}/envelopes/{label}.json: {{"lane": "{label}", "verdict": "<one word or ''>",
@@ -801,9 +825,12 @@ def falsifier_mode(run):
 
 def unit_falsify(unit, mode):
     """Does this merged unit get a falsifier verdict? uncorroborated: every CRITICAL, and each MAJOR
-    unit only ONE lane raised; a MAJOR a second lane also raised is corroborated and skips it."""
+    unit only ONE lane raised; a MAJOR a second lane also raised is corroborated and skips it.
+    critical: CRITICAL units only. off: none (the units still exist, so mark-applied can record them)."""
     if mode == "off":
         return False
+    if mode == "critical":
+        return unit["severity"] == "CRITICAL"
     if mode == "uncorroborated":
         return unit["severity"] == "CRITICAL" or len(unit.get("lanes") or []) < 2
     return True
@@ -847,7 +874,11 @@ def plan_batches(units, max_batches=6):
 
 def cmd_merge_check(a):
     run = Path(a.run)
-    findings = all_critical_major(run, expand_labels(run, csv(a.lanes)), scoped=True)
+    # The merge covers EVERY CRITICAL/MAJOR id, whatever the tier's falsifier scope: the F-N units are
+    # what the report names and what mark-applied records. Scoping it to the falsifier made a light
+    # run (falsifier off) write zero units over real findings, so every mark-applied id was refused.
+    # The tier decides only each unit's falsify flag (unit_falsify).
+    findings = all_critical_major(run, expand_labels(run, csv(a.lanes)))
     if not findings:
         write(run / "merged.json", json.dumps({"units": []}))
         return emit({"ok": True, "totalIds": 0, "clusters": 0})
@@ -880,7 +911,7 @@ def cmd_falsify_plan(a):
     tpl = (PROMPTS_DIR / e["prompt"]).read_text(encoding="utf-8")
     role_line(tpl, "finding-falsifier")
     body = extract_body(tpl)
-    findings = all_critical_major(run, csv(a.lanes), scoped=True)
+    findings = all_critical_major(run, csv(a.lanes))
     units = load_units(run)
     if units is None:
         raise StageError("merged.json missing: run merge-check before falsify-plan")

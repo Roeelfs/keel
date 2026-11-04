@@ -176,8 +176,10 @@ class LanePlanTests(unittest.TestCase):
             self.assertEqual((ids(True), ids(False)), (["EC-1"], ["EC-1", "EC-2"]))
             (run / "plan.json").write_text(json.dumps({"budget": {"falsifier": "off"}}))
             self.assertEqual(ids(True), [])
+            # The merge is NOT scoped: falsifier off still owes F-N units over every CRITICAL/MAJOR id.
             rc, out = call("merge-check", "--run", str(run), "--lanes", "edge-case-miner")
-            self.assertEqual((rc, out["totalIds"], out["clusters"]), (0, 0, 0))
+            self.assertEqual((rc, out["totalIds"]), (1, 2), out)
+            self.assertIn("EC-2", (run / "merge-index.txt").read_text())
 
 
 class TemplateTests(unittest.TestCase):

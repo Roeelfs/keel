@@ -310,7 +310,9 @@ At 1.5x it prints `SPEND STOP`: no NEW optional work is launched, and the report
 repair of a floor or fired-gate lane, and the falsification of every CRITICAL unit. Droppable at the stop: the
 second-wave drift investigators, the coverage repair of other lanes, the critic substitute for a dead
 adversarial lane, and the falsification of MAJOR units. Wave 1 (the reviewer lanes) is one concurrent fan-out
-launched before any spend is known, so the stop governs only the later waves; no lane is demoted by it.
+launched before any spend is known, so the stop governs only the later waves; no lane is demoted by it. A lane
+already running cannot be stopped either: one lane can cross 1.5x on its own, and the synthesis report still runs
+(the review is mandatory). At the stop its brief is lean: envelopes, merged units, verdicts and lane files only.
 
 **Quota stop and dead-agent cap (CYN-3231).** The first session/weekly limit message in any of this run's Claude
 agents (a synthetic `rate_limit` assistant message, `quota_hits` in `lane_spend.py`) or a Codex lane graded QUOTA
@@ -375,4 +377,13 @@ operator-plane-architect) are skipped, with that reason, in any other repo.
 **Gate evidence (CYN-3222, founder 2026-10-27).** `run_dir.py plan` rejects a fired gate whose reason quotes no path, file:line, backticked token or snake_case/camelCase identifier (`gate_evidence_errors`). liveSurface fires only for a changed, named deployed artifact; cutover only for a removed/replaced owner with a stated switch-over step. Tier follows the changed surface: "docs only" is never a downgrade for a money, security, tenancy, credential or shared-infrastructure spec (a docs PR specifying a money migration stays on the floor), and a shared reader/writer used by every Lambda or process/sandbox-killing code stays critical (replay cases CYN-3023, CYN-3160).
 
 **Applied flag.** Each merged unit in `merged.json` carries `applied` (null until the fixing step records it with
-`stage.py mark-applied --ids F-1,F-3 [--status false]`), so value per token is measured, not guessed.
+`stage.py mark-applied --ids F-1,F-3 [--status false]`), so value per token is measured, not guessed. The merge
+covers every CRITICAL/MAJOR id at every tier; the tier's falsifier scope sets only each unit's `falsify` flag. (A
+light run with the merge scoped to the falsifier wrote zero units over 25 findings, so every id was refused.)
+
+**Lane cost rules.** Every review lane's run contract asks for ranged reads, batched independent reads, live
+commands only when no file gives the value, and each deliverable written once. At `light` it also caps a lane at
+`LANE_FINDING_CAP` (12) findings, overriding a brief's minimum row count. The synthesis brief forbids reading this
+skill's scripts and multi-file `cat`s. Measured cause (spec-review-state-page-v2, light): a 53-row edge-case miner
+whose tool calls each stalled ~600s on an unreachable PreToolUse hook, past the 5-minute subagent cache, so its last
+8 turns re-created 173k-225k of context each.
