@@ -32,6 +32,7 @@ sys.path.insert(0, HERE)
 import program_family as pf  # noqa: E402
 import work_state_store as st  # noqa: E402
 import work_state_sources as src  # noqa: E402
+import work_state_waiters as waiters  # noqa: E402
 
 SCHEMA = "work-state-snapshot/1"
 TRACKER_MAJORS = {1}
@@ -543,6 +544,7 @@ def derive(ctx):
             "items": items, "flags": flags, "blocking": [{"item": x["item"], "flag": x["flag"], "fix": x["fix"]}
                                                          for x in blocking],
             "awaiting_manager": awaiting, "holds": holds, "frontier": frontier,
+            "waiters": waiters.derive(ctx, CLOSED),
             "pending_events": list(ctx.get("pending_events") or []), "map_line": map_line, "notes": notes}
     return snap, {"fp": new_fp, "ready_since": new_ready}
 

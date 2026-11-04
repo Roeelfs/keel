@@ -286,6 +286,47 @@ class EndToEnd(unittest.TestCase):
     def setUp(self):
         clean_derived()
 
+    def test_waiter_message_survives_page_and_context(self):
+        base = write_program("waiter-page")
+        write_program("waiting-program", manifest={"program": "waiting-program", "goal": "Wait for the foundation",
+                      "manager_session": "waiting-manager", "map": {"issue": "WAIT-1"}, "bindings": []})
+        with open(base + ".json") as fh:
+            manifest = json.load(fh)
+        path = manifest["map"]["snapshot_cmd"][1]
+        with open(path) as fh:
+            tracker = json.load(fh)
+        tracker["children"][0]["blocks"] = [{"ticket": "WAIT-1", "state": {"type": "started"}}]
+        tracker["children"][2]["blocked_by"] = [{"ticket": "TKT-2", "state": {"type": "completed"}}]
+        with open(path, "w") as fh:
+            json.dump(tracker, fh)
+        render("waiter-page")
+        html, payload = payload_of(base + ".state.html")
+        row = next(h for h in payload["now"]["held_by"] if h["kind"] == "waiter" and h["waiter"] == "TKT-4")
+        self.assertEqual(row["tell"], "local_x")
+        external = next(h for h in payload["now"]["held_by"] if h["kind"] == "waiter" and h["waiter"] == "WAIT-1")
+        self.assertEqual(external["tell"], "waiting-manager")
+        self.assertIn("TKT-2 is completed", row["message"])
+        self.assertIn("h.kind === 'waiter'", html)
+        with open(base + ".state.json") as fh:
+            sidecar = json.load(fh)
+        self.assertTrue(any("tell local_x:" in h for h in sidecar["held_by"]))
+        self.assertIn("TKT-2", sidecar["held_ids"])
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(rs.main(["--program", "waiter-page", "--context"], run=GhFake()), 0)
+        self.assertIn("TKT-4 waits on TKT-2; tell local_x:", output.getvalue())
+        self.assertIn(row["message"], output.getvalue())
+        self.assertNotIn("blocked_by", output.getvalue())
+        # Mutation control: dropping the relation drops the message in both renderings.
+        tracker["children"][2]["blocked_by"] = []
+        with open(path, "w") as fh:
+            json.dump(tracker, fh)
+        clean_derived()
+        render("waiter-page")
+        _, payload = payload_of(base + ".state.html")
+        self.assertFalse(any(h["kind"] == "waiter" and h["waiter"] == "TKT-4" for h in payload["now"]["held_by"]))
+        self.assertNotIn("TKT-4 waits on TKT-2", rs.state_brief.brief(payload))
+
     def test_renders_page_sidecar_and_index_from_every_owner(self):
         base = write_program("e2e")
         before = {p: tree_hash(base + p) for p in (".json", ".state.md", ".events.jsonl")}

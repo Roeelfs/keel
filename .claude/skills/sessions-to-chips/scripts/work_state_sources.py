@@ -307,8 +307,15 @@ def build_ctx(slug, *, mode="snapshot", refresh=False, stdin_facts=None, program
         notes += fnotes
         live_bg = None
     cli = {r.get("cliSessionId"): sid for sid, r in rows.items() if r.get("cliSessionId")}
+    ownership = []
+    for p in pf.load_manifests(programs or st.PROGRAMS):
+        try:
+            ownership.append(st.read_manifest(p["slug"], programs))
+        except (OSError, ValueError):
+            continue  # An unreadable owner must never manufacture a recipient.
     ctx = {"now": now, "slug": slug, "map_id": (manifest.get("map") or {}).get("issue"),
            "absorbed": bool(manifest.get("absorbed_by")), "bindings": bindings, "tracker": tracker,
+           "programs": ownership, "manager_session": manifest.get("manager_session") or manifest.get("orchestrator_session"),
            "tracker_age_s": t_age, "has_tracker_cmd": bool(tracker_cmd(manifest)[0]), "prs": prs, "gh_age_s": gh_age,
            "sessions": rows, "cli": cli, "family_sessions": lineage, "manager_ids": mgr_ids, "lanes": lanes, "proof_failures": lane_proof.failure_counts(),
            "pids": pmap, "outfiles": outfiles, "git": git, "state": facts, "live_bg": live_bg,

@@ -373,7 +373,7 @@ def flag_rows(snap):
 def held_by(snap, derived, overlap_rows, view):
     """Everything stopping progress, named by what holds it. A flag on a worker rather than a ticket belongs to
     the machinery footer, never here."""
-    rows = list(flag_rows(snap)[0])
+    rows = [dict(w, kind="waiter") for w in (snap or {}).get("waiters") or []] + list(flag_rows(snap)[0])
     for h in (snap or {}).get("holds") or []:
         rows.append({"kind": "hold", "id": h.get("ticket"), "reason": h.get("reason"), "text": " ".join(h.get("args") or []),
                      "valid": h.get("valid"), "why": h.get("why")})

@@ -98,6 +98,8 @@ def sidecar(payload, hold):
 
 
 def _held_text(h):
+    if h["kind"] == "waiter":
+        return f"{h['waiter']} waits on {h['blocker']}; tell {h['tell']}: {h['message']}"
     if h["kind"] == "flag":
         return f"{h['flag']}:{h['id']}"
     if h["kind"] == "overlap":
@@ -107,6 +109,8 @@ def _held_text(h):
 
 def _held_ids(h):
     ids = [h.get("id")] + list(h.get("by") or [])
+    if h["kind"] == "waiter":
+        ids += [h["waiter"], h["blocker"]]
     return [x for x in ids if isinstance(x, str) and x]
 
 

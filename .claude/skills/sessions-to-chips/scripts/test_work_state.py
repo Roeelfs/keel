@@ -128,6 +128,48 @@ class DerivedStates(unittest.TestCase):
         it = items(snap(bindings=[binding("T-6", [carrier("founder", iso(-30))])]))
         self.assertEqual(it["T-6"]["state"], "active")
 
+    def test_waiters_follow_relations_and_named_owners(self):
+        tracker = tracker_of([
+            child("T-1", 0, "Foundation", "completed", "task"),
+            child("T-2", 1, "Consumer", "started", "task", [("T-1", "completed")]),
+        ])
+        tracker["children"][0]["blocks"].append({"ticket": "X-1", "state": tstate("started")})
+        args = dict(tracker=tracker, bindings=[binding("T-2", [carrier("session", "consumer")])],
+                    sessions={"consumer": {"title": "Consumer owner"}, "upstream": {"title": "Foundation owner"}},
+                    programs=[{"program": "other", "map": {"issue": "X-1"}, "manager_session": "other-manager"}])
+        before = copy.deepcopy(args)
+        rows = snap(**args)["waiters"]
+        self.assertEqual({(r["waiter"], r["blocker"]) for r in rows}, {("T-2", "T-1"), ("X-1", "T-1")})
+        own = next(r for r in rows if r["waiter"] == "T-2")
+        self.assertEqual(own["tell"], "Consumer owner (consumer)")
+        self.assertIn("T-1 is completed", own["message"])
+        self.assertEqual(next(r for r in rows if r["waiter"] == "X-1")["tell"], "other-manager")
+        self.assertEqual(args, before)  # deriving must not write back to its owners
+
+        # Mutation controls: reopen, name its owner, close the consumer, remove the edge.
+        opened = copy.deepcopy(tracker)
+        opened["children"][0]["state"] = tstate("started")
+        opened["children"][1]["blocked_by"][0]["state"] = tstate("started")
+        self.assertEqual(snap(**dict(args, tracker=opened, manager_session="manager"))["waiters"], [])
+        named = args["bindings"] + [binding("T-1", [carrier("session", "upstream")])]
+        row = snap(**dict(args, tracker=opened, bindings=named))["waiters"][0]
+        self.assertEqual(row["tell"], "Foundation owner (upstream)")
+        self.assertIn("T-2 waits on T-1", row["message"])
+        unknown = copy.deepcopy(opened)
+        unknown["children"][0]["state"] = None
+        unknown["children"][1]["blocked_by"][0]["state"] = None
+        self.assertEqual(snap(**dict(args, tracker=unknown))["waiters"], [])
+        for ending in ("canceled", "duplicate"):
+            ended = copy.deepcopy(tracker)
+            ended["children"][0]["state"] = tstate(ending)
+            row = snap(**dict(args, tracker=ended))["waiters"][0]
+            self.assertIn(f"is {ending}", row["message"])
+            self.assertNotIn("ready", row["message"])
+        closed = copy.deepcopy(tracker)
+        closed["children"][1]["state"] = tstate("completed")
+        self.assertEqual([r["waiter"] for r in snap(**dict(args, tracker=closed))["waiters"]], ["X-1"])
+        self.assertEqual(snap(tracker=tracker_of([child("T-2", 0, "Consumer", "started", "task")]))["waiters"], [])
+
     def test_backlog_never_parks_a_ticket(self):  # R8a
         s = snap()
         self.assertIn("T-3", flagged(s, "READY_NOT_DISPATCHED"))

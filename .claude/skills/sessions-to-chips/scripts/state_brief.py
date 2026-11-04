@@ -47,6 +47,8 @@ def _section(title, items, more=0, cap=6):
 
 def held_text(h):
     k = h.get("kind")
+    if k == "waiter":
+        return f"{h['waiter']} waits on {h['blocker']}; tell {h['tell']}: {h['message']}"
     if k == "flag":
         return f"{h.get('id')}: {FLAG.get(h.get('flag'), str(h.get('flag')).lower())}"
     if k == "hold":

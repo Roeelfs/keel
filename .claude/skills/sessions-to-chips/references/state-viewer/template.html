@@ -567,6 +567,10 @@
   function heldBy() {
     var list = (data.now || {}).held_by || [];
     var out = [];
+    list.filter(function (h) { return h.kind === 'waiter'; }).forEach(function (h) {
+      out.push(row([ticket(h.waiter), ' waits on ', ticket(h.blocker), h.closed ? ' (closed)' : ''],
+        el('span', null, 'Tell ', h.tell, ': ', h.message)));
+    });
     list.filter(function (h) { return h.kind === 'main'; }).forEach(function (h) {
       if (h.state === 'unavailable') out.push(row(['Main health unavailable ', el('span', { class: 'ids' }, h.repo)], h.why, h.fix ? el('span', { class: 'fix' }, 'Fix: ', h.fix) : null));
       else if (h.state !== 'green') {
