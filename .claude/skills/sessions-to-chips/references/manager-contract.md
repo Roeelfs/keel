@@ -181,6 +181,13 @@ before you end.
 work the map from it, do <the on-fire action>, update `## VIEW`, re-render." It points at the state; it
 never re-serializes it (§State page).
 
+**Waiting on another session is a message, not a timer (founder 2026-11-04).** A wake that only re-checks
+what another session holds leaves both idle. In the same turn you find the dependency, `SendMessage` its
+owner: what you need, by when, and what it unblocks, with `notify_when_idle: true`. When you land something
+another session waits on, tell that session in the same turn, naming the object (PR, SHA, ticket); never
+leave it to find out at its next wake. An idle owner that holds your next step gets woken. A wake stays only
+as the fallback when no session owns the event (CI, a deploy, a date).
+
 **These are NOT stops** — each gets ONE event-bound wake, then the turn ends:
 
 | Situation | Wake size |
@@ -1078,6 +1085,7 @@ routing: [`docs/skill-memory.md`](../../../../docs/skill-memory.md)): operator-p
 - ❌ Trusting chat-text signals ("Exiting.", JSONL silence) over branch HEAD when classifying a lane.
 - ❌ `send_message` as the last act of an unattended wake, or a wake prompt that re-serializes the
   state instead of pointing at it.
+- ❌ Re-arming a wake to re-check work another session owns, instead of messaging that session.
 - ❌ Polling wakes against a human-only gate, or a lane parking on "waiting for PR #N" when it could
   stack on #N and build now.
 - ❌ Starting a child session from an automated turn and calling the work autonomous. It lands as a
