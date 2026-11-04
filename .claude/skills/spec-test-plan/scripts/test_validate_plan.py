@@ -121,7 +121,7 @@ class PlannerContractTests(unittest.TestCase):
         validator = load_validator()
         text = plan(obligations=[obligation(1)]).replace("| PENDING | |", "| DEFERRED | |")
         self.assertTrue(validator.validate_text(text))
-        self.assertEqual([], validator.validate_text(text.replace("| DEFERRED | |", "| DEFERRED | owner: CYN-1 |")))
+        self.assertEqual([], validator.validate_text(text.replace("| DEFERRED | |", "| DEFERRED | owner: TKT-1 |")))
 
 
 if __name__ == "__main__":

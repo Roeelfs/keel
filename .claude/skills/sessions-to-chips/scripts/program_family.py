@@ -212,7 +212,7 @@ def load_manifests(programs_dir=None):
 
 
 def display_title(title):
-    """A manager's session title as people read it: "[Manager] CAYP cutover (Access v2)" -> "CAYP cutover (Access v2)"."""
+    """A manager's session title as people read it: "[Manager] Acme cutover (Access v2)" -> "Acme cutover (Access v2)"."""
     t = re.sub(r"^\[Manager\]\s*[-:]?\s*", "", title or "")
     return re.sub(r"\s*\((?:fork|copy)\)\s*$", "", t, flags=re.I).strip()
 

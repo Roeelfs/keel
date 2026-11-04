@@ -885,7 +885,7 @@ def cmd_merge_check(a):
     raw = read_json(run / "merged.raw.json")
     if raw is None:
         # The index goes to a file, never stdout: a 60+ id one-line JSON gets mangled when relayed
-        # through a relay model, which made the whole stage fail (CYN-2850).
+        # through a relay model, which made the whole stage fail.
         idx = run / "merge-index.txt"
         write(idx, "\n".join(
             f"- {f['id']} [{f['lane']}, {f['severity']}] {f['title']}"

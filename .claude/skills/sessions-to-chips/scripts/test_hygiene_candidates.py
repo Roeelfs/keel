@@ -98,8 +98,8 @@ class TicketKeys(unittest.TestCase):
         self.assertEqual(ticket_keys({"title": "K-1 B4 ship 2", "branch": "claude/funny-darwin-2c9cf4"}), set())
 
     def test_reads_title_and_branch(self):
-        self.assertEqual(ticket_keys({"title": "CYN-2898 H2: spec", "branch": "claude/cyn-2898-h2-51d9e0"}),
-                         {"CYN-2898"})
+        self.assertEqual(ticket_keys({"title": "TKT-2898 H2: spec", "branch": "claude/tkt-2898-h2-51d9e0"}),
+                         {"TKT-2898"})
 
 
 if __name__ == "__main__":

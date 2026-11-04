@@ -27,7 +27,7 @@
 #          `fatal: Unable to create .../.git/index.lock: Operation not permitted`
 #        Git IDENTITY was never the binding constraint; write access to `.git` was.
 #   Granting `.git` as an explicit writable root fixes it. Verified both directions: with
-#   the grant, commit `d79c968` was authored `Roee Alfasi <roie.lfs@gmail.com>` — the host
+#   the grant, commit `d79c968` was authored with the host's own git
 #   identity, unchanged; without it, the same prompt produced only the seed commit and the
 #   `index.lock` error above.
 #

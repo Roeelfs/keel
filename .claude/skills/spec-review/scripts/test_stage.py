@@ -182,7 +182,7 @@ class ReviewFlowTests(unittest.TestCase):
             self.assertEqual((rc, out["needReview2"], out["hardStop"]), (0, False, False), out)
 
     def test_adr_and_dependency_lanes_follow_their_gates_through_finish_prepare(self):
-        """CYN-3219: unfired -> absent with its reason printed once; fired -> a review lane."""
+        """TKT-3219: unfired -> absent with its reason printed once; fired -> a review lane."""
         with tempfile.TemporaryDirectory() as tmp:
             run, root = new_run(tmp, tier="critical")
             out = full_prepare(run, root)
@@ -671,11 +671,11 @@ class WhyGateTests(unittest.TestCase):
             run, root = why_run(tmp)
             rc, out = prepare(run, root)
             self.assertEqual((rc, out["hardStop"], out["hardStopReasons"]), (1, True, ["why-gate"]))
-            rc, out = why(run, "--ticket", "CYN-3239")
+            rc, out = why(run, "--ticket", "TKT-3239")
             self.assertEqual((rc, out["whyGate"], out["workflow"]["stage"]), (0, "pending", "why"))
             prompt = (run / "prompts" / "why-gate.md").read_text()
             self.assertTrue(prompt.startswith("ROLE: why-gate\n"))
-            self.assertIn("CYN-3239", prompt)
+            self.assertIn("TKT-3239", prompt)
             self.assertIn("Goal: g", prompt)
             self.assertIn(str(run), prompt, "the run dir must be named so lane_spend counts this lane")
             self.assertEqual(run_dir.find_placeholders(prompt), [])

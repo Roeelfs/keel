@@ -107,12 +107,12 @@ Every guidance point below is (vendor-attested, not independently corroborated).
 
 ## Ranked additions
 
-Ranked by measured cost removed per unit of work. Nothing has been changed. The evidence for 1 and 2 comes from one manager over one night (`/private/tmp/claude-501/h1/mine-synth/report.md`, a volatile path).
+Ranked by measured cost removed per unit of work. Nothing has been changed. The evidence for 1 and 2 comes from one manager over one night (`<session scratchpad>/report.md`, a volatile path).
 
 | Rank | Add | File to change | Incident or metric | Size |
 |---|---|---|---|---|
 | 1 | Make `empty_rearm` and `human_gate_wake` block, with a reason that says who to message | `~/.claude/scripts/manager_arm_guard.py:387,502-504,549-555` | 14 of 20 fired wakes only re-checked. 7.85M tokens over 27 calls from 02:06 to 08:14. 8 identical re-arms accepted | Small |
-| 2 | Push an edge on landing: record who waits, message them when the fix lands, and show waiters in the tick | `tooling/sandbox/main-health-relay.mjs`, `tooling/sandbox/pr-merge` (repo); `S/work_state.py` for the generic waiter view | #5111 sat idle 7 h 46 after #5115 landed at 00:47:38. Related to CYN-3398 | Medium |
+| 2 | Push an edge on landing: record who waits, message them when the fix lands, and show waiters in the tick | `tooling/sandbox/main-health-relay.mjs`, `tooling/sandbox/pr-merge` (repo); `S/work_state.py` for the generic waiter view | #5111 sat idle 7 h 46 after #5115 landed at 00:47:38. Related to TKT-3398 | Medium |
 | 3 | Fail closed on Claude lanes: an implementation class that exits 3 when HEAD is unchanged, and a read of `is_error` | `~/.claude/scripts/spawn-lane.sh:225-243` copied into `:288-301` | `C:930-935` records 66 turns and $7.24 ending with nothing. The `L` comment records exit 0, 0 bytes, zero work | Small |
 | 4 | Add a SubagentStop acceptance gate for Agent lanes, matching rank 3's rule | `~/.claude/settings.json`, new hook beside `lane-artifact-guard.py` | The guard catches only the quota-banner class: 41 lanes across 10 sessions | Small |
 | 5 | Add stop conditions and an attempt counter: pass `--max-turns` and `--max-budget-usd`, count carriers per ticket, raise a new flag at the third attempt | `L:248`, `S/work_state.py:44`, `S/work_state_store.py` | One prompt was resent byte-identical 5 times (`C:930-941`). `FLAGS` has no attempt flag | Medium |
@@ -208,17 +208,17 @@ Live on 2026-11-04 (HTTP 200):
 
 Local code, read 2026-11-04:
 
-- `/Users/roeealfasi/code/keel/.claude/skills/sessions-to-chips/references/manager-contract.md:40-46,68,191-195,206,308-386,538,560,624-625,808-809,930-943`
-- `/Users/roeealfasi/code/keel/.claude/skills/sessions-to-chips/scripts/work_state.py:40,44,228-246,272,532-541`
-- `/Users/roeealfasi/code/keel/.claude/skills/sessions-to-chips/scripts/work_state_store.py:21,34`
-- `/Users/roeealfasi/code/keel/.claude/skills/spec-review/scripts/spec-review.workflow.js`
-- `/Users/roeealfasi/.claude/scripts/spawn-lane.sh:34-35,41,44,70,225-243,248-249,288-301` (symlink into keel)
-- `/Users/roeealfasi/.claude/scripts/codex-dispatch.sh:244-254,330-349`
-- `/Users/roeealfasi/.claude/scripts/manager_arm_guard.py:355-375,387,502-504,549-555`
-- `/Users/roeealfasi/.claude/hooks/agent-prompt-normalizer.py:106,109,197-217`
-- `/Users/roeealfasi/.claude/hooks/lane-artifact-guard.py:1-24`
-- `/Users/roeealfasi/.claude/hooks/bash-git-guards.sh:5`
-- `/Users/roeealfasi/.claude/settings.json:8`
-- `/Users/roeealfasi/.claude/CLAUDE.md:71,122`
-- `/Users/roeealfasi/.claude/analytics/manager-arm-guard.jsonl` and `/Users/roeealfasi/.claude/analytics/lane-deaths.jsonl`
-- `/private/tmp/claude-501/h1/mine-synth/report.md` (volatile)
+- `.claude/skills/sessions-to-chips/references/manager-contract.md:40-46,68,191-195,206,308-386,538,560,624-625,808-809,930-943`
+- `.claude/skills/sessions-to-chips/scripts/work_state.py:40,44,228-246,272,532-541`
+- `.claude/skills/sessions-to-chips/scripts/work_state_store.py:21,34`
+- `.claude/skills/spec-review/scripts/spec-review.workflow.js`
+- `~/.claude/scripts/spawn-lane.sh:34-35,41,44,70,225-243,248-249,288-301` (symlink into keel)
+- `~/.claude/scripts/codex-dispatch.sh:244-254,330-349`
+- `~/.claude/scripts/manager_arm_guard.py:355-375,387,502-504,549-555`
+- `~/.claude/hooks/agent-prompt-normalizer.py:106,109,197-217`
+- `~/.claude/hooks/lane-artifact-guard.py:1-24`
+- `~/.claude/hooks/bash-git-guards.sh:5`
+- `~/.claude/settings.json:8`
+- `~/.claude/CLAUDE.md:71,122`
+- `~/.claude/analytics/manager-arm-guard.jsonl` and `~/.claude/analytics/lane-deaths.jsonl`
+- `<session scratchpad>/report.md` (volatile)

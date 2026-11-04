@@ -73,7 +73,7 @@ class LanePlanTests(unittest.TestCase):
             self.assertTrue(any("must quote the evidence" in e and "liveSurface" in e for e in errs), bad)
         for good in ("edits apps/backend/src/x.ts:12", "changes `handler_wrapper`", "flips runtimeWiring flag", "table org_erasure"):
             self.assertEqual(plan("standard", {**GATES_OFF, "cutover": {"run": True, "reason": good}})[1], [], good)
-        # CYN-3219: the narrowed liveSurface still needs a quoted runtime surface when fired
+        # TKT-3219: the narrowed liveSurface still needs a quoted runtime surface when fired
         for bad in ("changes request handler behavior", "merging deploys it"):
             _, errs = plan("standard", {**GATES_OFF, "liveSurface": {"run": True, "reason": bad}})
             self.assertTrue(any("must quote the evidence" in e and "liveSurface" in e for e in errs), bad)
@@ -129,7 +129,7 @@ class LanePlanTests(unittest.TestCase):
         self.assertTrue(any("non-droppable" in e for e in errs))
 
     def test_adr_and_dependency_lanes_run_only_when_their_gate_fired(self):
-        """CYN-3219 (founder 2026-11-04): adr-auditor and dependency-currency are gated, not always-on."""
+        """TKT-3219 (founder 2026-11-04): adr-auditor and dependency-currency are gated, not always-on."""
         for tier in ("critical", "standard", "hotfix"):
             p, errs = plan(tier, floorDomain="money")
             self.assertEqual(errs, [], tier)
@@ -601,7 +601,7 @@ class BatchingTests(unittest.TestCase):
             self.assertEqual((out["hardStop"], out["hardStopReasons"]), (False, []))
 
     def test_fired_adr_gate_plans_the_lane_and_an_unapproved_adr_change_still_stops(self):
-        """CYN-3219: gating adr-auditor must not weaken the ADR hard stop once adrTouched fired."""
+        """TKT-3219: gating adr-auditor must not weaken the ADR hard stop once adrTouched fired."""
         p, errs = plan("standard", gates(adrTouched="supersedes docs/adr/0036-x.md"))
         self.assertEqual(errs, [])
         planned = ",".join(e["label"] for e in p["run"])

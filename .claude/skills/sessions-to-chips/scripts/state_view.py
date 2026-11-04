@@ -68,7 +68,7 @@ def _row(key, n, row, now, problems):
             continue
         if k in LIST_FIELDS:
             if not isinstance(v, list) or not all(isinstance(t, str) for t in v):
-                problems.append(problem("VIEW", f"{where}.{k} must be a list of ids like \"#5073\" or \"CYN-3256\""))
+                problems.append(problem("VIEW", f"{where}.{k} must be a list of ids like \"#5073\" or \"TKT-3256\""))
                 continue
             out[k] = v
             continue

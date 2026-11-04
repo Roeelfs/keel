@@ -1,6 +1,6 @@
 # Consolidation — progress is never lost across sessions and accounts
 
-Founder go 2026-11-04 (CYN-3453, map CYN-3168): a manager keeps its program's progress somewhere
+Founder go 2026-11-04: a manager keeps its program's progress somewhere
 durable on every wake, and checks it before any chip changes hands. Work that lives only in a dirty
 worktree, an unpushed branch, a dead memory link or a handoff sentence is one reaper, compaction or
 account switch away from gone.

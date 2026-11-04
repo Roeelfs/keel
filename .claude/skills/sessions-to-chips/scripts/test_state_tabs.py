@@ -31,14 +31,14 @@ class TabPlan(unittest.TestCase):
 
     def test_an_open_index_is_reloaded_and_every_other_state_tab_closed(self):
         tabs = [(1, 10, url("apps.state.html")), (1, 11, "https://github.com"), (2, 20, url("index.state.html", tail="#program=apps")),
-                (2, 21, url("cayp.state.html", tail="?embed=1")), (3, 30, url("index.state.html"))]
+                (2, 21, url("acme.state.html", tail="?embed=1")), (3, 30, url("index.state.html"))]
         plan = rs.tab_plan(tabs, DIR, INDEX)
         self.assertEqual(plan["action"], "reload")
         self.assertEqual(plan["tab"], (2, 20))
         self.assertEqual(sorted(plan["close"]), [(1, 10), (2, 21), (3, 30)])
 
     def test_without_the_index_the_first_state_tab_becomes_it_and_keeps_the_program(self):
-        tabs = [(1, 9, "https://mail.google.com"), (1, 10, url("apps.state.html", tail="#history")), (2, 20, url("cayp.state.html"))]
+        tabs = [(1, 9, "https://mail.google.com"), (1, 10, url("apps.state.html", tail="#history")), (2, 20, url("acme.state.html"))]
         plan = rs.tab_plan(tabs, DIR, INDEX)
         self.assertEqual(plan, {"action": "repoint", "tab": (1, 10), "url": "file://" + INDEX + "#program=apps", "close": [(2, 20)]})
 

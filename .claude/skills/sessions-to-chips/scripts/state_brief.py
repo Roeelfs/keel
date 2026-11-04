@@ -16,6 +16,9 @@ import state_story as story
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 LEDGER = os.path.join(os.path.dirname(HERE), "references", "rulings-ledger.md")
+# The machine's own rulings: private (they name tickets, accounts and files), read after the public format file.
+OVERLAY_LEDGER = os.path.join(os.path.expanduser("~"), ".claude", "skills-overlay", "sessions-to-chips",
+                              "rulings-ledger.md")
 CONTRACT = os.path.join(os.path.dirname(HERE), "references", "manager-contract.md")
 GLOBAL_RULES = os.path.join(os.path.expanduser("~"), ".claude", "CLAUDE.md")
 LEDGER_CAP, LOG_CAP = 14, 6
@@ -106,13 +109,18 @@ def _newer(stamp, since):
     return when > since if "T" in stamp else when.date() >= since.date()
 
 
-def ruling_lines(since, path=LEDGER):
-    """The ledger lines newer than `since` (a datetime, or None for all), capped, with a visible failure line."""
-    try:
-        with open(path, encoding="utf-8") as fh:
-            rows = [m.groups() for m in map(RULING.match, fh.read().splitlines()) if m]
-    except OSError as exc:
-        return [f"Rulings ledger unreadable: {path} ({exc.strerror or exc}); read it by hand before acting"]
+def ruling_lines(since, path=None, overlay=OVERLAY_LEDGER):
+    """The ledger lines newer than `since` (a datetime, or None for all), capped, with a visible failure line.
+    Reads the public ledger, then the private overlay when it exists; an explicit `path` reads that file alone."""
+    paths = [path] if path else [LEDGER] + ([overlay] if overlay and os.path.exists(overlay) else [])
+    rows = []
+    for one in paths:
+        try:
+            with open(one, encoding="utf-8") as fh:
+                rows += [m.groups() for m in map(RULING.match, fh.read().splitlines()) if m]
+        except OSError as exc:
+            return [f"Rulings ledger unreadable: {one} ({exc.strerror or exc}); read it by hand before acting"]
+    path = " + ".join(paths)
     if not rows:
         return [f"Rulings ledger unreadable: {path} has no dated `- <date> | <rule> | <source>` lines"]
     new = [f"- {d} {rule}" for d, rule in rows if _newer(d, since)]
@@ -127,7 +135,8 @@ def ruling_lines(since, path=LEDGER):
 
 def instruction_changes(since, files=None, run=subprocess.run):
     """One line per commit to each instruction file since `since` (the last LOG_CAP when None), deduplicated."""
-    files = files or (("global", GLOBAL_RULES), ("contract", CONTRACT), ("ledger", LEDGER))
+    files = files or (("global", GLOBAL_RULES), ("contract", CONTRACT), ("ledger", LEDGER)) + \
+        ((("rulings", OVERLAY_LEDGER),) if os.path.exists(OVERLAY_LEDGER) else ())
     window = [f"--since={since:%Y-%m-%dT%H:%M:%SZ}"] if since else [f"-n{LOG_CAP}"]
     lines, seen, errors = [], set(), []
     for label, path in files:

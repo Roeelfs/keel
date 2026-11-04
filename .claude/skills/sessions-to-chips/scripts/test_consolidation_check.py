@@ -60,9 +60,9 @@ class ConsolidationTests(unittest.TestCase):
         self.assertEqual((rc, out["worktrees"][0]["state"], out["owed"]), (0, "OK", 0))
 
     def test_dirty_and_unpushed_are_owed_until_a_reason_is_named(self):
-        dirty = self.add_worktree("wt-dirty", "feat/cyn-1-x")
+        dirty = self.add_worktree("wt-dirty", "feat/tkt-1-x")
         (dirty / "b.txt").write_text("wip\n")
-        ahead = self.add_worktree("wt-ahead", "feat/cyn-2-y")
+        ahead = self.add_worktree("wt-ahead", "feat/tkt-2-y")
         (ahead / "c.txt").write_text("c\n")
         git(ahead, "add", "c.txt")
         git(ahead, "commit", "-q", "-m", "local only")
@@ -75,11 +75,11 @@ class ConsolidationTests(unittest.TestCase):
         self.assertEqual((rc, out["owed"]), (0, 0))
 
     def test_program_family_comes_from_bindings_and_ticket_branches(self):
-        fam = self.add_worktree("wt-fam", "feat/cyn-7-thing")
-        self.add_worktree("wt-other", "feat/cyn-9-unrelated")
-        self.add_worktree("wt-prefix", "feat/cyn-71-shares-a-prefix")
+        fam = self.add_worktree("wt-fam", "feat/tkt-7-thing")
+        self.add_worktree("wt-other", "feat/tkt-9-unrelated")
+        self.add_worktree("wt-prefix", "feat/tkt-71-shares-a-prefix")
         (self.programs / "p.json").write_text(json.dumps({
-            "program": "p", "bindings": [{"ticket": "CYN-7"}],
+            "program": "p", "bindings": [{"ticket": "TKT-7"}],
             "repos": [{"repo": "o/r", "path": str(self.repo)}]}))
         rc, out = self.run_cc("--program", "p")
         self.assertEqual([Path(w["path"]).name for w in out["worktrees"]], ["wt-fam"])
@@ -91,7 +91,7 @@ class ConsolidationTests(unittest.TestCase):
 
     def test_commit_claims_are_checked_by_git(self):
         pushed = head(self.repo)
-        wt = self.add_worktree("wt-claim", "feat/cyn-3-z")
+        wt = self.add_worktree("wt-claim", "feat/tkt-3-z")
         (wt / "d.txt").write_text("d\n")
         git(wt, "add", "d.txt")
         git(wt, "commit", "-q", "-m", "unpushed")
@@ -103,7 +103,7 @@ class ConsolidationTests(unittest.TestCase):
         self.assertEqual(rc, 1)
 
     def test_record_appends_a_consolidation_block(self):
-        dirty = self.add_worktree("wt-rec", "feat/cyn-4-r")
+        dirty = self.add_worktree("wt-rec", "feat/tkt-4-r")
         (dirty / "e.txt").write_text("e\n")
         self.run_cc("--worktree", str(dirty), "--record", str(self.state))
         text = self.state.read_text()

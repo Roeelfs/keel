@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CYN-3161: one load evaluator shared by the lock and --admit-preview (machine-governor spec §7)."""
+"""TKT-3161: one load evaluator shared by the lock and --admit-preview (machine-governor spec §7)."""
 import fcntl
 import json
 import os

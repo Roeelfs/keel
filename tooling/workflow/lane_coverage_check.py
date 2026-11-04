@@ -16,7 +16,7 @@ a claim of coverage is indistinguishable from coverage without comparing the two
 This does that comparison.
 
 A lane counts as CITED if any of its distinctive tokens — decimals, multi-digit counts,
-`file:line` anchors, CYN-keys, PR numbers, SHAs — appears anywhere in the program, including
+`file:line` anchors, ticket keys, PR numbers, SHAs — appears anywhere in the program, including
 inside a DID_NOT_SURVIVE entry. Refuted lanes still have to be mentioned.
 
 Exit 0 = every dispatched lane completed and is cited. Exit 1 = otherwise, naming which.
@@ -35,7 +35,7 @@ import sys
 TOKEN_PATTERNS = [
     r"\d+\.\d+",           # 36.55, 127.1, 0.4988
     r"\d{3,}",             # 8536, 262, 155
-    r"[A-Z]{2,}-\d+",      # CYN-1164
+    r"[A-Z]{2,}-\d+",      # a tracker key
     r"#\d{3,}",            # #2331
     r"[0-9a-f]{7,40}",     # SHAs
     r"[\w./-]+\.(?:ts|py|sh|md|yml|yaml|json|js|mjs|tsx):\d+",  # file:line

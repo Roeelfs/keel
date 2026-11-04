@@ -56,6 +56,25 @@ class WakeLines(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertTrue(out[0].startswith("Rulings: none new since 2026-11-05T00:00Z"))
 
+    def test_private_overlay_rulings_join_the_public_format_file(self):
+        public = os.path.join(self.tmp, "public.md")
+        with open(public, "w") as fh:
+            fh.write("# Rulings ledger\n\n## Rulings\n\nFormat only.\n")
+        overlay = os.path.join(self.tmp, "overlay.md")
+        with open(overlay, "w") as fh:
+            fh.write(LEDGER)
+        real = sb.LEDGER
+        sb.LEDGER = public
+        try:
+            out = sb.ruling_lines(None, overlay=overlay)
+            self.assertEqual(len(out), 4)
+            self.assertIn(public + " + " + overlay, sb.ruling_lines(sb.parse_when("2026-11-05T00:00Z"), overlay=overlay)[0])
+            # Mutation control: no overlay on disk -> the format-only public file has no rulings, said visibly.
+            self.assertTrue(sb.ruling_lines(None, overlay=os.path.join(self.tmp, "absent.md"))[0]
+                            .startswith("Rulings ledger unreadable: " + public))
+        finally:
+            sb.LEDGER = real
+
     def test_unreadable_ledger_prints_a_visible_line(self):
         missing = os.path.join(self.tmp, "gone.md")
         self.assertTrue(sb.ruling_lines(None, missing)[0].startswith("Rulings ledger unreadable: " + missing))

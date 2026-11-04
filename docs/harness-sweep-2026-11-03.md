@@ -14,11 +14,11 @@ Status: **P** = proven by a test or file in the commit, **U** = unproven in live
 
 | Commit | What | Why | Status |
 |---|---|---|---|
-| 871e966 (11-01) | sessions-to-chips Mode 4 sweeps per program across all accounts | CYN-3280 | U (no live run cited) |
+| 871e966 (11-01) | sessions-to-chips Mode 4 sweeps per program across all accounts | TKT-3280 | U (no live run cited) |
 | 6c3b1e0 (11-01) | `mine_all.py` one-pass resume/mine; Sonnet-manager model policy | collapse Modes 2/4, founder 11-01 policy | P: script gated by completeness receipt; U live |
 | 2b3709b (11-02) | Contract: no manager stop without an armed wake; resume tick | managers died idle | U |
 | a4419ae (11-03) | session index, one `session_live()` predicate, exact-id program identity | store parse measured 4.7-6.3 s; no title matching | P: commit states measurement |
-| 426ba16 (11-03) | `work_state*.py` engine: bindings, four flags (UNBOUND, READY_NOT_DISPATCHED, STALLED, BAKE_OWED), `work_state_verify.py` V0-V2 | CYN-3366; derive state instead of hand ledgers | P: verifier + tests; U against live tracker |
+| 426ba16 (11-03) | `work_state*.py` engine: bindings, four flags (UNBOUND, READY_NOT_DISPATCHED, STALLED, BAKE_OWED), `work_state_verify.py` V0-V2 | TKT-3366; derive state instead of hand ledgers | P: verifier + tests; U against live tracker |
 | fcfba77 (11-03) | `spawn-lane.sh` writes a full lane row for both runtimes | prove lane liveness by pid identity | P: `test_spawn_lane_runtime.py` |
 | 63a1d94 / 72f78c8 / c4764b0 (11-03) | Contract runs on bindings and snapshot; reads real `work-state-tracker/1` producer; map census only from tracker snapshot | remove Linear MCP text search | U |
 
@@ -26,7 +26,7 @@ Status: **P** = proven by a test or file in the commit, **U** = unproven in live
 
 | Commit | What | Why | Status |
 |---|---|---|---|
-| 68bd523 (11-01) | Operator sessions skip spec-review/ship gates; docs-only PRs merge unasked | CYN-3238 | P: ratchet 34388→35527 B |
+| 68bd523 (11-01) | Operator sessions skip spec-review/ship gates; docs-only PRs merge unasked | TKT-3238 | P: ratchet 34388→35527 B |
 | 8242ab0 / dca5ebf (11-01/02) | Managers run sonnet; specs and implementation are opus or Codex; opus dispatch declares `Role:` not Model-why | founder 11-01 | P: `test_agent_normalizer_opus.py` |
 | 9720897 + 66c908a (11-02) | `manager-arm-guard` Stop hook blocks a WORKING manager turn with no armed wake; wired into Stop array | founder approved 11-02 | P: `test_manager_arm_guard.py`; U live block rate (log `analytics/manager-arm-guard.jsonl`) |
 | c63c52e (11-03) | `codex-dispatch.sh` records a lane row | same pid-identity proof | P: `test_codex_dispatch.py` |
@@ -46,7 +46,7 @@ Status: **P** = proven by a test or file in the commit, **U** = unproven in live
 | D2 | HIGH | `ai.local.workflow-wake` loaded but BLOCKED since Oct 18: "forwarder exited"; `service.err` "enrollment disabled or incomplete"; `service.log` 11 MB | `tail -c 300 ~/.claude/workflow-wake/service.log; cat ~/.claude/workflow-wake/service.err; launchctl list \| grep workflow-wake` | Restart, find why the forwarder exits (gh auth / secret flag), truncate log | needs founder (launchd + creds) |
 | D3 | MED | `~/.claude` has 6 uncommitted changes: `worktree-reaper.sh` (+76), two `LEARNINGS.md` overlays, 2 `analytics/context-economy` churn files, and a tracked-but-missing `skills/orchestrator` | `git -C ~/.claude status --porcelain; git -C ~/.claude diff --stat` | Commit the `orchestrator` deletion; check reaper isn't a live session's edit; gitignore receipts/state | safe-auto (deletion) / founder (rest) |
 | D4 | MED | `enrollment.json` is a symlink into `cynap-monorepo-next/.cynap/wake/`, so moving that checkout silently breaks the launchd job. Ignored on both sides, no inline secrets. | `ls -la ~/.claude/workflow-wake; git -C ~/.claude check-ignore -v ~/.claude/workflow-wake/enrollment.json` | Copy into `~/.claude/workflow-wake/` or document the dependency | needs founder |
-| D5 | LOW | 11 machine-local skill dirs not in keel: archify, carenet-whatsapp-ingest, creating-pdf, google-docs-fetch, macos-storage-reclaim, nano-banana-2, rp, stay-ops, synced, transcribe-audio, warp-snapshot. Contract says keel is the one canonical source. | `diff <(ls ~/.claude/skills) <(ls ~/code/keel/.claude/skills); find ~/.claude/skills -maxdepth 1 ! -type l` | Promote the public ones; keep carenet/stay-ops private. Remove `~/.claude/skills/.trash` | needs founder |
+| D5 | LOW | 11 machine-local skill dirs not in keel: archify, <private-ingest-skill>, creating-pdf, google-docs-fetch, macos-storage-reclaim, nano-banana-2, rp, <private-ops-skill>, synced, transcribe-audio, warp-snapshot. Contract says keel is the one canonical source. | `diff <(ls ~/.claude/skills) <(ls ~/code/keel/.claude/skills); find ~/.claude/skills -maxdepth 1 ! -type l` | Promote the public ones; keep the two private ones private. Remove `~/.claude/skills/.trash` | needs founder |
 | D6 | LOW | `~/.codex/skills` and `~/.agents/skills` link to `~/.claude/skills/*` (two hops), fragile if that dir is rebuilt | `find ~/.codex/skills -maxdepth 1 -type l \| xargs -n1 readlink` | Point at keel directly | informational |
 | D7 | LOW | 5 keel worktrees under `.claude/worktrees/`; two hold stale `spawn-lane.sh` copies that pollute greps | `git -C ~/code/keel worktree list` | `git status --porcelain` per worktree, then prune | needs founder |
 | D8 | LOW | `harness-reference.md:67` reads present-tense under a RETIRED fable heading | `grep -rniI fable ~/.claude/docs` | Prefix "(history)" | safe-auto |

@@ -12,7 +12,7 @@ const valid = {
 };
 
 describe('production stability record validator', () => {
-  it('accepts a strict CareNet-shaped path-gap and mutation record', () => {
+  it('accepts a strict customer-shaped path-gap and mutation record', () => {
     assert.deepEqual(validateProductionStabilityRecord(valid), { ok: true, record: valid });
   });
 

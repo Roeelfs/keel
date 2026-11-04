@@ -47,7 +47,10 @@ install step.
 - **Public and marker-free.** No secrets, customer names, project-private facts, or
   machine-specific paths in skills or seeds. Operator-private craft goes to the
   machine's `~/.claude/skills-overlay/<skill>/LEARNINGS.md`; machine/project facts go
-  to project memory (`docs/skill-memory.md` owns the routing).
+  to project memory (`docs/skill-memory.md` owns the routing). `.githooks/pre-commit` runs
+  `tooling/leak-check.py --staged` on every commit: emails, home paths, credential formats, and the
+  machine's private denylist (`~/.claude/scripts/keel-leak-denylist.txt`; never committed here, since the
+  list itself would be the leak). `tooling/leak-check.py --all` audits the whole tree.
 - **Committed `LEARNINGS.md` files are curated seeds** — they grow ONLY via
   de-identified promotion (an `/improve-harness` PR), never by hand-appending at task
   end.

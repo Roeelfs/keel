@@ -313,7 +313,7 @@ class Flags(unittest.TestCase):
         push = binding("T-1", publication={"repo": "owner/keel", "sha": "a" * 40, "via": "push"})
         self.assertEqual(flagged(snap(tracker=t, bindings=[push]), "BAKE_OWED"), ["T-1"])
 
-    def test_stale_open_when_the_bound_artifact_landed(self):  # CYN-3366 Ship 2
+    def test_stale_open_when_the_bound_artifact_landed(self):  # TKT-3366 Ship 2
         merged = binding("T-4", publication={"repo": "owner/repo", "pr": 101})
         s = snap(bindings=[merged], prs={"owner/repo#101": GH_ROWS[0]})
         self.assertEqual(flagged(s, "STALE_OPEN"), ["T-4"])

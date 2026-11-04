@@ -34,7 +34,7 @@ def ladder_row(pr, step, merged_at="2026-11-03T09:00:00Z", title="feat(x): a thi
 
 class Names(unittest.TestCase):
     def test_display_title_strips_the_manager_prefix_and_fork_suffix(self):
-        self.assertEqual(pf.display_title("[Manager] CAYP cutover (Access v2)"), "CAYP cutover (Access v2)")
+        self.assertEqual(pf.display_title("[Manager] Acme cutover (Access v2)"), "Acme cutover (Access v2)")
         self.assertEqual(pf.display_title("[Manager] Cynap (fork)"), "Cynap")
 
     def test_the_page_and_index_carry_the_manager_session_title(self):
@@ -45,15 +45,15 @@ class Names(unittest.TestCase):
         manifest["manager_session"] = MANAGER_ID
         with open(os.path.join(T.PROGRAMS, "named.json"), "w") as fh:
             json.dump(manifest, fh)
-        write_manager_session("[Manager] CAYP cutover (Access v2)")
+        write_manager_session("[Manager] Acme cutover (Access v2)")
         rc, _ = T.render("named")
         self.assertEqual(rc, 0)
         _, data = T.payload_of(os.path.join(T.PROGRAMS, "named.state.html"))
-        self.assertEqual(data["name"], "CAYP cutover (Access v2)")
+        self.assertEqual(data["name"], "Acme cutover (Access v2)")
         self.assertFalse([p for p in data["problems"] if p["source"] == "Name"])
         _, index = T.payload_of(os.path.join(T.PROGRAMS, "index.state.html"))
         row = next(r for r in index["rows"] if r["program"] == "named")
-        self.assertEqual((row["name"], row["map"]["issue"]), ("CAYP cutover (Access v2)", "TKT-1"))
+        self.assertEqual((row["name"], row["map"]["issue"]), ("Acme cutover (Access v2)", "TKT-1"))
 
     def test_without_a_readable_session_the_manifest_title_is_used_and_one_problem_said(self):
         problems = []
@@ -179,9 +179,9 @@ class Brief(unittest.TestCase):
 
 class WorkerFlags(unittest.TestCase):
     def test_a_flag_on_a_worker_goes_to_the_footer_not_held_by(self):
-        snap = {"blocking": [{"flag": "UNBOUND", "item": "CYN-1"}, {"flag": "UNBOUND", "item": "codex-dispatch-lane-x"}]}
+        snap = {"blocking": [{"flag": "UNBOUND", "item": "TKT-1"}, {"flag": "UNBOUND", "item": "codex-dispatch-lane-x"}]}
         on_ticket, other = rs.flag_rows(snap)
-        self.assertEqual(([r["id"] for r in on_ticket], [r["id"] for r in other]), (["CYN-1"], ["codex-dispatch-lane-x"]))
+        self.assertEqual(([r["id"] for r in on_ticket], [r["id"] for r in other]), (["TKT-1"], ["codex-dispatch-lane-x"]))
 
 
 class Index(unittest.TestCase):

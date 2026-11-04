@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-class RSS cap (CYN-3159): the resolver, the loader field, and every site that reads the cap."""
+"""Per-class RSS cap (TKT-3159): the resolver, the loader field, and every site that reads the cap."""
 import json
 import os
 import subprocess

@@ -51,7 +51,7 @@ const MINER = { type: 'object', properties: { ok: { type: 'boolean' }, questions
 const MERGED = { type: 'object', properties: { units: { type: 'number' } }, required: ['units'] }
 const SYNTH = { type: 'object', properties: { report_path: { type: 'string' } }, required: ['report_path'] }
 
-// Dead-agent cap (CYN-3231): mirrors lanes.json agentTurnCaps (test_skill_consistency pins the equality). A Workflow
+// Dead-agent cap (TKT-3231): mirrors lanes.json agentTurnCaps (test_skill_consistency pins the equality). A Workflow
 // agent() has no turn option, so the cap is a brief rule; an agent with no result is DEAD, retried once, then failed.
 const TURN_CAPS = A.turnCaps || { 'synthesis-writer': 40, 'context-dossier-miner': 80 }
 const capRule = (role) => `\nTURN CAP: at most ${TURN_CAPS[role]} turns. By turn ${TURN_CAPS[role] - 5} stop reading and write your deliverable, then reply via StructuredOutput; a run with no result by the cap is declared dead and discarded.`

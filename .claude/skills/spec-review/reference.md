@@ -298,7 +298,7 @@ Floor, gate and substitute lanes cannot be disabled.
 **Budget dials**: `maxLanes`, `maxCodexLanes` (advisory: the plan warns and the report prints planned vs ran),
 `falsifier` (`all|uncorroborated|critical|off`) and `tokenCeiling`, which is calibrated and ENFORCED.
 
-**Token ceilings (CYN-3219).** Calibrated at about 0.7x the measured means (64.6M critical, 32.3M standard):
+**Token ceilings (TKT-3219).** Calibrated at about 0.7x the measured means (64.6M critical, 32.3M standard):
 critical 45,000,000, standard 22,000,000, light 2,000,000, hotfix 3,000,000. Spend is Claude lane tokens
 (`lane_spend.py`: input + cache + output per `ROLE:` lane, counting only agents whose prompt names this run dir)
 plus the `tokens used` of this run's Codex dispatches. Every gate in `stage.py` re-measures it into
@@ -314,7 +314,7 @@ launched before any spend is known, so the stop governs only the later waves; no
 already running cannot be stopped either: one lane can cross 1.5x on its own, and the synthesis report still runs
 (the review is mandatory). At the stop its brief is lean: envelopes, merged units, verdicts and lane files only.
 
-**Quota stop and dead-agent cap (CYN-3231).** The first session/weekly limit message in any of this run's Claude
+**Quota stop and dead-agent cap (TKT-3231).** The first session/weekly limit message in any of this run's Claude
 agents (a synthetic `rate_limit` assistant message, `quota_hits` in `lane_spend.py`) or a Codex lane graded QUOTA
 sets a sticky `quotaStopped` in `state.json` and `lane-spend.json`; `post-review`, `synth-prep`, `falsify-prep` and
 `falsify-check` then refuse (exit 1, `quotaStopped:true`, one `QUOTA STOP` line) and launch nothing, so a limit is
@@ -326,7 +326,7 @@ agent with no result is DEAD, retried once, then the stage fails (the workflow's
 
 ## Why gate
 
-A pre-flight check (CYN-3239) that runs BEFORE `prepare`, so no review token is spent on a spec that should not be
+A pre-flight check (TKT-3239) that runs BEFORE `prepare`, so no review token is spent on a spec that should not be
 built as written. One Opus 5.5 lane (`why-gate` in `lanes.json` `support`, brief `prompts/why-gate.md`, no fan-out)
 answers six questions: (1) what real trigger or evidence makes this needed now; (2) can the playground (ADR-0036:
 customer config, flows, MCP) or an existing primitive already do it; (3) the smallest version that delivers the
@@ -350,7 +350,7 @@ lists it in `lane-spend.json` and counts it in the tier's `tokenCeiling` account
 
 ## Run costs (what this skill spends)
 
-The measured study (CYN-3219) found Claude lanes carry 99.6% of spec-review tokens and cache reads dominate, so
+The measured study (TKT-3219) found Claude lanes carry 99.6% of spec-review tokens and cache reads dominate, so
 cost follows turns x context. The levers, all in this skill: no LLM agent runs a command (every Bash step is a
 `stage.py` gate the main loop runs); the dossier and decisions miners and the Codex envelope extraction run on
 Codex (`verify` / `luna` / `luna`), with the Claude lane as the fallback only when the Codex lane is DEAD,
@@ -374,11 +374,11 @@ floor domain exists (security or cutover gate fired, the cutover being shared-st
 otherwise run `standard`, where every fired gate still adds its lane. Lanes marked `cynapOnly` (legal-auditor,
 operator-plane-architect) are skipped, with that reason, in any other repo.
 
-**Gate evidence (CYN-3222, founder 2026-10-27).** `run_dir.py plan` rejects a fired gate whose reason quotes no path, file:line, backticked token or snake_case/camelCase identifier (`gate_evidence_errors`). liveSurface fires only for a changed, named runtime behavior of a live system (narrowed by CYN-3219 below); cutover only for a removed/replaced owner with a stated switch-over step. Tier follows the changed surface: "docs only" is never a downgrade for a money, security, tenancy, credential or shared-infrastructure spec (a docs PR specifying a money migration stays on the floor), and a shared reader/writer used by every Lambda or process/sandbox-killing code stays critical (replay cases CYN-3023, CYN-3160).
+**Gate evidence (TKT-3222, founder 2026-10-27).** `run_dir.py plan` rejects a fired gate whose reason quotes no path, file:line, backticked token or snake_case/camelCase identifier (`gate_evidence_errors`). liveSurface fires only for a changed, named runtime behavior of a live system (narrowed by TKT-3219 below); cutover only for a removed/replaced owner with a stated switch-over step. Tier follows the changed surface: "docs only" is never a downgrade for a money, security, tenancy, credential or shared-infrastructure spec (a docs PR specifying a money migration stays on the floor), and a shared reader/writer used by every Lambda or process/sandbox-killing code stays critical (replay cases TKT-3023, TKT-3160).
 
-**Gated ADR and dependency lanes (CYN-3219, founder 2026-11-04).** `adr-auditor` and `dependency-currency` were always-on (critical+standard, dependency-currency also hotfix) and were among the costliest non-falsifier lanes (adr 95M, dependency 134M tokens over 36 reviews; critical reviews averaged 48.5M vs the 45M ceiling). Each now runs at any tier only when its gate fires: `adrTouched` (the spec adds, changes or supersedes an Accepted ADR or platform invariant, or edits a `docs/adr/` file) and `dependencyChange` (the spec adds, upgrades, removes or pins a package, vendor, SDK or runtime version). An unfired gate skips the lane with `gate: <name> not fired` in the plan; a fired gate makes the lane non-droppable and forbids `light`. The ADR hard stop is unchanged once the lane is planned (`founder_approval_needed` without `founder_approval_marker_present`, or a missing envelope, stops the review), so firing `adrTouched` is the main loop's duty whenever an ADR or invariant moves. The dependency lane checks installed vs latest versions, CVE/GHSA advisories joined to CISA KEV with reachability, changelogs since the installed version, current vendor docs via Context7, and workarounds a newer version removes. Falsifier policy and ceilings are unchanged.
+**Gated ADR and dependency lanes (TKT-3219, founder 2026-11-04).** `adr-auditor` and `dependency-currency` were always-on (critical+standard, dependency-currency also hotfix) and were among the costliest non-falsifier lanes (adr 95M, dependency 134M tokens over 36 reviews; critical reviews averaged 48.5M vs the 45M ceiling). Each now runs at any tier only when its gate fires: `adrTouched` (the spec adds, changes or supersedes an Accepted ADR or platform invariant, or edits a `docs/adr/` file) and `dependencyChange` (the spec adds, upgrades, removes or pins a package, vendor, SDK or runtime version). An unfired gate skips the lane with `gate: <name> not fired` in the plan; a fired gate makes the lane non-droppable and forbids `light`. The ADR hard stop is unchanged once the lane is planned (`founder_approval_needed` without `founder_approval_marker_present`, or a missing envelope, stops the review), so firing `adrTouched` is the main loop's duty whenever an ADR or invariant moves. The dependency lane checks installed vs latest versions, CVE/GHSA advisories joined to CISA KEV with reachability, changelogs since the installed version, current vendor docs via Context7, and workarounds a newer version removes. Falsifier policy and ceilings are unchanged.
 
-**Narrowed liveSurface gate (CYN-3219, founder 2026-11-04).** In cynap merging a PR is a prod deploy, so "changes a deployed artifact AND names it" was true of nearly every spec: liveSurface fired in 40 of 40 recent plans, and its two lanes (`live-evidence-auditor`, 163M tokens; `performance-architect`) ran on every review. The gate now fires only when the spec changes RUNTIME BEHAVIOR of a live system: request handlers, dispatch or queues, webhooks, billing or money paths, auth or credentials, data migrations or schema on live stores, deployed infrastructure wiring, or a model/LLM boundary. It does not fire for a spec that only changes tooling, the harness, skills, docs, CI config, dev scripts, lint rules, or config that has no live runtime consumer, even though merging it deploys something. The evidence rule is unchanged: a fired liveSurface reason must quote the runtime surface (a path, file:line or identifier), or `run_dir.py plan` rejects it. Lane membership, ceilings, falsifier policy and the other gates are unchanged.
+**Narrowed liveSurface gate (TKT-3219, founder 2026-11-04).** In cynap merging a PR is a prod deploy, so "changes a deployed artifact AND names it" was true of nearly every spec: liveSurface fired in 40 of 40 recent plans, and its two lanes (`live-evidence-auditor`, 163M tokens; `performance-architect`) ran on every review. The gate now fires only when the spec changes RUNTIME BEHAVIOR of a live system: request handlers, dispatch or queues, webhooks, billing or money paths, auth or credentials, data migrations or schema on live stores, deployed infrastructure wiring, or a model/LLM boundary. It does not fire for a spec that only changes tooling, the harness, skills, docs, CI config, dev scripts, lint rules, or config that has no live runtime consumer, even though merging it deploys something. The evidence rule is unchanged: a fired liveSurface reason must quote the runtime surface (a path, file:line or identifier), or `run_dir.py plan` rejects it. Lane membership, ceilings, falsifier policy and the other gates are unchanged.
 
 **Applied flag.** Each merged unit in `merged.json` carries `applied` (null until the fixing step records it with
 `stage.py mark-applied --ids F-1,F-3 [--status false]`), so value per token is measured, not guessed. The merge

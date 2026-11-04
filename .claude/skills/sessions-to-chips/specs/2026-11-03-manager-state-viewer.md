@@ -96,7 +96,7 @@ beside its row. No `repos` key: one plain Problems row; the paste-ready stub goe
 `gh pr list --repo R --state all --search "T1 OR … OR T6" --limit 100 --json number,title,headRefName,state,isDraft,mergedAt,mergeCommit,additions,deletions,updatedAt`.
 Keep a row only when `\bT\b` matches its title or head branch, and always keep a binding's own
 `publication.pr`. A batch that returns 100 rows is split and re-run, never read as complete. A PR under two
-tickets counts once; a ticket's step is its least-advanced PR's. Measured: a bare search for five cayp
+tickets counts once; a ticket's step is its least-advanced PR's. Measured: a bare search for five acme
 tickets returned 30 PRs, some matching on PR number alone. Files: one
 `gh pr list --repo R --state open --limit 100 --json number,files,additions,deletions` per repo (measured
 2.8 s, 23 PRs, 64.7 KB), and `gh pr view N --json files` once per merged PR, cached forever because a
@@ -121,7 +121,7 @@ were `success` with 25 of 30 steps skipped; the proof-step rule walks past both.
 **Red main.** `red_main_cmd` runs with cwd = the repo's `path` and prints
 `{schema: 1, state: green|red|outage|pending, sha, owners: [{id,title,runtime}], claim}`. The cynap data
 exists (`main-health-state.json`: top-level `owners` is the current episode, `lastRed` the previous), but no
-read-only verb exposes it; an unknown relay verb exits 0 with empty output. CYN-3398 (#5083, open) owes it.
+read-only verb exposes it; an unknown relay verb exits 0 with empty output. TKT-3398 (#5083, open) owes it.
 Until then `red_main_cmd` is `null` and the page shows **main health unavailable**, naming that ticket;
 empty or non-contract stdout reads the same, plus a Problems row. The main-health workflow's conclusion is
 never read: it succeeds after posting red. Red with `owners: []` reads "red, no owner".
@@ -133,7 +133,7 @@ on the index: manifest ownership stays the authority, and missing files read "un
 
 ## Cost and failure
 
-Renders run at every wake across ~10 managers. v1 measured 8.8 s (cayp-cutover) and 5.3 s (apps).
+Renders run at every wake across ~10 managers. v1 measured 8.8 s (acme-cutover) and 5.3 s (apps).
 
 - **Shared repo tier.** Repo-level reads (open-PR files, deploys, red main) are cached once per repo in
   `~/.claude/state/work-state/repo-<owner>__<name>.json` with TTL 120 s, using the existing atomic-rename and
@@ -150,7 +150,7 @@ Renders run at every wake across ~10 managers. v1 measured 8.8 s (cayp-cutover) 
   and sidecar are written by the deadline; Archify and the Chrome reload run after the write.
 - **Size budget.** Page ≤ 200 KB, sidecar ≤ 64 KB. The sidecar is a projection (open PRs and their files,
   counts, source health), never the page payload; past the page budget the renderer drops the oldest
-  History rows and says how many. A test renders cayp-cutover and apps against both budgets. Diagrams are
+  History rows and says how many. A test renders acme-cutover and apps against both budgets. Diagrams are
   never inlined (`archify compare architecture` measured 2,124,003 bytes): they are sibling files, shown in
   an `<iframe src>` with an "open" link.
 - **A missing source never reads as nothing.** Every zone whose source failed shows the reason and the fix
@@ -165,8 +165,8 @@ is closed; every key is optional; an unknown key, a wrong type or bad JSON goes 
 
 ```json
 { "updated_at": "2026-11-03T16:00:00Z",
-  "destination": "CAYP runs on Access v2 with its first workspace head, baked.",
-  "outcomes":   [{ "outcome": "CAYP has its first workspace head", "tickets": ["CYN-3155"] }],
+  "destination": "Acme runs on Access v2 with its first workspace head, baked.",
+  "outcomes":   [{ "outcome": "Acme has its first workspace head", "tickets": ["TKT-3155"] }],
   "needs_you":  [{ "ask": "...", "recommended": "...", "grill": "<grill file or chip>" }],
   "exposure":   [{ "ref": "#5073", "state": "dark", "evidence": "flag X off in prod" }],
   "proof_owed": [{ "claim": "...", "proof": "...", "org": "...", "runner": "...", "verdict": "owed" }],
@@ -187,7 +187,7 @@ row and stays on Now. A `proof_owed` row names its ticket; the derived bake verd
 Problems row, and a pass reads "ticket records pass", never "proven", since no bake artifact is read.
 `date` and `updated_at` are RFC3339; a date-only or future value is a Problems row. `kind` ∈
 `spec|adr|module`; `tier` ∈ `critical|standard|light|none`; `exposure.state` ∈ `dark|live|n/a`; `verdict` ∈
-`owed|pass|fail`. `refs` and `tickets` are lists of ids (`"#5073"`, `"CYN-3256"`). `workstreams` is retired
+`owed|pass|fail`. `refs` and `tickets` are lists of ids (`"#5073"`, `"TKT-3256"`). `workstreams` is retired
 (2026-11-04): it read as session tracking; its findings go to `findings`, its output to `done`, and an old
 block shows under "not migrated" until converted.
 `adopted` names merged PRs that came with tickets this program took over from another program: their delivery
@@ -201,7 +201,7 @@ real-guard test.
 ## Reads as the work
 
 A reader who never saw a session understands the track from the page alone. The bar names the program as its
-manager session is titled, with "[Manager] " and a "(fork)" suffix stripped ("Cynap", "Apps", "CAYP cutover
+manager session is titled, with "[Manager] " and a "(fork)" suffix stripped ("Cynap", "Apps", "Acme cutover
 (Access v2)"), with the map id beside it as a link; the slug never appears as a name. Now and History answer
 in this order, each in plain language:
 
@@ -284,7 +284,7 @@ first carries one of this program's PRs to a surface, a new blocker, a new grill
 time in the program cache; after cache loss the page says "baseline unavailable", never "new". One banner
 reads "Narrative stale: 2 merges and 1 deploy since 15:00Z". Each render prints one compact JSON line on
 stdout, which the manager reads at wake instead of opening the page:
-`{"out":…, "problems":2, "stale":true, "author":["exposure: #5073 deployed, no row", "outcomes: CYN-3256 closed"]}`.
+`{"out":…, "problems":2, "stale":true, "author":["exposure: #5073 deployed, no row", "outcomes: TKT-3256 closed"]}`.
 `author` names the exact keys to edit, at most 5, drawn only from what is unresolved on Now. The manager
 edits only those keys: one small Edit, not a re-read of the program.
 
@@ -319,8 +319,8 @@ held-by rows that name another program's ticket or PR.
   SHA, with no newest-40 cut, so retiring a binding never erases its publication.
 - The lane table and wake, armed and carrier facts move to the collapsed machinery footer. The events
   timeline moves to History.
-- Re-render the 10 existing pages once: apps, cayp-cutover, cayp-data-invoice, cynap-manager-2026-10,
-  harness, marketing, paddle-cayp-legal, repo-hygiene, security-hardening, synthetic-customers. A program
+- Re-render the 10 existing pages once: apps, acme-cutover, acme-data-invoice, cynap-manager-2026-10,
+  harness, marketing, billing-legal, repo-hygiene, security-hardening, synthetic-customers. A program
   without `repos` shows its Problems row; its manager adds the key next wake, or records why it cannot.
 - Update `references/manager-contract.md` (state viewer paragraph) and `SKILL.md` to the v2 keys, the
   `author` line and `<slug>.arch.json`.
@@ -359,8 +359,8 @@ in their "Managers" tab group.
   `state_graph.py` is gone.
 - Both pages carry real authored `done`, `architecture`, `design`, `decisions` and `findings` content and read
   as the work in the order above; `--context` prints a bounded brief for each.
-- `cayp-cutover.state.html` and `apps.state.html` are rendered from real data, each ≤ 200 KB, with a real
-  `<slug>.arch.json` showing a before/after diagram on cayp-cutover, and `index.state.html` lists both.
+- `acme-cutover.state.html` and `apps.state.html` are rendered from real data, each ≤ 200 KB, with a real
+  `<slug>.arch.json` showing a before/after diagram on acme-cutover, and `index.state.html` lists both.
 - Both pages and the index load with no console errors in dark and light themes.
 - Driven in Chrome through `chrome.sh`, on each page: the History tab opens and its search filters; the
   machinery footer expands; after a re-render with a new merge row, the since-you-last-looked strip counts

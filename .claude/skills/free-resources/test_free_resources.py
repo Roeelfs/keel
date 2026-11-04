@@ -35,7 +35,7 @@ _spec.loader.exec_module(fr)
 
 VITEST_CMD = ('timeout --signal=KILL 900 pnpm --filter @cynap/backend '
               'exec vitest run infra/__tests__/')
-VITEST_CHILD = ('node /Users/roeealfasi/code/cynap-monorepo-next/node_modules/'
+VITEST_CHILD = ('node /Users/dev/code/app/node_modules/'
                 'vitest/vitest.mjs run infra/__tests__/')
 
 
@@ -108,7 +108,7 @@ class OrphanReaperSafety(unittest.TestCase):
         """`timeout <n> ...` is a deliberately-bounded job; a daemon is never launched
         this way, so an orphaned one is in-flight work, not a stale server."""
         procs = {1: (0, 'launchd'),
-                 900: (1, 'timeout --signal=KILL 600 node /Users/roee/repo/pnpm-runner.js')}
+                 900: (1, 'timeout --signal=KILL 600 node /Users/dev/repo/pnpm-runner.js')}
         orph, prot = self.classify(procs)
         self.assertEqual(orph, [])
         self.assertEqual(prot[0]['why'], 'timeout-wrapped job')
@@ -116,8 +116,8 @@ class OrphanReaperSafety(unittest.TestCase):
     def test_heavy_op_anywhere_in_the_subtree_vetoes_the_root(self):
         """The veto walks the whole subtree, not just the root command."""
         procs = {1: (0, 'launchd'),
-                 500: (1, 'node /Users/roee/repo/pnpm-exec.js'),   # innocuous root
-                 501: (500, 'node /Users/roee/repo/node_modules/.bin/esbuild --bundle')}
+                 500: (1, 'node /Users/dev/repo/pnpm-exec.js'),   # innocuous root
+                 501: (500, 'node /Users/dev/repo/node_modules/.bin/esbuild --bundle')}
         orph, prot = self.classify(procs)
         self.assertEqual(orph, [])
         self.assertEqual(prot[0]['at'], 501)
@@ -126,7 +126,7 @@ class OrphanReaperSafety(unittest.TestCase):
 
     def test_genuine_orphan_next_dev_is_still_reaped(self):
         procs = {1: (0, 'launchd'),
-                 700: (1, 'node /Users/roee/repo/node_modules/.bin/next dev -p 3000'),
+                 700: (1, 'node /Users/dev/repo/node_modules/.bin/next dev -p 3000'),
                  701: (700, 'next-server (v15.5.19)')}
         orph, prot = self.classify(procs)
         self.assertEqual(orph, [700])
@@ -134,7 +134,7 @@ class OrphanReaperSafety(unittest.TestCase):
 
     def test_genuine_orphan_vite_dev_server_is_still_reaped(self):
         procs = {1: (0, 'launchd'),
-                 710: (1, 'node /Users/roee/repo/node_modules/.bin/vite --host')}
+                 710: (1, 'node /Users/dev/repo/node_modules/.bin/vite --host')}
         orph, prot = self.classify(procs)
         self.assertEqual(orph, [710])
 
