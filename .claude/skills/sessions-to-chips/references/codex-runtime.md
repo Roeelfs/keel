@@ -7,6 +7,10 @@ This skill is symlinked into both `~/.claude/skills/` and `~/.codex/skills/`. De
 
 When hosted by Codex, the following replace the Manager contract's verbs (`manager-contract.md`). Everything else in the contract — program files, membership, collision protocol, lane grading, pre-flight verification — applies unchanged.
 
+**The role load.** There is no `/manager-role` command and no Stop guard here. At the start of every task run
+`python3 -I ~/.claude/skills/sessions-to-chips/scripts/role_brief.py --program <slug>` and do its wake steps;
+it records the load with no session id. Nothing enforces it on this host: the duty is prose here.
+
 ## No automation substitute for continuation
 
 Do not translate Claude `/loop` or `ScheduleWakeup` instructions into Codex heartbeat/cron automations. Scheduling requires an explicit user request for that schedule. “Go”, “finish”, and a program GOAL heading are not such requests. Use an explicitly requested bounded native goal for reachable work, owned-child event waits for internal execution, and a durable resume key at external gates. Do not repeatedly recreate or update finite-count schedules; that resets their limit and makes an unbounded poller.

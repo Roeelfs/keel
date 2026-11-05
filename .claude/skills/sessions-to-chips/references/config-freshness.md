@@ -23,6 +23,11 @@ python3 -I ~/.claude/skills/sessions-to-chips/scripts/config_freshness.py --grep
 `CLAUDE_CONFIG_DIR` (`ps eww <pid>`, 10-22), so a change "made in the other account" is the same
 `~/.claude` and keel files. An account switch swaps the OAuth token, not the hooks.
 
+**A manager's role needs no refresh message.** A change to `role.md` or a rulings ledger moves the computed
+role version; the prompt hook tells every manager on an older load what changed, and the Stop guard holds
+its turn until it runs `/manager-role <slug>` ([`role.md`](role.md)). Never fan a role change out by
+`SendMessage`.
+
 ## Verdicts and the fix for each
 
 | Verdict | Meaning | Fix |

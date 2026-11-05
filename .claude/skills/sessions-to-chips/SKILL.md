@@ -80,17 +80,17 @@ offers). Measured failures (2026-10-14) behind each argument:
 3. Start ONE session titled `[Manager] <goal>` with this prompt, filled in:
 
    ```text
+   /manager-role <slug>
    You are the manager for program "<slug>". GOAL: <outcome>.
-   CONTRACT: ~/.claude/skills/sessions-to-chips/references/manager-contract.md binds you. Read it
-   first, then the reference its triggers name. Your first act is to declare the program's three
-   state files (manifest, events, state) under ~/.claude/orchestrator/programs/.
-   MODEL POLICY: you run sonnet/medium and never write a spec or code yourself; specs and all implementation go to opus or Codex lanes (contract §Model policy).
+   The role that command prints binds you; its depth is
+   ~/.claude/skills/sessions-to-chips/references/manager-contract.md. Your first act is to declare
+   the program's three state files (manifest, events, state) under ~/.claude/orchestrator/programs/.
    STATE: <only facts not in repo law or the ticket: issue refs, branches, PRs, worktrees>.
    START HERE: <pointers: spec, map, tracker issue; never pasted bodies>.
    GATES: <prod mutations, merges, founder decisions the human holds>.
    ```
 
-   Keep it lean (≤~900 chars). The contract carries the rules; never paste them into the prompt.
+   Keep it lean (≤~900 chars). The role carries the rules; never paste them into the prompt.
 
 ## Mode 2 — Resume / mine (one pass; also after an account switch)
 
@@ -243,80 +243,13 @@ python3 -I $SCR/wrapup_status.py --date <YYYY-MM-DD>   # one-shot: which session
 5. After the switch, run Mode 2 from a session on the NEW account. The notes on disk are shared
    by both accounts, but the sessions are not.
 
-## Manager contract — the rules that must fire
+## Manager role — the rules that must fire
 
-Depth and evidence for each rule are in [`references/manager-contract.md`](references/manager-contract.md).
-
-- **Never implement.** Code, installs, review panels and long gates go into a lane or child.
-- **One program, your lanes only.** Filter every machine-wide list to your manifest's membership.
-  First claim wins; transfer, don't grab; a live-vs-live contest goes to the human.
-- **Program state is three bounded files, declared first in either mode,** under `~/.claude/orchestrator/programs/`: a manifest
-  (strict keys, ≤~8 KB, `updated_at` to the second), an append-only `.events.jsonl`, and a
-  `.state.md` with a completion checkpoint and `## AT-WAKE`.
-- **The track's state is its page, and every wake starts from it:** at every wake and session start (new, resumed or forked) run `scripts/render_state.py --program <slug> --context` FIRST and work the map from that brief instead of re-deriving the program; before ending the turn, update the `## VIEW` keys the brief names plus any new `done` / `architecture` / `design` / `decisions` / `findings` line, then re-render with `render_state.py --program <slug>`. The page names the program by its manager session title and reads as the work (done, architecture, design, decisions, then next, holds, proof); sessions and lanes stay in its machinery footer. Every state page shares ONE Chrome tab, the index; never open a page in a tab of its own. You own three inputs: manifest `repos`, the `state-view/2` `## VIEW` block and `<slug>.arch.json`; everything else is derived (manager-contract.md "State page").
-- **Pick the lane runtime by deliverable:** headless lane (`~/.claude/scripts/spawn-lane.sh`) for a
-  branch or PR, `Agent`/`Workflow` for information, a Codex lane for a crisp off-window pass, a child
-  session only when the human must judge. **Probe a headless Claude lane first:**
-  `scripts/lane_probe.sh <model>` (rc 0 ok, 1 refused/capped, 2 no output). A lane can be capped (429)
-  while desktop sessions work, and a dead lane exits 0 with 0 tokens. Rc 1 means use an in-session
-  `Agent` or a desktop session instead. The probe is necessary, not sufficient (2026-10-24: it passed
-  right after a lane died on 429), so re-probe at dispatch and still grade by artifact.
-- **Grade by ARTIFACT, never the completion envelope.** Salvage a dead lane's worktree
-  (`git status --porcelain`) before re-dispatching; a re-dispatch is a continuation, never a replay.
-- **Verify before any routing claim:** branch HEAD, `gh pr view --json mergedAt,state`, the spec
-  file. Merged is not baked. Confirm the deploy SHA is in the environment before a verify lane.
-- **Every dispatch has a wake.** A lane is launched tracked (event-driven: background Bash, `Agent`,
-  `Workflow`, child session) or, where no event can exist, with ONE event-bound `ScheduleWakeup`
-  armed and recorded in the state file; never detached. Audit every unreported lane before ending
-  a turn (manager-contract.md "Every dispatch has a wake").
-- **No scheduled polling.** No heartbeat, `/loop`, cron or re-armed wake unless the user asks for
-  that schedule. An external gate gets a keyed resume artifact and the turn ends.
-- **No stop without an armed wake** — it wins where the bullet above differs: a turn ends WORKING only with ONE event-bound wake armed and recorded in `## AT-WAKE` (429s, caps, CI, "waiting on X" included); only DONE and GRILLING end unarmed (manager-contract.md "No stop without an armed wake"; Stop guard `hooks/manager-arm-guard.sh`).
-- **Overrides first, every tick:** terminal stop (zero further tools), then completion-mode freeze,
-  then an owned child still inside its lease. Only then survey, classify, and dispatch every
-  independent forcing function at once.
-- **One living map per manager.** The program's goal is a Linear `wayfinder:map` issue (manifest `map`);
-  every new piece of work is filed as a child ticket in the turn it is found, before any lane runs;
-  the manager advances the frontier in parallel until the Destination is met; every report opens with
-  the Map line (done/open/blocked, frontier, needed from you). Contract §Every manager owns one living map.
-- **Open decisions get a grill chip.** A manager never leaves a founder decision open: it writes the frontier to `~/.claude/orchestrator/grills/<slug>-<date>.md` and dispatches one `Grill: <program> decisions` chip session to ask it (contract §Open items are grilled), then keeps working.
-  Census and status come only from the tracker snapshot (`linear-map.mjs snapshot`), never from Linear MCP text search (no parent/child/comment reads).
-- **Spec review is mandatory, depth by risk.** Every spec is `/spec-review`ed before its build lane
-  starts; tier (critical|standard|light) follows risk (access/security/architecture/infra = critical),
-  lanes are chosen per spec and configurable. A spec with no review artifact is not buildable
-  (contract §Spec review is mandatory).
-- **Parallel by default.** Dispatch the whole independent set each tick (Codex ≤5, one writer per
-  file set); a blocker blocks only its dependents. Contract §Parallel by default.
-- **Three end states only: DONE, GRILLING, WORKING.** A manager session ends every turn either
-  with no work left (family archived, nothing owed), or having grilled the founder on ALL open
-  decisions in one round (recommended answer first), or actively doing and managing work (test,
-  bake, preview, build, spec, review, or active children and lanes, each with an owner and an
-  artifact). "Parked", "blocked on X", "waiting" and "N items owed" are defects: start the work,
-  grill the decision now, or finish. Contract §Open items.
-- **A founder ask arrives as a ready-to-run kit.** Anything the human must DO (secret, login,
-  step-up, CLI, console click, go-ahead) comes with the exact command in its own fenced `bash`
-  block (secrets by reference, never inline), where and as whom to run it, what success looks like,
-  the one-line reply that resumes you, and what you do next. Steps you can run, you run. One
-  numbered round, most-unblocking first. Contract §Open items.
-- **No open items — grill them.** Decide what is reversible or in-brief yourself; grill founder
-  decisions in your own session, whole frontier, recommended answer first, and keep working while
-  they wait. No state file, note or close-out carries an open-questions list. Contract §Open items.
-- **Finite reviews:** `moderate` ≤2 activations, `critical` ≤5, one changed-seam closure, then stop.
-- **`send_message` stalls an unattended recipient.** Send only from an operator-present turn, by
-  session id, never as the last act of an unattended wake.
-- **Merges and prod need the human's in-session go-ahead** unless project law grants that class.
-- **Keep your family small** at every stopping boundary ([HYGIENE.md](HYGIENE.md);
-  candidates: `scripts/hygiene_candidates.py`, run from the manager itself). In a `[Manager]` session the
-  `manager-hygiene` Stop hook announces each new candidate set. Hygiene is standing: run it when
-  the hook, the founder or another session asks, with no confirmation (HYGIENE.md "Authority").
-  **Backlog first:** before engaging with new work (a catch-up, handoff, new unit), clear every family
-  session idle ≥1 day (HYGIENE.md "Backlog first"); Mode 2's catch-up makes this its first step.
-- **Harness changed? Refresh, don't re-dispatch.** Hooks, permissions and agents reach a running
-  session live; CLAUDE.md, skill bodies already invoked, plugins and the CLI build do not.
-  `scripts/config_freshness.py` names each stale session and its fix (a refresh message naming the
-  files to re-read; restart-class items wait for the next app relaunch). Never kill a CLI process.
-  Detail: [`references/config-freshness.md`](references/config-freshness.md).
-- **Close out** with ONE summary: shipped (PR and `mergedAt`), parked and why, still unproven.
+Every manager loads them from disk with `/manager-role <slug>` (`scripts/role_brief.py`) at every wake,
+session start, compaction and account switch; the Stop guard checks the loaded version. Their one
+owner is [`references/role.md`](references/role.md) (role card and wake steps); never restate them
+here, in a start prompt or in a catch-up message. Depth and evidence:
+[`references/manager-contract.md`](references/manager-contract.md).
 
 ## References
 

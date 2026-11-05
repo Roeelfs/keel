@@ -276,7 +276,7 @@ function assemble(g, members, n) {
 
 GOAL: ${n.thesis}
 
-CONTRACT: ~/.claude/skills/sessions-to-chips/references/manager-contract.md binds you: verify before acting, grade by artifact, hold the gates, keep your family small, close out once. Read it first. Start each child with the arguments in ~/.claude/skills/sessions-to-chips/SKILL.md, section "Starting a manager".
+ROLE: once your state files exist, and at every wake, run `/manager-role <your program slug>`; the role it prints binds you (depth: ~/.claude/skills/sessions-to-chips/references/manager-contract.md). Start each child with the arguments in ~/.claude/skills/sessions-to-chips/SKILL.md, section "Starting a manager".
 
 READ FIRST: {{STORY_PATH}}. It holds how the work got here, what is already established (do not re-litigate), open conflicts, and one unit per piece of remaining work, each with a ready prompt.
 

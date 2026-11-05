@@ -1,8 +1,9 @@
 # Manager contract
 
 Every manager follows this file, whichever mode started it: a `[Manager]` desktop session, or a
-Codex root acting as manager because its host cannot start sessions. SKILL.md carries the
-must-fire subset; this file carries the depth.
+Codex root acting as manager because its host cannot start sessions. [`role.md`](role.md) is the one
+owner of the must-fire rules and the wake loop (loaded with `/manager-role <slug>` at every wake); this
+file carries the depth.
 
 **Session hygiene is part of the job.** At every stopping boundary, run the pass in
 [`../HYGIENE.md`](../HYGIENE.md): archive finished children, fold true duplicates into one survivor
@@ -16,7 +17,7 @@ before any new work (a catch-up, a handoff, a new unit or child) clear every fam
 **Taking a program over (account switch, absorbed manager, catch-up).** The order is fixed:
 (1) backlog first, (2) salvage unpushed work (`git status --porcelain`, one push of your own
 branches; a RUNNING child's worktree is pushed by that child), (3) read the standing rulings in
-[`rulings-ledger.md`](rulings-ledger.md) (every `--context` wake brief prints the new ones; never copy them
+[`rulings-ledger.md`](rulings-ledger.md) (every role load, `/manager-role <slug>`, prints the new ones; never copy them
 into your state file) and repoint anything that contradicts them, (4) fix each numbered sweep gap,
 (5) only then new children. Own your program's absorbed scope: if you absorbed another manager
 (`absorbs` in your manifest), its live children and decisions are yours; acknowledge its
@@ -185,9 +186,8 @@ first; a `wrap_up` with `blocked: true` or an `AskUserQuestion` counts). Write t
 before you end. An approval clicked on such a question IS an in-session merge go only when the question
 names the exact PR and action; a generic Done/Continue button never is (founder 2026-11-04, rulings ledger).
 
-**Every wake prompt starts from the context brief:** "Run `render_state.py --program <slug> --context`,
-work the map from it, do <the on-fire action>, update `## VIEW`, re-render." It points at the state; it
-never re-serializes it (§State page).
+**Every wake prompt is the role load:** `/manager-role <slug> -- on fire: <the one action>` (role.md
+§Wake steps). It points at the state; it never re-serializes it (§State page).
 
 **Waiting on another session is a message, not a timer (founder 2026-11-04).** A wake that only re-checks
 what another session holds leaves both idle. In the same turn you find the dependency, `SendMessage` its
@@ -261,6 +261,11 @@ SHADOW (`would_block:<flag>` is logged, nothing blocks on it, whatever `MANAGER_
 says; `off` skips the step); a timeout or error logs `flags_skipped:<why>` and is counted (fail
 open). Decisions log to
 `~/.claude/analytics/manager-arm-guard.jsonl`; kill switch `MANAGER_ARM_GUARD=0`.
+**Role check (enforced), before the arm check:** a manager whose `<slug>.role.json` is missing, names an older
+role version, was written by another session, or predates the session's last compaction is blocked once per
+turn until it runs `/manager-role <slug>` ([`role.md`](role.md)); it has its own once-per-turn stamp and a
+kill-switch file. **Page check (shadow):** a turn that changed `<slug>.state.md` while the page stayed older logs
+`would_block:page_not_rendered`; a touch-file switches it to blocking.
 
 ## Owned child continuation invariant
 
@@ -433,19 +438,12 @@ Never open a state page in its own tab. The render prints one stdout line:
 `{"out", "problems", "stale", "author": [...], "chrome": {...}}`. `author` names the exact VIEW keys to edit
 (at most 5).
 
-**Every wake and every session start runs from the context brief.** `render_state.py --program <slug> --context`
-prints the same payload as a plain-text brief of about 60 lines: destination, what was done recently,
-architecture and design changes, decisions in force, the next outcomes on the map, what holds them, the proof
-owed, each open PR's merge readiness (a draft reads "DRAFT, not ready"; a reason not derived this tick reads
-"merge state unknown"), and the keys to update. It writes no page and has no second source. The loop is:
-1. Read the brief first, in place of re-deriving the program from transcripts, events or the tracker.
-   Then run the consolidation step ([consolidation.md](consolidation.md)): family worktrees pushed or
-   reasoned, memory links resolving, inherited commit claims checked with git/gh, recorded in the state file.
-2. Work the map from it: the next outcome, what holds it, the proof owed.
-3. Before ending the turn, update `## VIEW` with what the turn changed (the keys the brief's last lines name,
-   plus any new `done`, `architecture`, `design`, `decisions` or `findings` line) and set `updated_at`.
-4. Re-render with `render_state.py --program <slug>`.
-A new, resumed or forked manager session gets its state the same way: step 1 is the brief. The `## AT-WAKE`
+**The context brief.** `render_state.py --program <slug> --context` prints the same payload as a plain-text
+brief of about 60 lines: destination, what was done recently, architecture and design changes, decisions in
+force, the next outcomes on the map, what holds them, the proof owed, each open PR's merge readiness (a draft
+reads "DRAFT, not ready"; a reason not derived this tick reads "merge state unknown"), and the keys to update.
+It writes no page and has no second source; the role load (`/manager-role <slug>`) embeds it. The wake loop
+that reads it, updates `## VIEW` and re-renders is owned by [`role.md`](role.md) §Wake steps. The `## AT-WAKE`
 facts the Stop guard reads (`Status:`, `Wake:`, `Hold:`, `Mode:`) are unchanged and still required.
 
 You author only judgment. PRs, merges, deploys per surface, main health, bakes, blockers and file overlap are

@@ -28,5 +28,6 @@ Write {{OUT}} (≤4 KB): only STALE and DROPPED rows with owner program and the 
 PRESENT/STALE/DROPPED count. Own scratch subdirectory only. Return the count line and the top 3.
 ```
 
-Then fold each row into the owning manager's catch-up as a numbered finding, and every cross-cutting
-ruling into every catch-up (the "standing rulings" line in CATCHUP_MESSAGE.md).
+Then fold each row into the owning manager's catch-up as a numbered finding, and append every
+cross-cutting ruling to the overlay rulings ledger, never to a message: every manager's role load
+(`/manager-role <slug>`) prints it.
