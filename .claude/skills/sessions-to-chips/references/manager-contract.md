@@ -60,7 +60,7 @@ use a worker.
 ## Model policy (founder, 2026-11-01)
 
 **Managers coordinate on Sonnet 5.5; specs and all implementation are written only by Opus 5.5
-lanes or Codex lanes; implementation runs through Codex wherever a lane qualifies.** Sonnet and
+lanes or Codex lanes; which runtime an implementation lane gets is §Lane runtimes.** Sonnet and
 haiku keep mechanical work only: mining, census, verification, grading. This section is the one
 owner of who may author what; `../prompts/model-routing.md` carries the per-lane parameters.
 
@@ -69,7 +69,7 @@ owner of who may author what; `../prompts/model-routing.md` carries the per-lane
 | Manager (Claude `[Manager]`) | `start_session` `model: sonnet`, `effort: medium` | read, probe, dispatch, grade, integrate (push a graded lane branch, merge on the go-ahead), state files, tracker | write spec prose or a code diff; run review panels |
 | Manager (Codex root) | gate class `standard` | the same as above | the same as above |
 | Spec author (spec, design, proof ledger, ADR) | Claude `opus` lane, or a Codex lane through the gate | write and revise the spec from review findings | — |
-| Implementer (code, tests, migrations, config, review fixes) | Codex headless lane first whenever it qualifies (`spawn-lane.sh --runtime codex`; `codex-headroom.sh` picks the model and always dispatches, no fan-out cap, the quota wall is the only limit); Claude `opus` lane where Codex does not fit (Lane runtimes Q5) | commit diffs in its worktree | push without grading |
+| Implementer (code, tests, migrations, config, review fixes) | per §Lane runtimes: a headless Codex lane (`spawn-lane.sh`, Codex by default), or a Claude `opus` lane with a stated reason (Q5) | commit diffs in its worktree | push without grading |
 | Mechanical (mining, census, extraction, verification runs, grading against a checklist, procedural worker) | `haiku` / `sonnet`, Codex `mining` | produce reports, verdicts, receipts | author a spec or a diff |
 | Reviewer / judge | `opus` or Codex `astra`/`sol` for deep, security and final-gate review; `sonnet` for topical or coverage review | write a review artifact | edit the spec or diff it reviews (findings go back to the author lane) |
 
@@ -518,8 +518,11 @@ turn (nothing to diff). **Cache-diff:** if the survey matches the state file, re
 ## Lane runtimes — pick by deliverable, then by human need
 
 A lane goes interactive **only when it needs the human**. Everything else runs prompt-free.
-**Codex is the default runtime for every lane that qualifies** (founder, 2026-10-22): Claude
-time is the scarce pool. Pick the runtime by walking these questions in order; the first "yes" wins.
+**Codex is the default; the dispatch gate enforces it.** An opus implementation lane sent to Claude
+needs a `Codex-no: <reason>` line (Agent/Workflow, `codex-first-gate` hook) or
+`--runtime claude --claude-reason "<reason>"` (`spawn-lane.sh`); the reason names the offload test
+that fails. Claude time is the scarce pool. Pick the runtime by walking these questions in order;
+the first "yes" wins.
 
 **Security work is pinned to the top tier, whatever runtime the tree picks.** CVE/advisory
 triage, a security patch lane, its reachability or exposure check, security review and
@@ -542,13 +545,14 @@ Never sonnet, haiku, luna or sol for these, and never a cheaper fallback when th
    extraction; sol for review, research and falsifiers; astra only for one final-gate judgment
    per spec review. A multi-angle fan-out with cross-verification → `Workflow` instead.
 4. **Is the deliverable a commit/branch in ONE worktree, from a written spec or mission?** →
-   **headless Codex lane**: `spawn-lane.sh --runtime codex --class <class> --cwd <worktree>`.
+   **headless Codex lane**: `spawn-lane.sh --class <class> --cwd <worktree>` (Codex is the default runtime).
    It commits, never pushes; you grade the diff, run the test gate it cannot run (a Codex lane
    cannot run vitest here: give it typecheck plus a baseline/apply check and run the suite in CI
    order yourself), then push once.
 5. **Shippable, but Codex does not fit?** It needs a static-credential MCP, network or push,
    the live test loop inside the lane, repo hooks that write `$HOME`, or a lane came back
-   BLOCKED-ON-QUOTA → **headless Claude lane**: `spawn-lane.sh --model opus` for a spec or
+   BLOCKED-ON-QUOTA → **headless Claude lane**: `spawn-lane.sh --runtime claude --model opus
+   --claude-reason "<which test fails>"` (a `Role: spec` mission needs no reason) for a spec or
    implementation lane (§Model policy); `sonnet` only for a mechanical lane. An implementation
    lane also passes `--class implementation`, so committing nothing exits 3 instead of reading as done.
    Run `scripts/lane_probe.sh <model>` first: rc 1 (refused/capped) → in-session `Agent` or a desktop
@@ -583,7 +587,7 @@ subagent that only shells out to Codex; that charges the window you are sparing.
 
 ### Which runtime a SHIPPABLE lane gets
 
-The headless row takes `--runtime codex --class <task-class>` (default `standard`). It consults
+The headless row runs Codex by default and takes `--class <task-class>` (default `standard`). It consults
 the central headroom gate even with an explicit `--model` override, and applies the class effort.
 Claude leads user interaction, task acceptance, and integration, while independent bounded Codex
 lanes run through harness-tracked background Bash. Codex is a separate billing pool and Claude time
@@ -902,7 +906,7 @@ for, polls or checks a deploy. `bake: none:docs-only` is automatic only under th
 (`work_state.py bake-exempt`); any other `none` needs a reason.
 
 **Bake carriers are pre-authorized (founder, 2026-11-03).** At merge the manager starts the bake
-carrier without asking: a headless sonnet/medium lane (`spawn-lane.sh`), which needs no click; a
+carrier without asking: a headless sonnet/medium lane (`spawn-lane.sh --runtime claude --model sonnet`), which needs no click; a
 `start_session` chip only on an operator-present turn when the bake needs an interactive surface
 (recorded as a `card` carrier until its session id is bound). Scope: read-only probes plus drives on
 the project's test org, no merges, no prod writes, human-gated steps as kits. The verdict is a comment

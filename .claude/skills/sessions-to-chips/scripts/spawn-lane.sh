@@ -6,15 +6,25 @@
 #
 # Usage:
 #   spawn-lane.sh --mission <file|-> [--cwd <worktree>] [--worktree <name>]
-#                 [--runtime claude|codex] [--model <alias>] [--effort low|medium|high|xhigh|max] [--class <task-class>] [--mode <permission-mode>]
+#                 [--runtime codex|claude] [--claude-reason <text>] [--model <alias>] [--effort low|medium|high|xhigh|max] [--class <task-class>] [--mode <permission-mode>]
 #                 [--mcp-config <file>] [--ticket <id>]
 #                 [--max-turns <n>] [--max-budget-usd <x>] [--proof <command> <args...>]
 # --proof must be last; argv runs directly, without shell parsing. Use sh -c explicitly
 # for shell syntax. Proof rc 0 passes, 75 defers (launcher rc 75), other failures exit 4.
 # Heavy commands must name the project's heavy-lock wrapper in this argv.
 #
-#   --runtime codex   Spawn the lane on Codex instead of Claude. Separate billing pool.
-#                     Defaults to claude, so every existing call site is unchanged.
+#   --runtime codex   The DEFAULT. Codex is a separate billing pool and Claude time is the scarce
+#                     one, so a lane goes to Codex unless the caller says why it cannot.
+#   --runtime claude  Run the lane on Claude. An opus lane (any lane but `Role: spec` in the mission)
+#                     must also pass --claude-reason "<which offload test fails and why>" (10+
+#                     chars): not self-contained, not a document or one-worktree deliverable, or it
+#                     edits harness state. The reason lands in the lane row. A quota wall is never a
+#                     reason. sonnet/haiku lanes need no reason. Kill switch:
+#                     ~/.claude/run/codex-first-gate.off (lifts the reason requirement only).
+#   No --runtime:     --model sonnet|haiku keeps Claude (mechanical lane); --model opus means Claude
+#                     and needs --claude-reason; no model means Codex. A Claude-only option
+#                     (--worktree, --mode, --mcp-config, --max-turns, --max-budget-usd) with no
+#                     --runtime and no model is refused: say which runtime you mean.
 #
 # WHY A CODEX LANE COULD NOT SHIP UNTIL NOW, and what changed (probed 2026-08-24):
 #   The Codex-first rule kept failing its metric because no Codex route could COMMIT, so
@@ -61,7 +71,7 @@ LANE_SCRIPT_DIR="$(lane_script_dir)"
 
 MISSION_SRC="" ; WORKTREE="" ; MODEL="" ; MODE="bypassPermissions" ; LANE_CWD="" ; MCP_CFG="" ; LANE_EFFORT="medium"
 PROOF=() ; TICKET="" ; MAX_TURNS="" ; MAX_BUDGET=""
-RUNTIME="claude" ; ALLOW_NETWORK=0 ; CLASS="standard" ; CLASS_SET=0
+RUNTIME="" ; CLAUDE_REASON="" ; ALLOW_NETWORK=0 ; CLASS="standard" ; CLASS_SET=0
 while [ $# -gt 0 ]; do
   case "$1" in
     # --proof consumes the remaining argv, without eval; put launcher options first.
@@ -75,6 +85,7 @@ while [ $# -gt 0 ]; do
     --model)      MODEL="$2"; shift 2 ;;
     --effort)     LANE_EFFORT="$2"; shift 2 ;;
     --runtime)    RUNTIME="$2"; shift 2 ;;
+    --claude-reason) CLAUDE_REASON="$2"; shift 2 ;;
     --class)      CLASS="$2"; CLASS_SET=1; shift 2 ;;
     --allow-network) ALLOW_NETWORK=1; shift 1 ;;
     --mode)       MODE="$2"; shift 2 ;;
@@ -84,16 +95,56 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$MISSION_SRC" ] || { echo "spawn-lane.sh: --mission <file|-> required" >&2; exit 2; }
+[ -n "$LANE_CWD" ] && cd "$LANE_CWD"
+
+if [ "$MISSION_SRC" = "-" ]; then MISSION="$(cat)"; else MISSION="$(cat "$MISSION_SRC")"; fi
+[ -n "$MISSION" ] || { echo "spawn-lane.sh: empty mission" >&2; exit 2; }
+
+# ---- runtime: Codex unless the caller says why not (codex-first gate) ---------------------
+# The Agent/Workflow surfaces are gated by the codex-first-gate hook; this launcher is the one
+# owner of the same rule for headless lanes, so it holds in a Codex session or a plain shell too.
+CODEX_INSTEAD="spawn-lane.sh --mission <file> --cwd <worktree> --class implementation   (Codex; create the worktree first)"
+MODEL_L="$(printf '%s' "$MODEL" | tr 'A-Z' 'a-z')"
+DEEP=0
+case "$MODEL_L" in opus|fable|claude-opus*|claude-fable*) DEEP=1 ;; esac
+if [ -z "$RUNTIME" ]; then
+  case "$MODEL_L" in
+    sonnet|haiku|claude-sonnet*|claude-haiku*|opus|fable|claude-opus*|claude-fable*) RUNTIME=claude ;;
+    "")
+      CLAUDE_ONLY=""
+      [ -n "$WORKTREE" ] && CLAUDE_ONLY="$CLAUDE_ONLY --worktree"
+      [ "$MODE" != bypassPermissions ] && CLAUDE_ONLY="$CLAUDE_ONLY --mode"
+      [ -n "$MCP_CFG" ] && CLAUDE_ONLY="$CLAUDE_ONLY --mcp-config"
+      [ -n "$MAX_TURNS" ] && CLAUDE_ONLY="$CLAUDE_ONLY --max-turns"
+      [ -n "$MAX_BUDGET" ] && CLAUDE_ONLY="$CLAUDE_ONLY --max-budget-usd"
+      if [ -n "$CLAUDE_ONLY" ]; then
+        echo "spawn-lane.sh: the runtime defaults to codex, and${CLAUDE_ONLY} is claude-only. Codex: drop it (create the worktree first, pass --cwd). Claude: pass --runtime claude (--model opus also needs --claude-reason)." >&2
+        exit 2
+      fi
+      RUNTIME=codex ;;
+    *) RUNTIME=codex ;;
+  esac
+fi
 case "$RUNTIME" in
   claude)
     case "$CLASS" in standard|research|implementation) ;;
       *) echo "spawn-lane.sh: claude --class must be standard|research|implementation" >&2; exit 2 ;;
     esac
-    : "${MODEL:=sonnet}" ;;
-  codex) : ;;
+    : "${MODEL:=sonnet}"
+    if [ "$DEEP" = 1 ] && [ ! -e "$HOME/.claude/run/codex-first-gate.off" ] \
+       && ! printf '%s' "$MISSION" | grep -qiE 'Role:[[:space:]]*spec([^A-Za-z]|$)'; then
+      if [ "${#CLAUDE_REASON}" -lt 10 ]; then
+        echo "spawn-lane.sh: BLOCKED (codex-first gate): an opus lane on Claude needs --claude-reason \"<which offload test fails and why>\" (10+ chars): not self-contained, not a document or one-worktree deliverable, or it edits harness state. A quota wall is never a reason. Run it on Codex instead:" >&2
+        echo "  $CODEX_INSTEAD" >&2
+        echo "  ~/.claude/scripts/codex-dispatch.sh standard <promptfile> <outfile> [workdir]   (document or report)" >&2
+        exit 2
+      fi
+    fi
+    [ -n "$CLAUDE_REASON" ] && echo "spawn-lane.sh: claude lane, Codex-no: $CLAUDE_REASON" >&2 ;;
+  codex)
+    [ -n "$CLAUDE_REASON" ] && { echo "spawn-lane.sh: --claude-reason is claude-only; this lane runs on codex" >&2; exit 2; } ;;
   *) echo "spawn-lane.sh: --runtime must be claude|codex (got '$RUNTIME')" >&2; exit 2 ;;
 esac
-[ -n "$LANE_CWD" ] && cd "$LANE_CWD"
 
 # Snapshot every existing worktree before dispatch. The guard resolves a newly created
 # lane worktree against its own initial HEAD, never the launching checkout's HEAD.
@@ -124,11 +175,10 @@ record_lane_row() {
   [ -n "${CLAUDE_SESSION_ID:-}" ] || return 0
   python3 -I "$LANE_SCRIPT_DIR/work_state.py" lane-row --lane "$1" --parent "$CLAUDE_SESSION_ID" \
     --runtime "$2" --model "$MODEL" --pid "$$" --outfile "${3:-}" --worktree "${WORKTREE:-$(pwd -P)}" \
+    --claude-reason "$CLAUDE_REASON" \
     >/dev/null 2>&1 || true
 }
 
-if [ "$MISSION_SRC" = "-" ]; then MISSION="$(cat)"; else MISSION="$(cat "$MISSION_SRC")"; fi
-[ -n "$MISSION" ] || { echo "spawn-lane.sh: empty mission" >&2; exit 2; }
 
 # Repo-supplied hook: may export LANE_MCP_CONFIG (and any lane-only env).
 LANE_HOOK="${LANE_CWD:-$PWD}/.claude/lane-env.sh"

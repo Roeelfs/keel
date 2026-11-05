@@ -62,8 +62,8 @@ The Codex column names the **class** to pass to `codex-headroom.sh --route <clas
 |---|---|---|
 | Manager | `start_session` (`use_worktree: true`, `context: "fresh"`) | `model: "sonnet"`, `effort: "medium"` |
 | Spec or implementation child the human steers | `start_session` | `model: "opus"`, `effort: "medium"` (more only with a stated reason) |
-| Unattended spec or implementation lane, Codex (default for implementation) | `spawn-lane.sh --runtime codex --class standard --cwd <worktree>`, or `codex-dispatch.sh <class> …` for a spec document; both ask `~/.claude/scripts/codex-headroom.sh` | the gate's `--route <class>` |
-| Unattended spec or implementation lane, Claude (Codex does not fit) | `spawn-lane.sh --model opus` | opus, medium |
+| Unattended spec or implementation lane, Codex (default for implementation) | `spawn-lane.sh --class standard --cwd <worktree>` (Codex by default), or `codex-dispatch.sh <class> …` for a spec document; both ask `~/.claude/scripts/codex-headroom.sh` | the gate's `--route <class>` |
+| Unattended spec or implementation lane, Claude (Codex does not fit) | `spawn-lane.sh --runtime claude --model opus --claude-reason "<why>"` | opus, medium |
 | Mechanical lane or child (mining, census, verification, grading) | `start_session`, `spawn-lane.sh` or `Agent` | `sonnet`/`haiku`, Codex `mining` |
 
 Grade every lane by its artifact, never its exit code: the spec file or commits exist, answer the mission, and name an opus or Codex author.

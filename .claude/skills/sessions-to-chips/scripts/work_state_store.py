@@ -422,11 +422,15 @@ def pid_start(pid):
     return " ".join(out.split())
 
 
-def append_lane_row(lane, parent, runtime, model, pid, outfile, worktree, path=None, now=None):
-    """The ONE lane-row writer (spawn-lane.sh and codex-dispatch.sh call `work_state.py lane-row`)."""
+def append_lane_row(lane, parent, runtime, model, pid, outfile, worktree, path=None, now=None,
+                    claude_reason=""):
+    """The ONE lane-row writer (spawn-lane.sh and codex-dispatch.sh call `work_state.py lane-row`).
+    A Claude lane's `--claude-reason` (why it is not on Codex) is kept as `claude_reason`."""
     row = {"lane": lane, "parent": parent, "runtime": runtime, "model": model, "pid": int(pid),
            "pid_start": pid_start(pid), "outfile": outfile or "", "worktree": worktree or "",
            "ts": now_iso(now)}
+    if claude_reason:
+        row["claude_reason"] = claude_reason
     path = path or LANE_ROWS
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "a") as fh:

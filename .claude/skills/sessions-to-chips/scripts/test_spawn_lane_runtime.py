@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Behavioral tests for `spawn-lane.sh --runtime codex`.
+"""Behavioral tests for `spawn-lane.sh` runtimes (Codex by default) and the codex-first gate.
 
 Not phrase-matching: a stub `codex` earlier on PATH records the real argv, so these
 assert the command the script actually builds."""
@@ -73,9 +73,69 @@ class RuntimeTests(unittest.TestCase):
                 return a.split("=", 1)[1]
         return ""
 
-    def test_default_runtime_is_still_claude(self):
-        # Every existing call site must be unchanged by this feature.
+    def test_default_runtime_is_codex(self):
+        # Codex-first: a lane with no runtime and no model goes to Codex.
         result, argv = self.spawn(self.base)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("workspace-write", argv)
+
+    def test_no_runtime_with_a_mechanical_model_keeps_claude(self):
+        for model in ("sonnet", "haiku"):
+            with self.subTest(model=model):
+                result, argv = self.spawn(self.base, "--model", model)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(argv[argv.index("--model") + 1], model)
+                self.assertIn("-p", argv)
+
+    def test_opus_on_claude_needs_a_reason(self):
+        for extra in (("--model", "opus"), ("--runtime", "claude", "--model", "opus"),
+                      ("--runtime", "claude", "--model", "claude-opus-5-5"),
+                      ("--runtime", "claude", "--model", "opus", "--claude-reason", "short")):
+            with self.subTest(extra=extra):
+                r, argv = self.spawn(self.base, *extra)
+                self.assertEqual(r.returncode, 2)
+                self.assertEqual(argv, [])
+                self.assertIn("--claude-reason", r.stderr)
+                self.assertIn("codex-dispatch.sh standard <promptfile> <outfile> [workdir]", r.stderr)
+
+    def test_opus_with_a_reason_runs_on_claude_and_records_it(self):
+        rows_path = self.home / ".claude/state/lane-parents.jsonl"
+        self.run_env = {"CLAUDE_SESSION_ID": "mgr-cli-2"}
+        reason = "edits harness hooks a cold Codex lane cannot reach"
+        r, argv = self.spawn(self.base, "--runtime", "claude", "--model", "opus", "--claude-reason", reason)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(argv[argv.index("--model") + 1], "opus")
+        self.assertIn("Codex-no: " + reason, r.stderr)
+        row = json.loads(rows_path.read_text().splitlines()[-1])
+        self.assertEqual((row["runtime"], row["claude_reason"]), ("claude", reason))
+
+    def test_a_spec_mission_is_not_gated(self):
+        self.mission.write_text("Role: spec\nWrite the spec.")
+        r, argv = self.spawn(self.base, "--runtime", "claude", "--model", "opus")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("-p", argv)
+
+    def test_kill_switch_lifts_the_reason_requirement(self):
+        (self.home / ".claude/run").mkdir(parents=True)
+        (self.home / ".claude/run/codex-first-gate.off").write_text("")
+        r, _ = self.spawn(self.base, "--runtime", "claude", "--model", "opus")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_claude_reason_is_refused_on_codex(self):
+        r, argv = self.spawn(self.base, "--claude-reason", "some long enough reason")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("claude-only", r.stderr)
+
+    def test_a_claude_only_option_without_runtime_is_refused(self):
+        for extra in (("--worktree", "x"), ("--max-turns", "3"), ("--mode", "acceptEdits")):
+            with self.subTest(extra=extra):
+                r, argv = self.spawn(self.base, *extra)
+                self.assertEqual(r.returncode, 2)
+                self.assertEqual(argv, [])
+                self.assertIn("--runtime claude", r.stderr)
+
+    def test_explicit_claude_runtime_builds_the_claude_argv(self):
+        result, argv = self.spawn(self.base, "--runtime", "claude")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("-p", argv)
         self.assertIn("--output-format", argv)
@@ -85,7 +145,7 @@ class RuntimeTests(unittest.TestCase):
     def test_claude_lane_pins_fork_off_and_carries_the_headless_marker(self):
         # Since 2.1.302 `-p` forks subagents by default and a fork bypasses the Model-why
         # gate; the marker is what makes serialize-heavy-ops.py keep its deny for lanes.
-        self.spawn(self.base)
+        self.spawn(self.base, "--runtime", "claude")
         seen = dict(l.split("=", 1) for l in (self.root / "env.txt").read_text().splitlines())
         self.assertEqual(seen["FORK"], "0")
         self.assertEqual(seen["HEADLESS"], "1")
@@ -95,7 +155,7 @@ class RuntimeTests(unittest.TestCase):
         # row with only lane/parent/ts (the legacy shape) is unevaluable.
         rows_path = self.home / ".claude/state/lane-parents.jsonl"
         self.run_env = {"CLAUDE_SESSION_ID": "mgr-cli-1", "LANE_RECORD_OUTFILE": str(self.root / "lane.out")}
-        self.spawn(self.base)
+        self.spawn(self.base, "--runtime", "claude")
         self.spawn(self.base, "--runtime", "codex")
         rows = [json.loads(x) for x in rows_path.read_text().splitlines()]
         self.assertEqual([r["runtime"] for r in rows], ["claude", "codex"])
@@ -114,7 +174,7 @@ class RuntimeTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.run_env = {"STUB_RC": "1", "STUB_ENVELOPE": json.dumps(
                     {"type": "result", "subtype": "success", "is_error": True, "result": text})}
-                r, _ = self.spawn(self.base)
+                r, _ = self.spawn(self.base, "--runtime", "claude")
                 self.assertEqual(r.returncode, 3, r.stderr)
                 self.assertIn("claude /login", r.stderr)
                 self.assertNotIn(text, r.stdout)
@@ -125,7 +185,7 @@ class RuntimeTests(unittest.TestCase):
         for rc in ("0", "1"):
             with self.subTest(rc=rc):
                 self.run_env = {"STUB_RC": rc, "STUB_ENVELOPE": env}
-                r, _ = self.spawn(self.base)
+                r, _ = self.spawn(self.base, "--runtime", "claude")
                 self.assertEqual(r.returncode, 1, r.stderr)
                 self.assertEqual(r.stdout, env)
 
@@ -255,7 +315,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(argv, [])
 
     def test_claude_rejects_unsupported_class(self):
-        r, argv = self.spawn(self.base, "--class", "security")
+        r, argv = self.spawn(self.base, "--runtime", "claude", "--class", "security")
         self.assertEqual(r.returncode, 2)
         self.assertEqual(argv, [])
 
