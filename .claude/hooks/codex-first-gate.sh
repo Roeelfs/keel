@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # codex-first-gate.sh — PreToolUse (Agent|Task|Workflow). Shim only; logic lives in
 # codex-first-gate.py (an embedded `python3 -c` block is silently darkened by one apostrophe).
-# See that file's docstring for what is gated, the `Codex-no:` escape and the kill switch.
+# See that file's docstring for what is gated, the `Native-why:` escape and the kill switch.
 # FAILS OPEN: a missing .py or any python error lets the dispatch through.
 set -uo pipefail
 py="$(dirname "${BASH_SOURCE[0]}")/codex-first-gate.py"

@@ -39,11 +39,13 @@ class GateTests(unittest.TestCase):
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertIn("codex-dispatch.sh standard <promptfile> <outfile> [workdir]",
                       out["permissionDecisionReason"])
-        self.assertIn("Codex-no:", out["permissionDecisionReason"])
+        self.assertIn("Native-why:", out["permissionDecisionReason"])
 
     def test_opus_implementation_without_reason_is_denied(self):
         self.assertDenied(self.run_hook("Agent", {"prompt": "Role: implementation\nFix it.", "model": "opus"}))
         self.assertEqual(self.log_rows()[0]["verdict"], "deny")
+        self.assertIn("spawn-lane.sh --mission <promptfile> --cwd <worktree> --class implementation",
+                      self.run_hook("Agent", {"prompt": "Build it."})["permissionDecisionReason"])
 
     def test_unset_model_inherits_opus_and_is_gated(self):
         self.assertDenied(self.run_hook("Agent", {"prompt": "Role: implementation. Fix it."}))
@@ -52,29 +54,67 @@ class GateTests(unittest.TestCase):
         self.assertDenied(self.run_hook("Agent", {"prompt": "Role: implementation", "subagent_type": "architect"}))
 
     def test_reason_line_allows_and_is_logged(self):
-        out = self.run_hook("Agent", {"prompt": "Role: implementation\nCodex-no: edits harness hooks under the home dir",
+        out = self.run_hook("Agent", {"prompt": "Role: implementation\nNative-why: edits harness hooks under the home dir",
                                       "model": "opus"})
         self.assertIsNone(out)
         row = self.log_rows()[0]
         self.assertEqual(row["verdict"], "allow")
-        self.assertIn("harness hooks", row["reason"])
+        self.assertIn("harness hooks", row["native_why"])
 
     def test_short_reason_does_not_count(self):
-        self.assertDenied(self.run_hook("Agent", {"prompt": "Role: implementation\nCodex-no: no", "model": "opus"}))
+        self.assertDenied(self.run_hook("Agent", {"prompt": "Role: implementation\nNative-why: no", "model": "opus"}))
 
-    def test_mechanical_and_spec_lanes_pass_silently(self):
+    def test_mechanical_and_spec_lanes_pass_and_are_logged(self):
         cases = [
             {"prompt": "Role: implementation", "model": "sonnet"},
             {"prompt": "Role: implementation", "model": "haiku"},
             {"prompt": "Role: implementation", "subagent_type": "executor"},
             {"prompt": "Role: spec\nWrite the spec.", "model": "opus"},
-            {"prompt": "Model-why: deep architecture judgment needed", "model": "opus"},
-            {"prompt": "Count the files."},
         ]
         for ti in cases:
             with self.subTest(ti=ti):
                 self.assertIsNone(self.run_hook("Agent", ti))
+        self.assertTrue(all(r["dispatch_runtime"] == "native" for r in self.log_rows()))
+
+    def test_plain_native_lanes_require_a_reason(self):
+        for tool in ("Agent", "Task"):
+            with self.subTest(tool=tool):
+                self.assertDenied(self.run_hook(tool, {"prompt": "Review the repository and return findings."}))
+        self.assertEqual(self.log_rows()[0]["dispatch_runtime"], "native")
+
+    def test_large_document_pass_overrides_cheap_and_spec_exemptions(self):
+        for prompt in ("Role: spec\nResearch the entire repository and write a report.",
+                       "Read-only review of all modules; return findings.md.",
+                       "Research the architecture and produce a report."):
+            for model in ("sonnet", "haiku", "opus"):
+                with self.subTest(prompt=prompt, model=model):
+                    self.assertDenied(self.run_hook("Agent", {"prompt": prompt, "model": model}))
+
+    def test_reason_is_one_line_and_counts_trimmed_characters(self):
+        for reason in ("Native-why:          x", "Native-why: short\nmore text here",
+                       "Codex-no: needs harness state to finish", "Mention Native-why: needs harness state"):
+            with self.subTest(reason=reason):
+                self.assertDenied(self.run_hook("Agent", {"prompt": "Review everything.\n" + reason}))
+        for name in ("critic", "verifier", "security-reviewer"):
+            (self.home / ".claude/agents" / (name + ".md")).write_text("---\nmodel: sonnet\n---\n")
+            self.assertDenied(self.run_hook("Agent", {"subagent_type": name, "prompt": "Review everything."}))
+            self.assertIsNone(self.run_hook("Agent", {"subagent_type": name,
+                "prompt": "Review everything.\nNative-why: needs MCP servers from this harness"}))
+        self.assertIn("MCP servers", self.log_rows()[-1]["native_why"])
+
+    def test_workflow_without_agents_is_not_gated(self):
+        self.assertIsNone(self.run_hook("Workflow", {"script": "return 'Role: implementation'"}))
         self.assertEqual(self.log_rows(), [])
+
+    def test_workflow_document_pass_and_mixed_models(self):
+        self.assertDenied(self.run_hook("Workflow", {"script":
+            "await agent('Research all modules and write a report', {model: 'sonnet'})"}))
+        self.assertDenied(self.run_hook("Workflow", {"script":
+            "await agent('Count files', {model: 'sonnet'}); await agent('Review everything')"}))
+        self.assertIsNone(self.run_hook("Workflow", {"script":
+            "await agent('Review everything\\nNative-why: needs MCP servers in this harness')"}))
+        self.assertIsNone(self.run_hook("Workflow", {"script": "await agent(args.prompt)",
+            "args": {"prompt": "Review everything.\nNative-why: needs MCP servers in this harness"}}))
 
     def test_other_tools_pass(self):
         self.assertIsNone(self.run_hook("Bash", {"command": "echo Role: implementation"}))
@@ -90,8 +130,8 @@ class GateTests(unittest.TestCase):
         mech = "await agent('Role: implementation\\nbuild it', {model: 'sonnet'})"
         self.assertIsNone(self.run_hook("Workflow", {"script": mech}))
         review = "await agent('review the spec', {model: 'opus'})"
-        self.assertIsNone(self.run_hook("Workflow", {"script": review}))
-        reasoned = deep + "\n// Codex-no: needs this conversation's accumulated context"
+        self.assertDenied(self.run_hook("Workflow", {"script": review}))
+        reasoned = deep + "\n// Native-why: needs this conversation's accumulated context"
         self.assertIsNone(self.run_hook("Workflow", {"script": reasoned}))
 
     def test_kill_switch_allows_everything(self):
@@ -101,6 +141,15 @@ class GateTests(unittest.TestCase):
 
     def test_garbage_input_fails_open(self):
         r = subprocess.run(["bash", str(SHIM)], input="not json", capture_output=True, text=True,
+                           env=dict(os.environ, HOME=str(self.home)))
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+
+    def test_logging_failure_does_not_fail_open_the_decision(self):
+        (self.home / ".claude/analytics").write_text("not a directory")
+        self.assertDenied(self.run_hook("Agent", {"prompt": "Review everything."}))
+
+    def test_unexpected_payload_fails_open(self):
+        r = subprocess.run(["bash", str(SHIM)], input="[]", capture_output=True, text=True,
                            env=dict(os.environ, HOME=str(self.home)))
         self.assertEqual((r.returncode, r.stdout), (0, ""))
 

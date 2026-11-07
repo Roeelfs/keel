@@ -12,12 +12,15 @@ SOURCES (all under ~/.claude, override with --claude-home):
                                      agent()); `.model` is its model, a `/workflows/` path marks a
                                      Workflow lane. Filtered by file mtime.
   * projects/**/*.jsonl transcripts  tool_use blocks: Agent/Task dispatches (model, `Role:` line,
-                                     `Codex-no:` line), `spawn-lane.sh --mission` and
+                                     `Native-why:` line), `spawn-lane.sh --mission` and
                                      `codex-dispatch.sh` Bash calls, Workflow calls. Blocks are
                                      deduplicated by (timestamp, kind, prompt/command head), since a
                                      resumed session repeats its history.
   * projects/<proj>/<session>/custom-title.json  a "[Manager]" title marks a manager session.
-  * analytics/codex-first-gate.jsonl  the dispatch gate's deny/allow decisions.
+  * analytics/codex-first-gate.jsonl  deny/allow decisions; dispatch_runtime=native identifies
+                                     new native attempts, native_why carries the exception reason.
+                                     dispatch_routes compares these with transcript headless/Codex
+                                     attempts, without adding denials to executed-lane shares.
 
 SHARES:
   all          Codex gate rows / (Codex gate rows + Claude subagent lanes + Claude headless lanes)
@@ -27,7 +30,7 @@ SHARES:
   qualifying   the target metric: Codex hand-dispatched lanes / (Codex hand-dispatched + Claude opus
                implementation lanes that state no reason to stay on Claude). A Claude lane counts
                here when it is an Agent `Role: implementation` dispatch at opus (or unset model)
-               with no `Codex-no:` line, or a `spawn-lane.sh` claude opus lane with no
+               with no `Native-why:` line, or a `spawn-lane.sh` claude opus lane with no
                `--claude-reason` whose mission (when still readable) is not `Role: spec`.
 
 RUNTIME OF A spawn-lane CALL: explicit `--runtime`; else `--model sonnet|haiku|opus` means claude;
@@ -47,7 +50,7 @@ import shlex
 import sys
 
 ROLE_RE = re.compile(r"Role:\s*(\w+)")
-CODEX_NO_RE = re.compile(r"(?i)\bCodex-no:[ \t]*([^\n\r\"'`]{10,})")
+NATIVE_WHY_RE = re.compile(r"(?im)^[ \t]*Native-why:[ \t]*([^\n\r\"'`]+)")
 SPAWN_RE = re.compile(r"(^|[\s;&|(])(\S*/)?spawn-lane\.sh\s+")
 DISPATCH_RE = re.compile(r"(^|[\s;&|(])(\S*/)?codex-dispatch\.sh\s+(\S+)")
 READ_ONLY_RE = re.compile(r"^\s*(#|(cat|grep|rg|ls|sed|head|tail|bash -n|wc|less|jq|echo|printf)\b)")
@@ -174,10 +177,10 @@ def classify(name, i):
     if name in ("Agent", "Task"):
         p = i.get("prompt") or ""
         role = ROLE_RE.search(p)
-        reason = CODEX_NO_RE.search(p)
+        reason = any(len(m.group(1).strip()) >= 10 for m in NATIVE_WHY_RE.finditer(p))
         return {"kind": "agent", "model": i.get("model"), "subagent_type": i.get("subagent_type"),
                 "role": role.group(1).lower() if role else None,
-                "mentions_codex": "codex" in p.lower(), "codex_no": bool(reason), "_key": p[:80]}
+                "mentions_codex": "codex" in p.lower(), "native_why": bool(reason), "_key": p[:80]}
     if name == "Workflow":
         s = json.dumps(i)
         return {"kind": "workflow", "_key": s[:80]}
@@ -249,6 +252,10 @@ def gate_log(home, since, until):
                     continue
                 if in_window(r.get("ts", "")[:19] + "Z", since, until) and not r.get("synthetic"):
                     c[(r.get("surface"), r.get("verdict"))] += 1
+                    # Attempts, not executed lanes: denied native calls never ran. Keep these
+                    # separate from meta-based shares and historical rows without the field.
+                    if r.get("dispatch_runtime") == "native":
+                        c[("native", r.get("verdict"))] += 1
     except OSError:
         pass
     return {"%s/%s" % k: v for k, v in sorted(c.items())}
@@ -278,7 +285,7 @@ def measure(home, since, until, codex_default_from):
     codex_hand = len(spawn_codex) + len(disp)
     impl = [r for r in top_agents if r["role"] == "implementation"]
     impl_deep = [r for r in impl if model_family(r["model"]) in DEEP or not r["model"]]
-    agent_unjustified = [r for r in impl_deep if not r["codex_no"]]
+    agent_unjustified = [r for r in impl_deep if not r["native_why"]]
     spawn_unjustified = [r for r in spawn_claude if r["model"] in DEEP and not r["claude_reason"]
                          and not mission_is_spec(r["argv"], r.get("cwd"))]
 
@@ -295,6 +302,7 @@ def measure(home, since, until, codex_default_from):
         cx = c.get("spawn_codex", 0) + c.get("codex_dispatch", 0)
         by_side[side] = dict(c, codex_share_pct=pct(cx, sum(c.values())))
 
+    decisions = gate_log(home, since, until)
     return {
         "window": {"since": since, "until": until, "codex_default_from": codex_default_from},
         "codex_lanes": {"gate_rows": len(gate),
@@ -309,14 +317,18 @@ def measure(home, since, until, codex_default_from):
             "by_role": dict(collections.Counter(r["role"] or "none" for r in top_agents)),
             "opus_implementation": len(impl_deep),
             "opus_implementation_mentioning_codex": sum(r["mentions_codex"] for r in impl_deep),
-            "opus_implementation_with_codex_no": sum(r["codex_no"] for r in impl_deep)},
+            "opus_implementation_with_native_why": sum(r["native_why"] for r in impl_deep)},
         "workflow_invocations": sum(1 for r in recs if r["kind"] == "workflow" and not r["nested"]),
         "spawn_lane": {"total": len(spawns), "claude": len(spawn_claude), "codex": len(spawn_codex),
                        "claude_by_model": dict(collections.Counter(r["model"] or "unset" for r in spawn_claude)),
                        "claude_with_reason": sum(r["claude_reason"] for r in spawn_claude)},
         "codex_dispatch_calls": len(disp),
         "managers": by_side,
-        "dispatch_gate": gate_log(home, since, until),
+        "dispatch_gate": decisions,
+        "dispatch_routes": {"native_allowed": decisions.get("native/allow", 0),
+                            "native_denied": decisions.get("native/deny", 0),
+                            "headless_claude": len(spawn_claude), "headless_codex": len(spawn_codex),
+                            "codex_document": len(disp)},
         "shares_pct": {
             "all": pct(len(gate), len(gate) + len(meta) + len(spawn_claude)),
             "hand": pct(codex_hand, codex_hand + len(meta_agent) + len(spawn_claude)),
@@ -342,10 +354,11 @@ def render(r):
         "  spawn-lane on Codex:  %s%%  (%d of %d)" % (s["spawn_lane_codex"], r["spawn_lane"]["codex"], r["spawn_lane"]["total"]),
         "  QUALIFYING (target):  %s%%  (Codex %d vs Claude opus impl with no reason: Agent %d + spawn-lane %d)"
         % (s["qualifying"], q["codex_hand"], q["claude_agent_opus_impl_no_reason"], q["claude_spawn_opus_no_reason"]),
-        "  opus implementation Agent dispatches: %d, mentioning Codex %d, with Codex-no %d"
-        % (a["opus_implementation"], a["opus_implementation_mentioning_codex"], a["opus_implementation_with_codex_no"]),
+        "  opus implementation Agent dispatches: %d, mentioning Codex %d, with Native-why %d"
+        % (a["opus_implementation"], a["opus_implementation_mentioning_codex"], a["opus_implementation_with_native_why"]),
         "  managers: %s" % json.dumps(r["managers"]["manager"]),
         "  others:   %s" % json.dumps(r["managers"]["other"]),
+        "  dispatch routes (attempts): %s" % json.dumps(r["dispatch_routes"]),
         "  dispatch gate: %s" % (json.dumps(r["dispatch_gate"]) or "{}"),
     ]
     return "\n".join(lines)

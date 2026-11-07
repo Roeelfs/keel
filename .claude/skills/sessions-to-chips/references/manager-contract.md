@@ -81,7 +81,8 @@ in one line. Only a go relayed by message from another session (a `SendMessage`,
 card) is refused: the founder types it where the merge runs.
 
 An opus spec or implementation lane needs no further justification: this policy is its
-`Model-why`. Effort stays `medium` unless the mission states a reason for more.
+`Model-why`. Native runtime exceptions and their `Native-why` line are governed by §Lane runtimes.
+Effort stays `medium` unless the mission states a reason for more.
 
 **Violation, and its check (graded by artifact).** A spec or diff authored by the manager, or by
 a sonnet/haiku lane, is a contract violation. For every spec file and every commit the program
@@ -518,11 +519,18 @@ turn (nothing to diff). **Cache-diff:** if the survey matches the state file, re
 ## Lane runtimes — pick by deliverable, then by human need
 
 A lane goes interactive **only when it needs the human**. Everything else runs prompt-free.
-**Codex is the default; the dispatch gate enforces it.** An opus implementation lane sent to Claude
-needs a `Codex-no: <reason>` line (Agent/Workflow, `codex-first-gate` hook) or
-`--runtime claude --claude-reason "<reason>"` (`spawn-lane.sh`); the reason names the offload test
-that fails. Claude time is the scarce pool. Pick the runtime by walking these questions in order;
-the first "yes" wins.
+**Codex or headless lanes are the default (2026-11-07).** Every session relies heavily on
+`codex-dispatch.sh` and `spawn-lane.sh`, rather than native Agent/Task/Workflow `agent()`.
+A self-contained lane with a document or one-worktree deliverable and no harness state qualifies,
+regardless of its role. The `codex-first-gate` hook denies a native dispatch without one prompt line
+`Native-why: <reason>` (10+ trimmed characters). Reasons: needs harness state, MCP servers or this
+conversation's context; interactive work; a sub-minute lookup. Named agents pinned to a model
+(critic, verifier, security-reviewer) also carry that line. `Native-why` replaces `Codex-no`;
+there is one native escape. Sonnet/haiku mechanical lanes and `Role: spec` authors retain their
+exceptions, unless doing large read-only research/review passes with document-shaped output.
+The gate uses scope and deliverable words as a conservative heuristic, not semantic analysis.
+Headless Claude keeps `--runtime claude --claude-reason "<reason>"`; it is a separate runtime,
+not a native escape. Pick the runtime by walking these questions in order; the first "yes" wins.
 
 **Security work is pinned to the top tier, whatever runtime the tree picks.** CVE/advisory
 triage, a security patch lane, its reachability or exposure check, security review and
@@ -537,13 +545,15 @@ Never sonnet, haiku, luna or sol for these, and never a cheaper fallback when th
    archiving a chip, record its consolidation state ([consolidation.md](consolidation.md) §Before a chip).
 2. **Does it need a desktop-only tool?** Interactive-OAuth MCP (Linear, Supabase, Vercel via the
    desktop), the PR/session/sidebar tools, or this conversation's accumulated context → **`Agent`
-   subagent inside the manager** (it inherits the desktop MCP set). Keep it short and read-mostly;
+   subagent inside the manager**, with `Native-why: needs this harness MCP set or conversation context`.
+   Keep it short and read-mostly;
    its reply lands in YOUR context and is re-paid every turn, so cap the return size.
 3. **Is the deliverable information** (report, verdict, census, research, mining, review,
    falsifier pass) **with a self-contained prompt?** → **Codex document lane**:
    `codex-dispatch.sh <luna|sol> <promptfile> <outfile> [repo]`. luna for mining, census and
    extraction; sol for review, research and falsifiers; astra only for one final-gate judgment
-   per spec review. A multi-angle fan-out with cross-verification → `Workflow` instead.
+   per spec review. A multi-angle fan-out also uses Codex/headless lanes; native
+   `Workflow agent()` needs `Native-why`.
 4. **Is the deliverable a commit/branch in ONE worktree, from a written spec or mission?** →
    **headless Codex lane**: `spawn-lane.sh --class <class> --cwd <worktree>` (Codex is the default runtime).
    It commits, never pushes; you grade the diff, run the test gate it cannot run (a Codex lane
@@ -567,7 +577,7 @@ Never sonnet, haiku, luna or sol for these, and never a cheaper fallback when th
 | Codex document lane | report, verdict, census | the slice of the outfile you read | use MCP, push, see this conversation |
 | Headless Codex lane | commits in one worktree | the graded diff | push, run vitest, use MCP |
 | Headless Claude lane | branch/PR | its completion note | (the fallback; costs Claude time) |
-| `Workflow` | cross-verified multi-agent research or review | its returned paths | write files from the script itself |
+| `Workflow agent()` | native exception with `Native-why`; otherwise Codex/headless fan-out | its returned paths | write files from the script itself |
 
 Grade every one by its artifact, never its completion message.
 

@@ -39,7 +39,7 @@ class ShareTests(unittest.TestCase):
         lines = [
             tool_use("2026-11-10T03:00:00Z", "Agent", {"prompt": "Role: implementation\nfix", "model": "opus"}),
             tool_use("2026-11-10T03:00:00Z", "Agent", {"prompt": "Role: implementation\nfix", "model": "opus"}),  # dup
-            tool_use("2026-11-10T03:01:00Z", "Agent", {"prompt": "Role: implementation\nCodex-no: needs the MCP servers here",
+            tool_use("2026-11-10T03:01:00Z", "Agent", {"prompt": "Role: implementation\nNative-why: needs the MCP servers here",
                                                        "model": "opus"}),
             tool_use("2026-11-10T03:02:00Z", "Bash", {"command": "~/.claude/scripts/spawn-lane.sh --mission m.md --cwd w"}),
             tool_use("2026-11-10T03:03:00Z", "Bash", {"command": "spawn-lane.sh --mission m.md --model opus --runtime claude"}),
@@ -57,7 +57,7 @@ class ShareTests(unittest.TestCase):
         self.assertEqual(r["codex_lanes"]["gate_rows"], 2)
         self.assertEqual(r["claude_subagent_lanes"]["total"], 2)
         self.assertEqual(r["top_level_agent_dispatches"]["total"], 2)
-        self.assertEqual(r["top_level_agent_dispatches"]["opus_implementation_with_codex_no"], 1)
+        self.assertEqual(r["top_level_agent_dispatches"]["opus_implementation_with_native_why"], 1)
         self.assertEqual((r["spawn_lane"]["codex"], r["spawn_lane"]["claude"]), (1, 2))
         self.assertEqual(r["codex_dispatch_calls"], 1)
         self.assertEqual(r["workflow_invocations"], 1)
@@ -67,6 +67,23 @@ class ShareTests(unittest.TestCase):
                          (2, 1, 1))
         self.assertEqual(r["shares_pct"]["qualifying"], 50.0)
         self.assertEqual(r["managers"]["manager"]["spawn_codex"], 1)
+
+    def test_native_decisions_are_counted_without_inflating_executed_shares(self):
+        rows = [
+            {"surface": "agent", "verdict": "deny", "dispatch_runtime": "native"},
+            {"surface": "workflow", "verdict": "allow", "dispatch_runtime": "native",
+             "native_why": "needs MCP servers in this harness"},
+            {"surface": "agent", "verdict": "allow"},  # historical; runtime unknown
+            {"surface": "agent", "verdict": "deny", "dispatch_runtime": "native", "synthetic": True},
+        ]
+        path = Path(self.home) / "analytics/codex-first-gate.jsonl"
+        path.write_text("\n".join(json.dumps(dict(r, ts="2026-11-10T05:00:00+00:00")) for r in rows))
+        r = cs.measure(self.home, "2026-11-09T00:00:00Z", "2026-11-11T00:00:00Z", "2026-11-06T00:00:00Z")
+        self.assertEqual(r["dispatch_routes"], {"native_allowed": 1, "native_denied": 1,
+            "headless_claude": 2, "headless_codex": 1, "codex_document": 1})
+        self.assertEqual(r["dispatch_gate"]["agent/allow"], 1)
+        self.assertEqual(r["shares_pct"]["qualifying"], 50.0)
+        self.assertIn('"native_denied": 1', cs.render(r))
 
     def test_runtime_before_the_flip_defaults_to_claude(self):
         r = cs.measure(self.home, "2026-11-09T00:00:00Z", "2026-11-11T00:00:00Z", "2026-11-20T00:00:00Z")
