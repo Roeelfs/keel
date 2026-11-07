@@ -20,7 +20,7 @@ GOVERNOR_MODULES = tuple(
     ("__init__.py", "state.py", "snapshot.py", "admission.py", "jev_client.py", "broker.py",
      "act.py", "context.py", "registry.py"))  # docs/specs/2026-09-29-machine-governor.md phase 1
 RUNTIME_FILES = ("with-heavy-lock", "heavy_resources.py", "heavy_runner.py", "heavy_node.cjs",
-                  "heavy_child.py", *GOVERNOR_MODULES)
+                  "heavy_child.py", "keel_test_tmpdir.py", *GOVERNOR_MODULES)
 RESOURCE_SCRIPT = "serialize-heavy-ops.py"
 
 def load_json(path, default):
