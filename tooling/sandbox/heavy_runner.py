@@ -533,7 +533,7 @@ def acquire(directory, policy, job_id, command):
             signal.signal(sig, handler)
 
 
-def child_environment(policy, job_id):
+def child_environment(policy, job_id, command=()):
     preload = Path(__file__).resolve().with_name('heavy_node.cjs')
     if not preload.is_file():
         raise ValueError('worker-cap preload is missing; refusing an uncapped job')
@@ -541,10 +541,25 @@ def child_environment(policy, job_id):
     # This is a per-process heap aid. The supervisor enforces aggregate RSS.
     require = '--require=' + json.dumps(str(preload))
     options = node_options if require in node_options else node_options + ' --max-old-space-size=2048 ' + require
-    return {**os.environ, 'KEEL_HEAVY_LOCK_HELD': '1', 'KEEL_HEAVY_JOB_ID': job_id,
+    env = {**os.environ, 'KEEL_HEAVY_LOCK_HELD': '1', 'KEEL_HEAVY_JOB_ID': job_id,
             'KEEL_HEAVY_MAX_WORKERS': str(int(policy.max_workers)),
             'KEEL_HEAVY_TURBO_CONCURRENCY': str(int(policy.turbo_concurrency)),
             'NODE_OPTIONS': options.strip()}
+    return test_tmpdir_environment(env, command)
+
+
+def test_tmpdir_environment(env, command):
+    # The harness selector alone owns mount, ownership and real-I/O fallback checks.
+    if job_class_of(command) not in {'wt-verify.sh', 'cynap-sandbox'}:
+        return env
+    try:
+        from keel_test_tmpdir import command_env
+        selected = command_env({**env, 'KEEL_TEST_TMPDIR_ENABLED':
+                                env.get('KEEL_TEST_TMPDIR_ENABLED', '1')})
+        # Keep the default local to this selection, without enabling nested other classes.
+        return {**env, 'TMPDIR': selected['TMPDIR']} if 'TMPDIR' in selected else env
+    except (ImportError, OSError):
+        return env  # Optional storage must never refuse an otherwise runnable job.
 
 
 class Job:
@@ -750,7 +765,7 @@ def run_job(command, directory, policy, job_id, stream, slot):
             raise ValueError('job startup gate is missing')
         # Only the supervisor holds the slot: a daemon that leaves the group must not inherit it.
         child = subprocess.Popen([sys.executable, str(bootstrap), str(gate_read), *command],
-                                 env=child_environment(policy, job_id), start_new_session=True,
+                                 env=child_environment(policy, job_id, command), start_new_session=True,
                                  pass_fds=(gate_read,))
         os.close(gate_read)
         gate_read = None
@@ -817,6 +832,7 @@ def run_broker_if_wrapper(directory, policy, command):
         return None
     shim_dir = account_home() / '.keel' / 'resource-hooks' / 'shims'
     env = {**os.environ, 'PATH': str(shim_dir) + os.pathsep + os.environ.get('PATH', '')}
+    env = test_tmpdir_environment(env, command)
     started = time.monotonic()
     event(directory, 'broker_started', executable=Path(command[0]).name, args=event_args(command),
           cwd=working_directory())
@@ -979,7 +995,7 @@ def main():
             print('usage: with-heavy-lock [--status|--check-lease|--cpu-check] | COMMAND [ARGS...]', file=sys.stderr)
             return 64
         if valid_lease(directory):
-            os.execvpe(command[0], command, child_environment(policy, os.environ['KEEL_HEAVY_JOB_ID']))
+            os.execvpe(command[0], command, child_environment(policy, os.environ['KEEL_HEAVY_JOB_ID'], command))
         policy = cap_wait_for_codex(policy)
         if policy.governor_mode == 'enforce':
             broker_result = run_broker_if_wrapper(directory, policy, command)

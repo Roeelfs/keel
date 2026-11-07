@@ -156,8 +156,12 @@ class InstallerTests(unittest.TestCase):
             probe = subprocess.run(
                 [os.sys.executable, "-c",
                  "import sys; sys.path.insert(0, '.'); "
-                 "from governor import admission, snapshot, jev_client, broker, act, context, registry"],
-                cwd=str(runtime_dir), capture_output=True, text=True)
+                 "from governor import admission, snapshot, jev_client, broker, act, context, registry; "
+                 "import keel_test_tmpdir; from heavy_runner import child_environment; "
+                 "from heavy_resources import Policy; "
+                 "assert child_environment(Policy(), 'job', ['wt-verify.sh'])['TMPDIR'] == '/internal'"],
+                cwd=str(runtime_dir), capture_output=True, text=True,
+                env={**os.environ, "TMPDIR": "/internal", "KEEL_TEST_TMPDIR_ENABLED": "0"})
             self.assertEqual(probe.returncode, 0, probe.stderr)
             second = installer.install(home, True)
             self.assertFalse(second.get("claude_changed"))
