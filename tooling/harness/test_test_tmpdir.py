@@ -124,6 +124,16 @@ class ResolverTests(unittest.TestCase):
             env=env, text=True, capture_output=True, check=True)
         self.assertEqual(result.stdout, "/internal\ntwo words\n")
 
+    def test_node_tmpdir_and_child_exit_code(self):
+        with tempfile.TemporaryDirectory() as internal:
+            env = {**os.environ, "TMPDIR": internal, "KEEL_TEST_TMPDIR_ENABLED": "0"}
+            result = subprocess.run(
+                [sys.executable, test_tmpdir.__file__, "--", "node", "-e",
+                 'console.log(require("os").tmpdir()); process.exit(7)'],
+                env=env, text=True, capture_output=True)
+            self.assertEqual(result.stdout.strip(), internal)
+            self.assertEqual(result.returncode, 7)
+
     def test_disk_keeper_config_targets_same_root(self):
         config = Path(test_tmpdir.__file__).with_name("disk-keeper-tmpdir.env.sh")
         result = subprocess.run(
