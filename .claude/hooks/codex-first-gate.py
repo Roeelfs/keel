@@ -1,30 +1,18 @@
 #!/usr/bin/env python3
-"""PreToolUse(Agent|Task|Workflow): an opus implementation lane goes to Codex unless it says why not.
+"""PreToolUse(Agent|Task|Workflow): qualifying lanes use Codex or headless runtimes.
 
-WHY A HOOK. "Codex first for qualifying lanes" was a prose rule for weeks and stayed one: in one
-measured window most opus `Role: implementation` dispatch prompts never mentioned Codex at all,
-and about half of the sampled ones qualified for it (self-contained, a document or one-worktree
-deliverable, no harness state). A rule that is only remembered at dispatch time is not weighed at
-dispatch time, so this hook asks the question at that moment.
+Native dispatch defaults to deny, regardless of role or model inheritance. Preserve the
+spec-author and sonnet/haiku mechanical exceptions, unless the prompt describes a large
+research/review pass (scope-wide or document-shaped). This is a conservative text heuristic,
+not a semantic proof of eligibility. A non-qualifying lane states one Native-why: reason
+(10+ trimmed characters): harness state, MCP servers, conversation context, interactive
+work, or a sub-minute lookup. Named/pinned agents use the same reason, never a name bypass.
 
-WHAT IS GATED. A dispatch that sends an IMPLEMENTATION lane to Claude at the opus tier:
-  * Agent/Task: the prompt declares `Role: implementation`, and the effective model is opus.
-    Effective model = the explicit `model`; else a named agent's frontmatter pin; else (an
-    untyped dispatch with no model) the main loop's model, treated as opus.
-  * Workflow: the script (inline `script`, the file at `scriptPath`, and `args`) declares
-    `Role: implementation`, and at least one agent() model is opus or unset.
-NOT gated: sonnet/haiku lanes, `Role: spec` lanes, lanes with no `Role: implementation` line, and
-headless lanes (`spawn-lane.sh` enforces the same rule itself, so this hook does not parse Bash).
-
-THE ESCAPE. One line `Codex-no: <reason>` (10+ chars) in the prompt or script: which of the three
-offload tests fails (not self-contained / not a document or one-worktree deliverable / it edits
-harness state). A quota wall is never a reason; a Codex lane at the wall reports BLOCKED-ON-QUOTA.
-
-KILL SWITCH. `~/.claude/run/codex-first-gate.off` exists -> the hook allows everything.
-
-FAIL-OPEN BY CONSTRUCTION: any error returns 0 with no stdout, so the dispatch proceeds.
-Every gated decision (deny, or allow on a stated reason) is logged to
-`~/.claude/analytics/codex-first-gate.jsonl`, which the share measurement reads.
+Workflow reads inline script, scriptPath and string args; only agent() scripts are native.
+Headless Bash launches are handled by spawn-lane.sh, not this hook.
+Kill switch: ~/.claude/run/codex-first-gate.off. Any error fails open (0, no stdout).
+Decisions, including mechanical/spec allowances, go to the existing analytics JSONL with
+dispatch_runtime=native and native_why. Logging failures never block a dispatch.
 """
 import datetime
 import json
@@ -38,9 +26,11 @@ LOG = os.path.join(HOME, ".claude/analytics/codex-first-gate.jsonl")
 LOG_MAX_BYTES = 2 * 1024 * 1024
 AGENTS_DIR = os.path.join(HOME, ".claude/agents")
 
-ROLE_IMPL_RE = re.compile(r"(?i)\bRole:[ \t]*implementation\b")
-# A reason must be real text on the same line: `Codex-no:` followed by 10+ non-quote chars.
-REASON_RE = re.compile(r"(?i)\bCodex-no:[ \t]*([^\n\r\"'`]{10,})")
+ROLE_SPEC_RE = re.compile(r"(?i)\bRole:[ \t]*spec\b")
+REASON_RE = re.compile(r"(?im)^[ \t]*(?://[ \t]*)?Native-why:[ \t]*([^\n\r\"'`]+)")
+PASS_RE = re.compile(r"(?i)\b(research|review|audit|investigat\w*|survey|census|falsif\w*)\b")
+DOCUMENT_RE = re.compile(r"(?i)\b(report|document|findings|verdict|dossier|memo)\b|\.md\b")
+SCOPE_RE = re.compile(r"(?i)\b(entire|all|across|comprehensive|large|deep|repository|codebase)\b")
 FRONTMATTER_MODEL_RE = re.compile(r"(?m)^model:[ \t]*([A-Za-z0-9_.-]+)")
 WF_MODEL_RE = re.compile(r"""\bmodel["']?\s*:\s*["'`]([A-Za-z0-9_.-]+)["'`]""")
 WF_AGENT_RE = re.compile(r"\bagent\s*\(")
@@ -54,9 +44,13 @@ CODEX_COMMANDS = (
 )
 
 
-def is_deep(model):
+def is_mechanical(model):
     m = (model or "").strip().lower()
-    return m == "opus" or m.startswith("claude-opus") or m == "fable" or m.startswith("claude-fable")
+    return any(m == family or m.startswith("claude-" + family) for family in ("sonnet", "haiku"))
+
+
+def document_pass(text):
+    return bool(PASS_RE.search(text) and (DOCUMENT_RE.search(text) or SCOPE_RE.search(text)))
 
 
 def pinned_model(subagent_type):
@@ -99,51 +93,56 @@ def workflow_text(ti):
             pass
     if "args" in ti:
         try:
-            parts.append(json.dumps(ti.get("args")))
+            parts.extend(string_args(ti.get("args")))
         except (TypeError, ValueError):
             pass
-    return "\n".join(parts)
+    return "\n".join(parts).replace("\\n", "\n").replace("\\r", "\r")
 
 
-def workflow_sends_deep(text):
-    """True when some agent() lane may run at opus: an explicit opus model, or an agent()
-    call while the script names no sonnet/haiku-only model set."""
-    models = [m.lower() for m in WF_MODEL_RE.findall(text)]
-    if any(is_deep(m) for m in models):
-        return True
-    if not WF_AGENT_RE.search(text):
-        return False
-    # agent() calls with no model at all inherit the main loop (opus). A script whose every
-    # stated model is sonnet/haiku is read as a mechanical script.
-    return not models
+def string_args(value):
+    """Read decoded argument strings, preserving reason-line boundaries."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [s for v in value.values() for s in string_args(v)]
+    if isinstance(value, list):
+        return [s for v in value for s in string_args(v)]
+    return []
 
 
 def decide(d):
-    """-> (verdict, detail) where verdict is None (not gated), 'allow' or 'deny'."""
-    tool = d.get("tool_name")
-    ti = d.get("tool_input")
+    """-> (verdict, detail); None means this is not a native lane dispatch."""
+    tool, ti = d.get("tool_name"), d.get("tool_input")
     if not isinstance(ti, dict):
         return None, {}
     if tool in ("Agent", "Task"):
         text = ti.get("prompt")
-        if not isinstance(text, str) or not ROLE_IMPL_RE.search(text):
+        if not isinstance(text, str):
             return None, {}
         model = agent_effective_model(ti)
-        if not (is_deep(model) or model == "inherit"):
-            return None, {}
+        mechanical = is_mechanical(model) and ti.get("subagent_type") not in (
+            "critic", "verifier", "security-reviewer")
         detail = {"surface": "agent", "model": model, "subagent_type": ti.get("subagent_type")}
     elif tool == "Workflow":
-        text = workflow_text(ti)
-        if not ROLE_IMPL_RE.search(text) or not workflow_sends_deep(text):
+        # Args may contain a mission, but cannot turn a non-agent script into a dispatch.
+        script = workflow_text({k: v for k, v in ti.items() if k != "args"})
+        calls = len(WF_AGENT_RE.findall(script))
+        if not calls:
             return None, {}
+        text = workflow_text(ti)
+        models = WF_MODEL_RE.findall(script)
+        mechanical = len(models) == calls and all(is_mechanical(m) for m in models)
         detail = {"surface": "workflow", "script": os.path.basename(str(ti.get("scriptPath") or "inline"))}
     else:
         return None, {}
-    m = REASON_RE.search(text)
-    if m:
-        detail["reason"] = m.group(1).strip()[:300]
-        return "allow", detail
-    return "deny", detail
+    reason = next((m.group(1).strip() for m in REASON_RE.finditer(text)
+                   if len(m.group(1).strip()) >= 10), None)
+    # A spec tag in one Workflow lane must not exempt unrelated siblings.
+    spec = bool(ROLE_SPEC_RE.search(text)) and (tool != "Workflow" or calls == 1)
+    exempt = (mechanical or spec) and not document_pass(text)
+    detail = dict(detail, dispatch_runtime="native", native_why=reason[:300] if reason else None,
+                  eligibility="exception" if exempt else "codex-or-headless")
+    return ("allow" if reason or exempt else "deny"), detail
 
 
 def log(d, verdict, detail):
@@ -161,16 +160,16 @@ def log(d, verdict, detail):
 
 
 def deny_reason(detail):
-    where = ("an Agent dispatch (model %s)" % detail.get("model")
-             if detail.get("surface") == "agent" else "a Workflow whose agent() lanes run opus or inherit it")
     return (
-        "BLOCKED (codex-first gate): %s sends a `Role: implementation` lane to Claude at the opus tier. "
-        "Implementation goes to Codex whenever the lane qualifies (self-contained prompt; a document or "
-        "one-worktree deliverable; no harness-state edit). Run it on Codex:\n%s\n"
-        "Or keep it on Claude: add ONE line `Codex-no: <which test fails and why>` to the prompt, e.g. "
-        "`Codex-no: edits harness hooks a cold Codex lane cannot reach`. A quota wall is never a reason: "
-        "a Codex lane at the wall reports BLOCKED-ON-QUOTA. Mechanical work: use model sonnet or haiku."
-        % (where, CODEX_COMMANDS)
+        "BLOCKED (codex-first gate): native %s dispatch requires a reason. Self-contained lanes "
+        "with a document or one-worktree deliverable and no harness state use Codex or headless lanes, "
+        "including large read-only research/review passes. Run:\n%s\n"
+        "For a native exception, add ONE line `Native-why: <reason>` (10+ characters) to the prompt. "
+        "Reasons: needs harness state, MCP servers or conversation context; interactive work; "
+        "a sub-minute lookup. Named agents (critic, verifier, security-reviewer) also need this line. "
+        "A quota wall is never a reason. Spec authors and sonnet/haiku mechanical lanes remain exempt "
+        "unless doing a large document-shaped research/review pass."
+        % (detail.get("surface"), CODEX_COMMANDS)
     )
 
 
