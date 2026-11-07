@@ -145,9 +145,10 @@ def live_tickets(queue):
 
 
 def first_lease(directory, policy):
-    for slot in range(1, policy.slots + 1):
+    for slot in range(1, MAX_SLOTS + 1):
         lease = read_record(lease_path(directory, slot))
-        if lease:
+        if lease and (slot <= policy.slots or not lock_available(directory, slot)
+                      or lease_group_alive(lease)):
             return lease
     return None
 
@@ -228,7 +229,8 @@ def job_sessions(directory):
 
 def running_job_count(directory, policy):
     """Held heavy slots: the one `running_jobs` figure the lock, --cpu-check and the preview share."""
-    return sum(1 for slot in range(1, policy.slots + 1)
+    # A lowered ceiling must still account for jobs admitted under the previous policy.
+    return sum(1 for slot in range(1, MAX_SLOTS + 1)
                if not lock_available(directory, slot) or lease_group_alive(read_record(lease_path(directory, slot))))
 
 
@@ -260,15 +262,16 @@ def evaluate_load(directory, policy, running_jobs, memory_reason=None, memory='u
 
 def claim_slot(directory, policy, position, budget_mb=None, jev_admit=False, reserve_mb=0.0,
                job_class=None):
-    """Lock the first free slot when no more waiters are ahead than there are free slots.
+    """Claim an eligible slot when queue position fits the remaining total-job ceiling.
 
-    Returns (stream, slot) or (None, reason). A slot is free when its lock is available and no
-    job from a killed supervisor still runs in it.
+    Returns (stream, slot) or (None, reason). Only slots at or below policy.slots are eligible;
+    live jobs in every slot consume capacity, including descendants of killed supervisors.
     """
     free = []
     orphaned = 0
+    low_orphans = 0
     try:
-        for slot in range(1, policy.slots + 1):
+        for slot in range(1, MAX_SLOTS + 1):
             stream = slot_path(directory, slot).open('a')
             try:
                 fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -279,11 +282,16 @@ def claim_slot(directory, policy, position, budget_mb=None, jev_admit=False, res
             if lease_group_alive(read_record(lease_path(directory, slot))):
                 free.pop()[0].close()
                 orphaned += 1
-        if position > len(free):
-            return None, 'previous_job_alive' if position <= len(free) + orphaned else 'resource_busy'
-        held = policy.slots - len(free)  # Read while every free slot is still locked here.
+                low_orphans += int(slot <= policy.slots)
+        held = MAX_SLOTS - len(free)  # Read while every free slot is still locked here.
+        eligible = [(stream, slot) for stream, slot in free if slot <= policy.slots]
+        available = min(len(eligible), max(0, policy.slots - held))
+        if position > available:
+            after_orphans = min(len(eligible) + low_orphans, policy.slots - held + orphaned)
+            return None, 'previous_job_alive' if position <= after_orphans else 'resource_busy'
         others_held = held > 0
-        stream, slot = free.pop(0)
+        stream, slot = eligible[0]
+        free = [(other, number) for other, number in free if number != slot]
         for other, _ in free:
             other.close()
         free = []
@@ -934,10 +942,11 @@ def main():
         command = sys.argv[1:]
         if command == ['--status']:
             leases = []
-            for slot in range(1, policy.slots + 1):
+            for slot in range(1, MAX_SLOTS + 1):
                 lease = read_record(lease_path(directory, slot))
                 live = not lock_available(directory, slot) or lease_group_alive(lease)
-                leases.append({'slot': slot, 'live': live, 'lease': lease})
+                if slot <= policy.slots or live:
+                    leases.append({'slot': slot, 'live': live, 'lease': lease})
             print(json.dumps({**asdict(policy), 'live': any(entry['live'] for entry in leases),
                               'lease': next((entry['lease'] for entry in leases if entry['lease']), None),
                               'leases': leases, 'state_dir': str(directory)}))

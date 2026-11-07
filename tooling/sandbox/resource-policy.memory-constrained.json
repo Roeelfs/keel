@@ -1,0 +1,15 @@
+{
+  "slots": 3,
+  "max_slots": 3,
+  "max_rss_mb": 6144,
+  "min_free_percent": 20,
+  "run_min_free_percent": 10,
+  "class_max_rss_mb": {
+    "wt-verify.sh": 8192,
+    "cynap-sandbox": 8192,
+    "pnpm": 7680,
+    "npx": 7680,
+    "staging-sync": 9216,
+    "wt-setup": 8192
+  }
+}
