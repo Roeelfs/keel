@@ -63,8 +63,12 @@ refuses the policy. A stop records `wall_time_budget` with `budget_seconds`.
 admission. The account database determines the home for both policy and state.
 State is always `~/.keel/heavy.slots`, including an atomic lease per slot
 (`lease.<n>.json`) and `events.jsonl` with job ids, terminal reasons and observed
-peak RSS. `--status` keeps `live` and `lease` (the lowest-numbered published lease) and lists every
-slot's holder under `leases`. A `started` event records its `slot` and `args`, the
+peak RSS. `slots` limits both new slot numbers and total concurrent jobs. Live jobs
+above a lowered ceiling still consume capacity until they drain. Waiters retain the
+policy loaded at startup, so a waiter using the old ceiling can still admit under it
+until its wait expires. `--status` keeps `live` and `lease` (the lowest-numbered
+published lease within the ceiling, or a live holder above it). `leases` lists slots
+within the ceiling and any live slots above it. A `started` event records its `slot` and `args`, the
 first three arguments after the executable; an argument containing `=` or longer
 than 120 characters is recorded as `<redacted>`. A `queued` event records the same
 `args` with `cwd`, `executable`, the effective `wait_seconds` and `caller` (`claude` or
