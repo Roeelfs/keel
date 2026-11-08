@@ -210,6 +210,8 @@ def carrier_state(c, ctx):
         return live, _h(bool(out and ctx["outfiles"].get(out))), None
     if t == "card":
         return now - st.parse_iso(c["bound_at"]) < LEASE["card"], None, None
+    if t == "bake":
+        return now < st.parse_iso(c["id"]), None, None
     if t == "wake":
         fire = wake_fire(c["id"], ctx["state"].get("wakes") or [])
         return bool(fire and now < fire + WAKE_GRACE_S), None, None
@@ -263,6 +265,15 @@ def validate_hold(h, ctx, kids, by_ticket, live_of):
         return "not_a_map_ticket"
     base, _, target = reason.partition(":")
     base = base.lower()
+    if base in ("awaiting-bake", "bake"):
+        target = target or (args[0] if args else "")
+        if kids[t].get("kind") != "bake":
+            return "awaiting-bake: only a bake ticket may wait for its due date"
+        try:
+            due = st.parse_iso(target)
+        except ValueError:
+            return "awaiting-bake: invalid due date"
+        return None if due > ctx["now"] else "awaiting-bake: due date reached or missing"
     if base == "file-collision":
         other = by_ticket.get(target)
         mine = [p for a in args[:1] for p in a.split(",") if p]

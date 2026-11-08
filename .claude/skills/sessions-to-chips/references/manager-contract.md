@@ -260,7 +260,10 @@ no live background task. Its message is the fix: arm one wake and record it, or 
 flags and exemptions, and exit 4 means UNBOUND or READY_NOT_DISPATCHED is blocking. It runs in
 SHADOW (`would_block:<flag>` is logged, nothing blocks on it, whatever `MANAGER_ARM_GUARD_FLAGS`
 says; `off` skips the step); a timeout or error logs `flags_skipped:<why>` and is counted (fail
-open). Decisions log to
+open). A bake ticket with a valid future-dated `Hold: <ticket> bake <ISO date>` (or
+`awaiting-bake:<ISO date>`) is excluded from READY_NOT_DISPATCHED until due. A `bake` carrier
+uses its RFC3339 UTC due time as its id; it expires at that time and does not replace an armed wake.
+Decisions log to
 `~/.claude/analytics/manager-arm-guard.jsonl`; kill switch `MANAGER_ARM_GUARD=0`.
 **Role check (enforced), before the arm check:** a manager whose `<slug>.role.json` is missing, names an older
 role version, was written by another session, or predates the session's last compaction is blocked once per

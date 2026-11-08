@@ -22,9 +22,9 @@ STATE_DIR = os.environ.get("WORK_STATE_DIR") or os.path.join(HOME, "state/work-s
 LANE_ROWS = os.environ.get("WORK_STATE_LANE_ROWS") or os.path.join(HOME, "state/lane-parents.jsonl")
 MANIFEST_CAP = 8192
 
-# A wake is an event, not a writer: one armed wake may carry many tickets' bindings.
-SHARED_CARRIERS = frozenset({"wake"})
-CARRIER_TYPES = ("session", "lane", "agent", "workflow", "bg", "card", "wake", "founder")
+# Wakes and bake due times are events, not writers; each may carry many bindings.
+SHARED_CARRIERS = frozenset({"wake", "bake"})
+CARRIER_TYPES = ("session", "lane", "agent", "workflow", "bg", "card", "wake", "founder", "bake")
 RUNTIMES = ("claude", "codex")
 ROOT_GLOBS = {"**", "*", "/", "**/*", "/**", "./**", "."}
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
@@ -98,6 +98,13 @@ def validate_carrier(c, where="carrier"):
         raise SchemaError(f"{where}.runtime: one of {RUNTIMES}")
     if not RFC3339.match(c["bound_at"]):
         raise SchemaError(f"{where}.bound_at: RFC3339 UTC (…Z)")
+    if c["type"] == "bake":
+        if not RFC3339.fullmatch(c["id"]):
+            raise SchemaError(f"{where}: a bake carrier id is its RFC3339 UTC due time")
+        try:
+            parse_iso(c["id"])
+        except ValueError as exc:
+            raise SchemaError(f"{where}: invalid bake due time") from exc
     if c["type"] == "founder" and not RFC3339.match(c["id"]):
         raise SchemaError(f"{where}: a founder carrier id is the RFC3339 UTC time of the grill round")
 
@@ -346,7 +353,7 @@ def bind(slug, ticket, *, children, map_id, bake="required", branch=None, worktr
 
 def carrier(slug, ticket, ctype, cid, *, programs=None, now=None, **fields):
     """R2: append a launched carrier. Idempotent on (type, id); a carrier sits in at most one binding,
-    except a wake (SHARED_CARRIERS), which may carry several."""
+    except event carriers (SHARED_CARRIERS), which may carry several."""
     now = time.time() if now is None else now
     c = {"type": ctype, "id": cid, "bound_at": now_iso(now)}
     c.update({k: v for k, v in fields.items() if v is not None})
