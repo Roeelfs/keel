@@ -405,6 +405,38 @@ class Holds(unittest.TestCase):
         return snap(state=dict({"holds": [{"ticket": ticket, "reason": reason, "args": list(args)}]}, **kw.pop("state", {})),
                     **kw)
 
+    def test_future_bake_hold_suppresses_ready_until_due(self):
+        for due in ("2026-11-04", "2026-11-03T13:00:00Z"):
+            s = self.hold("T-2", "awaiting-bake:" + due)
+            self.assertNotIn("T-2", [x["item"] for x in s["blocking"]])
+            self.assertTrue(s["holds"][0]["valid"])
+            self.assertIn("T-6", [x["item"] for x in s["blocking"]])
+
+    def test_bake_hold_accepts_date_argument(self):
+        s = self.hold("T-2", "bake", "2026-11-04")
+        self.assertTrue(s["holds"][0]["valid"])
+        self.assertNotIn("T-2", [x["item"] for x in s["blocking"]])
+
+    def test_bake_hold_does_not_hide_due_invalid_or_non_bake_work(self):
+        for ticket, due in (("T-2", "2026-11-03"), ("T-2", "2026-11-03T12:00:00Z"),
+                            ("T-2", ""), ("T-2", "later"), ("T-2", "2026-02-30"), ("T-6", "2026-11-04")):
+            s = self.hold(ticket, "awaiting-bake:" + due)
+            self.assertFalse(s["holds"][0]["valid"])
+            self.assertIn(ticket, [x["item"] for x in s["blocking"]])
+
+    def test_bake_carrier_has_a_valid_due_date_and_expires(self):
+        c = carrier("bake", "2026-11-04T00:00:00Z")
+        st.validate_carrier(c)
+        self.assertTrue(ws.carrier_state(c, ctx())[0])
+        self.assertFalse(ws.carrier_state(c, ctx(now=st.parse_iso(c["id"])))[0])
+        before = snap(bindings=[binding("T-2", [c])])
+        self.assertNotIn("T-2", [x["item"] for x in before["blocking"]])
+        self.assertIn("T-6", [x["item"] for x in before["blocking"]])
+        after = snap(bindings=[binding("T-2", [c])], now=st.parse_iso(c["id"]))
+        self.assertIn("T-2", [x["item"] for x in after["flags"]["STALLED"]])
+        with self.assertRaises(st.SchemaError):
+            st.validate_carrier(carrier("bake", "later"))
+
     def test_file_collision(self):
         other = binding("T-4", [carrier("founder", iso(-1))], paths=["src/a/**"])
         s = self.hold("T-6", "file-collision:T-4", "src/a/b.py", bindings=[other])
@@ -588,6 +620,19 @@ class CacheAndCommands(unittest.TestCase):
                                 stdin_facts={"state_facts": {"status": "WORKING"}, "live_bg": []})
         self.assertEqual((rc, r.tracker_calls()), (4, 0))
         self.assertFalse(any(c[0] in ("gh", "git") for c in r.calls))
+
+    def test_guard_cli_skips_future_bake_hold_and_keeps_ready_work(self):
+        ws.run_snapshot(self.slug, runner=FakeRunner())
+        facts = {"state_facts": {"status": "WORKING", "holds": [
+            {"ticket": "T-2", "reason": "bake", "args": ["2999-11-14"]}]}, "live_bg": []}
+        result = subprocess.run([sys.executable, "-I", os.path.join(HERE, "work_state.py"),
+                                 "guard", "--program", self.slug], input=json.dumps(facts),
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 4, result.stderr)
+        snapshot = json.loads(result.stdout)
+        self.assertNotIn("T-2", flagged(snapshot, "READY_NOT_DISPATCHED"))
+        self.assertIn("T-6", flagged(snapshot, "READY_NOT_DISPATCHED"))
+        self.assertTrue(snapshot["holds"][0]["valid"])
 
     def test_one_wake_carries_many_bindings(self):
         kids = {c["ticket"] for c in TRACKER["children"]}
