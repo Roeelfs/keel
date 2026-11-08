@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# codex-first-gate.sh — PreToolUse (Agent|Task|Workflow). Shim only; logic lives in
+# codex-first-gate.sh — PreToolUse (Agent|Task|Workflow) native-dispatch gate (name kept for its
+# registration; the rule is headless-first, not Codex-first). Shim only; logic lives in
 # codex-first-gate.py (an embedded `python3 -c` block is silently darkened by one apostrophe).
 # See that file's docstring for what is gated, the `Native-why:` escape and the kill switch.
 # FAILS OPEN: a missing .py or any python error lets the dispatch through.

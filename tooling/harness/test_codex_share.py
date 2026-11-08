@@ -53,7 +53,7 @@ class ShareTests(unittest.TestCase):
         os.utime(proj / "mgr-1.jsonl", (t, t))
 
     def test_measure(self):
-        r = cs.measure(self.home, "2026-11-09T00:00:00Z", "2026-11-11T00:00:00Z", "2026-11-06T00:00:00Z")
+        r = cs.measure(self.home, "2026-11-09T00:00:00Z", "2026-11-11T00:00:00Z", "2026-11-06T00:00:00Z", "2026-11-20T00:00:00Z")
         self.assertEqual(r["codex_lanes"]["gate_rows"], 2)
         self.assertEqual(r["claude_subagent_lanes"]["total"], 2)
         self.assertEqual(r["top_level_agent_dispatches"]["total"], 2)
@@ -61,11 +61,12 @@ class ShareTests(unittest.TestCase):
         self.assertEqual((r["spawn_lane"]["codex"], r["spawn_lane"]["claude"]), (1, 2))
         self.assertEqual(r["codex_dispatch_calls"], 1)
         self.assertEqual(r["workflow_invocations"], 1)
-        q = r["qualifying_inputs"]
-        # codex: 1 spawn + 1 dispatch; claude unjustified: 1 Agent + 1 spawn (the spec mission is exempt)
-        self.assertEqual((q["codex_hand"], q["claude_agent_opus_impl_no_reason"], q["claude_spawn_opus_no_reason"]),
-                         (2, 1, 1))
-        self.assertEqual(r["shares_pct"]["qualifying"], 50.0)
+        self.assertEqual(r["codex_hand"], 2)  # 1 spawn + 1 dispatch
+        self.assertNotIn("qualifying", r["shares_pct"])  # the Codex-share target is retired
+        sp = r["runtime_split"]
+        self.assertEqual((sp["headless_claude"], sp["codex"], sp["native"]), (2, 2, 2))
+        self.assertEqual(sp["pct"]["headless_claude"], 33.3)
+        self.assertIn("headless Claude 2", cs.render(r))
         self.assertEqual(r["managers"]["manager"]["spawn_codex"], 1)
 
     def test_native_decisions_are_counted_without_inflating_executed_shares(self):
@@ -78,16 +79,26 @@ class ShareTests(unittest.TestCase):
         ]
         path = Path(self.home) / "analytics/codex-first-gate.jsonl"
         path.write_text("\n".join(json.dumps(dict(r, ts="2026-11-10T05:00:00+00:00")) for r in rows))
-        r = cs.measure(self.home, "2026-11-09T00:00:00Z", "2026-11-11T00:00:00Z", "2026-11-06T00:00:00Z")
+        r = cs.measure(self.home, "2026-11-09T00:00:00Z", "2026-11-11T00:00:00Z", "2026-11-06T00:00:00Z", "2026-11-20T00:00:00Z")
         self.assertEqual(r["dispatch_routes"], {"native_allowed": 1, "native_denied": 1,
             "headless_claude": 2, "headless_codex": 1, "codex_document": 1})
         self.assertEqual(r["dispatch_gate"]["agent/allow"], 1)
-        self.assertEqual(r["shares_pct"]["qualifying"], 50.0)
         self.assertIn('"native_denied": 1', cs.render(r))
 
     def test_runtime_before_the_flip_defaults_to_claude(self):
-        r = cs.measure(self.home, "2026-11-09T00:00:00Z", "2026-11-11T00:00:00Z", "2026-11-20T00:00:00Z")
+        r = cs.measure(self.home, "2026-11-09T00:00:00Z", "2026-11-11T00:00:00Z", "2026-11-20T00:00:00Z",
+                       "2026-11-30T00:00:00Z")
         self.assertEqual((r["spawn_lane"]["codex"], r["spawn_lane"]["claude"]), (0, 3))
+
+    def test_runtime_after_headless_first_defaults_to_claude(self):
+        r = cs.measure(self.home, "2026-11-09T00:00:00Z", "2026-11-11T00:00:00Z", "2026-11-06T00:00:00Z",
+                       "2026-11-08T00:00:00Z")
+        self.assertEqual((r["spawn_lane"]["codex"], r["spawn_lane"]["claude"]), (0, 3))
+        self.assertEqual(r["runtime_split"]["headless_claude"], 3)
+
+    def test_gpt_model_counts_as_codex(self):
+        self.assertEqual(cs.spawn_runtime(["--model", "gpt-6-sol"], "2026-11-10T00:00:00Z",
+                                          "2026-11-06T00:00:00Z", "2026-11-08T00:00:00Z"), "codex")
 
 
 if __name__ == "__main__":

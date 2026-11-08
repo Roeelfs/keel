@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Behavioral tests for `spawn-lane.sh` runtimes (Codex by default) and the codex-first gate.
+"""Behavioral tests for `spawn-lane.sh` runtimes (Claude by default; Codex needs a reason).
 
 Not phrase-matching: a stub `codex` earlier on PATH records the real argv, so these
 assert the command the script actually builds."""
@@ -12,6 +12,8 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "spawn-lane.sh"
+CODEX_REASON = "Claude is at a quota wall for this test"
+CODEX = ("--runtime", "codex", "--codex-reason", CODEX_REASON)
 STUB = '#!/bin/bash\nprintf "%s\\n" "$@" > "$STUB_OUT"\n'
 # The claude stub also records the two env settings a headless lane must carry, and can
 # answer with a canned JSON envelope + exit code (an auth death is is_error:true, rc=1).
@@ -73,66 +75,64 @@ class RuntimeTests(unittest.TestCase):
                 return a.split("=", 1)[1]
         return ""
 
-    def test_default_runtime_is_codex(self):
-        # Codex-first: a lane with no runtime and no model goes to Codex.
-        result, argv = self.spawn(self.base)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("workspace-write", argv)
-
-    def test_no_runtime_with_a_mechanical_model_keeps_claude(self):
-        for model in ("sonnet", "haiku"):
-            with self.subTest(model=model):
-                result, argv = self.spawn(self.base, "--model", model)
+    def test_default_runtime_is_claude(self):
+        # Headless-first: a lane with no runtime runs on Claude, sonnet unless told otherwise.
+        for extra, model in (((), "sonnet"), (("--model", "opus"), "opus"), (("--model", "haiku"), "haiku")):
+            with self.subTest(extra=extra):
+                result, argv = self.spawn(self.base, *extra)
                 self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("-p", argv)
                 self.assertEqual(argv[argv.index("--model") + 1], model)
+
+    def test_opus_on_claude_needs_no_reason(self):
+        for extra in (("--runtime", "claude", "--model", "opus"),
+                      ("--runtime", "claude", "--model", "claude-opus-5-5", "--class", "implementation")):
+            with self.subTest(extra=extra):
+                r, argv = self.spawn(self.base, *extra)
+                self.assertNotEqual(r.returncode, 2, r.stderr)
                 self.assertIn("-p", argv)
 
-    def test_opus_on_claude_needs_a_reason(self):
-        for extra in (("--model", "opus"), ("--runtime", "claude", "--model", "opus"),
-                      ("--runtime", "claude", "--model", "claude-opus-5-5"),
-                      ("--runtime", "claude", "--model", "opus", "--claude-reason", "short")):
+    def test_codex_needs_a_reason(self):
+        for extra in (("--runtime", "codex"), ("--runtime", "codex", "--codex-reason", "short"),
+                      ("--runtime", "codex", "--codex-reason", "   x      "),
+                      ("--model", "gpt-6-sol")):
             with self.subTest(extra=extra):
                 r, argv = self.spawn(self.base, *extra)
                 self.assertEqual(r.returncode, 2)
                 self.assertEqual(argv, [])
-                self.assertIn("--claude-reason", r.stderr)
-                self.assertIn("codex-dispatch.sh standard <promptfile> <outfile> [workdir]", r.stderr)
+                self.assertIn("--codex-reason", r.stderr)
+                # The deny names the Claude command first; Codex is only the exception.
+                self.assertLess(r.stderr.index("--runtime claude"), r.stderr.index("--codex-reason"))
 
-    def test_opus_with_a_reason_runs_on_claude_and_records_it(self):
+    def test_codex_with_a_reason_runs_and_records_it(self):
         rows_path = self.home / ".claude/state/lane-parents.jsonl"
         self.run_env = {"CLAUDE_SESSION_ID": "mgr-cli-2"}
-        reason = "edits harness hooks a cold Codex lane cannot reach"
-        r, argv = self.spawn(self.base, "--runtime", "claude", "--model", "opus", "--claude-reason", reason)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(argv[argv.index("--model") + 1], "opus")
-        self.assertIn("Codex-no: " + reason, r.stderr)
-        row = json.loads(rows_path.read_text().splitlines()[-1])
-        self.assertEqual((row["runtime"], row["claude_reason"]), ("claude", reason))
-
-    def test_a_spec_mission_is_not_gated(self):
-        self.mission.write_text("Role: spec\nWrite the spec.")
-        r, argv = self.spawn(self.base, "--runtime", "claude", "--model", "opus")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("-p", argv)
-
-    def test_kill_switch_lifts_the_reason_requirement(self):
-        (self.home / ".claude/run").mkdir(parents=True)
-        (self.home / ".claude/run/codex-first-gate.off").write_text("")
-        r, _ = self.spawn(self.base, "--runtime", "claude", "--model", "opus")
-        self.assertEqual(r.returncode, 0, r.stderr)
-
-    def test_claude_reason_is_refused_on_codex(self):
-        r, argv = self.spawn(self.base, "--claude-reason", "some long enough reason")
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("claude-only", r.stderr)
-
-    def test_a_claude_only_option_without_runtime_is_refused(self):
-        for extra in (("--worktree", "x"), ("--max-turns", "3"), ("--mode", "acceptEdits")):
+        for extra in (CODEX, ("--model", "gpt-6-sol", "--codex-reason", CODEX_REASON)):
             with self.subTest(extra=extra):
                 r, argv = self.spawn(self.base, *extra)
-                self.assertEqual(r.returncode, 2)
-                self.assertEqual(argv, [])
-                self.assertIn("--runtime claude", r.stderr)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("workspace-write", argv)
+                self.assertIn("codex-reason: " + CODEX_REASON, r.stderr)
+                row = json.loads(rows_path.read_text().splitlines()[-1])
+                self.assertEqual((row["runtime"], row["codex_reason"]), ("codex", CODEX_REASON))
+
+    def test_codex_reason_is_refused_on_claude(self):
+        r, argv = self.spawn(self.base, "--codex-reason", "some long enough reason")
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(argv, [])
+        self.assertIn("codex-only", r.stderr)
+
+    def test_claude_reason_flag_is_gone(self):
+        r, argv = self.spawn(self.base, "--claude-reason", "some long enough reason")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("unknown arg --claude-reason", r.stderr)
+
+    def test_claude_only_options_need_no_runtime(self):
+        for extra in (("--max-turns", "3"), ("--mode", "acceptEdits")):
+            with self.subTest(extra=extra):
+                r, argv = self.spawn(self.base, *extra)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("-p", argv)
 
     def test_explicit_claude_runtime_builds_the_claude_argv(self):
         result, argv = self.spawn(self.base, "--runtime", "claude")
@@ -156,7 +156,7 @@ class RuntimeTests(unittest.TestCase):
         rows_path = self.home / ".claude/state/lane-parents.jsonl"
         self.run_env = {"CLAUDE_SESSION_ID": "mgr-cli-1", "LANE_RECORD_OUTFILE": str(self.root / "lane.out")}
         self.spawn(self.base, "--runtime", "claude")
-        self.spawn(self.base, "--runtime", "codex")
+        self.spawn(self.base, *CODEX)
         rows = [json.loads(x) for x in rows_path.read_text().splitlines()]
         self.assertEqual([r["runtime"] for r in rows], ["claude", "codex"])
         for r in rows:
@@ -190,7 +190,7 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(r.stdout, env)
 
     def test_codex_runtime_grants_the_git_dir(self):
-        _, argv = self.spawn(self.base, "--runtime", "codex")
+        _, argv = self.spawn(self.base, *CODEX)
         self.assertIn("workspace-write", argv)
         self.assertIn(str((self.base / ".git").resolve()), self.roots(argv))
 
@@ -200,7 +200,7 @@ class RuntimeTests(unittest.TestCase):
         # file and then dies on `Operation not permitted`. Verified against a real lane.
         lane = self.root / "lane"
         git("worktree", "add", "-q", str(lane), "-b", "lane-b", cwd=self.base)
-        _, argv = self.spawn(lane, "--runtime", "codex")
+        _, argv = self.spawn(lane, *CODEX)
         roots = self.roots(argv)
         self.assertIn("worktrees/lane", roots, "per-worktree git dir must be granted")
         self.assertIn(f'"{(self.base / ".git").resolve()}"', roots,
@@ -221,12 +221,12 @@ class RuntimeTests(unittest.TestCase):
         # The lane must not hold push authority. With HOME preserved, shared git config
         # granted and network open, it could `git push origin HEAD:main` as easily as its
         # own branch, gated only by prompt text. Denying egress removes the question.
-        _, argv = self.spawn(self.base, "--runtime", "codex")
+        _, argv = self.spawn(self.base, *CODEX)
         self.assertNotIn("sandbox_workspace_write.network_access=true", argv)
         self.assertIn("sandbox_workspace_write.network_access=false", argv)
 
     def test_network_is_opt_in_and_explicit(self):
-        _, argv = self.spawn(self.base, "--runtime", "codex", "--allow-network")
+        _, argv = self.spawn(self.base, *CODEX, "--allow-network")
         self.assertIn("sandbox_workspace_write.network_access=true", argv)
 
     def test_writable_roots_are_json_encoded_not_interpolated(self):
@@ -238,7 +238,7 @@ class RuntimeTests(unittest.TestCase):
         (evil / "s.txt").write_text("s")
         git("add", "-A", cwd=evil)
         git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "s", cwd=evil)
-        _, argv = self.spawn(evil, "--runtime", "codex")
+        _, argv = self.spawn(evil, *CODEX)
         roots = self.roots(argv)
         self.assertTrue(roots.startswith("["), roots)
         parsed = json.loads(roots)
@@ -249,11 +249,11 @@ class RuntimeTests(unittest.TestCase):
     def test_a_lane_output_file_is_requested(self):
         # Claude gets --output-format json so empty output + exit 0 proves it never ran.
         # docs/codex-lane-contract.md requires -o <outfile> for the same classification.
-        _, argv = self.spawn(self.base, "--runtime", "codex")
+        _, argv = self.spawn(self.base, *CODEX)
         self.assertIn("-o", argv)
 
     def test_the_mission_carries_the_session_id_and_no_push_rule(self):
-        _, argv = self.spawn(self.base, "--runtime", "codex")
+        _, argv = self.spawn(self.base, *CODEX)
         # The stub records one argv element per LINE, so a multi-line mission spans lines;
         # search the joined text rather than the last line.
         mission = "\n".join(argv)
@@ -262,23 +262,23 @@ class RuntimeTests(unittest.TestCase):
 
     def test_mcp_config_is_refused_rather_than_silently_dropped(self):
         cfg = self.root / "m.json"; cfg.write_text("{}")
-        r, _ = self.spawn(self.base, "--runtime", "codex", "--mcp-config", str(cfg))
+        r, _ = self.spawn(self.base, *CODEX, "--mcp-config", str(cfg))
         self.assertEqual(r.returncode, 2)
         self.assertIn("claude-only", r.stderr)
 
     def test_mode_is_refused_rather_than_silently_dropped(self):
-        r, _ = self.spawn(self.base, "--runtime", "codex", "--mode", "acceptEdits")
+        r, _ = self.spawn(self.base, *CODEX, "--mode", "acceptEdits")
         self.assertEqual(r.returncode, 2)
         self.assertIn("claude-only", r.stderr)
 
     def test_codex_runtime_never_uses_the_home_isolating_wrapper(self):
         # That wrapper strips git identity; a shipping lane must keep it.
-        _, argv = self.spawn(self.base, "--runtime", "codex")
+        _, argv = self.spawn(self.base, *CODEX)
         self.assertNotIn("codex-dispatch.sh", " ".join(argv))
 
     def test_class_effort_reaches_codex_and_explicit_model_is_preserved(self):
         self.gate_env = {"STUB_ROUTE": "gpt-6-astra high"}
-        r, argv = self.spawn(self.base, "--runtime", "codex", "--class", "security",
+        r, argv = self.spawn(self.base, *CODEX, "--class", "security",
                              "--model", "gpt-6-sol")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(argv[argv.index("-m") + 1], "gpt-6-sol")
@@ -289,7 +289,7 @@ class RuntimeTests(unittest.TestCase):
         for rc in ("0", "1"):
             with self.subTest(rc=rc):
                 self.gate_env = {"STUB_GATE_RC": rc}
-                r, argv = self.spawn(self.base, "--runtime", "codex")
+                r, argv = self.spawn(self.base, *CODEX)
                 self.assertEqual(r.returncode, 0, r.stderr)
                 self.assertIn("model_reasoning_effort=medium", argv)
 
@@ -297,7 +297,7 @@ class RuntimeTests(unittest.TestCase):
         for rc in ("2", "3", "127"):
             with self.subTest(rc=rc):
                 self.gate_env = {"STUB_GATE_RC": rc}
-                r, argv = self.spawn(self.base, "--runtime", "codex", "--model", "gpt-6-astra")
+                r, argv = self.spawn(self.base, *CODEX, "--model", "gpt-6-astra")
                 self.assertEqual(r.returncode, 2, r.stderr)
                 self.assertEqual(argv, [])
 
@@ -306,11 +306,11 @@ class RuntimeTests(unittest.TestCase):
                       "gpt-6-sol medium\ngpt-6-astra high", ""):
             with self.subTest(route=route):
                 self.gate.write_text('#!/bin/bash\nprintf "%s" ' + __import__("shlex").quote(route) + '\n')
-                r, argv = self.spawn(self.base, "--runtime", "codex")
+                r, argv = self.spawn(self.base, *CODEX)
                 self.assertEqual(r.returncode, 2, r.stderr)
                 self.assertEqual(argv, [])
         self.gate.unlink()
-        r, argv = self.spawn(self.base, "--runtime", "codex")
+        r, argv = self.spawn(self.base, *CODEX)
         self.assertEqual(r.returncode, 2)
         self.assertEqual(argv, [])
 
@@ -326,7 +326,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_worktree_flag_is_refused_on_codex(self):
         # Codex has no --worktree equivalent; failing loudly beats spawning in the wrong dir.
-        r, _ = self.spawn(self.base, "--runtime", "codex", "--worktree", "x")
+        r, _ = self.spawn(self.base, *CODEX, "--worktree", "x")
         self.assertEqual(r.returncode, 2)
         self.assertIn("claude-only", r.stderr)
 

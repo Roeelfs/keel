@@ -688,7 +688,7 @@ def main(argv=None):
         e.add_argument(k)
     e.add_argument("--pr", type=int)
     lr = sub.add_parser("lane-row")
-    for k in ("--lane", "--parent", "--runtime", "--model", "--outfile", "--worktree", "--claude-reason"):
+    for k in ("--lane", "--parent", "--runtime", "--model", "--outfile", "--worktree", "--codex-reason"):
         lr.add_argument(k, default="")
     lr.add_argument("--pid", type=int, required=True)
     mg = sub.add_parser("migrate")
@@ -766,7 +766,7 @@ def main(argv=None):
             return 0
         if a.cmd == "lane-row":
             _emit(st.append_lane_row(a.lane, a.parent, a.runtime, a.model, a.pid, a.outfile, a.worktree,
-                                    claude_reason=a.claude_reason))
+                                    codex_reason=a.codex_reason))
             return 0
         if a.cmd == "migrate":
             import work_state_migrate as wm

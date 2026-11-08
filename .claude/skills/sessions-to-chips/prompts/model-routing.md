@@ -6,7 +6,7 @@ Per-lane recommendations to minimize token cost. The state-miner emits `recommen
 
 **Claude:** Opus 5.5 (alias `opus`) is the Claude ceiling (founder, 2026-10-24: "decrease the use of fable in general. max should be opus 5.5"): architecture, hard RCA, security and final gates; Fable is retired as a dispatch tier and the dispatch hook denies it; Sonnet 5.5 (alias `sonnet`) is the manager and mechanical tier (verification, grading, topical review, diagnosis); Haiku 5.5 (alias `haiku`) is the high-volume mining tier.
 
-**Authorship (founder, 2026-11-01):** specs and ALL implementation are written only by an Opus 5.5 lane or a Codex lane, with implementation run through Codex wherever a lane qualifies; managers run on Sonnet and write neither. The role table, the violation definition and its artifact check are owned by `../references/manager-contract.md` §Model policy; the rows below only carry the parameters.
+**Authorship (founder, 2026-11-01):** specs and ALL implementation are written only by an Opus 5.5 lane or a Codex lane, with implementation run as headless Claude lanes and on Codex only if it must (founder 2026-11-08); managers run on Sonnet and write neither. The role table, the violation definition and its artifact check are owned by `../references/manager-contract.md` §Model policy; the rows below only carry the parameters.
 
 > Model diversity in the deep-review panel now comes from runtimes: Opus 5.5 beside Codex astra/sol.
 
@@ -34,22 +34,22 @@ The Codex column names the **class** to pass to `codex-headroom.sh --route <clas
 | Define: spec + moderate proof ledger | Opus | think | standard |
 | Define: one critical coverage review | Sonnet | think | standard |
 | Define: unresolved security/irreversible dispute | Opus + Codex | think harder | security |
-| Build: implementation + targeted tests | Opus (Codex first) | think | standard |
+| Build: implementation + targeted tests | Opus (headless) | think | standard |
 | Verify-release: finite execution | Sonnet | think | standard |
 | Procedural worker: deterministic command pass | Haiku | (none) | mining |
 | Verify-release: failure-cluster diagnosis | Sonnet | think | standard |
-| Bug fix < 200 LOC | Opus (Codex first) | think | standard |
-| Trivial < 50 LOC, docs | Opus (Codex first) | (none) | mining |
+| Bug fix < 200 LOC | Opus (headless) | think | standard |
+| Trivial < 50 LOC, docs | Opus (headless) | (none) | mining |
 | Mining / surveys / parsing | Haiku | (none) | mining |
 | Soak observation | Haiku | (none) | mining |
 | Soak ESCALATE investigation | Sonnet | think | standard |
 | PR comment review (fixes go to the implementer) | Sonnet | think | standard |
-| Refactor (no API change) | Opus (Codex first) | think | standard |
-| Refactor (API change) | Opus (Codex first) | think | standard |
+| Refactor (no API change) | Opus (headless) | think | standard |
+| Refactor (API change) | Opus (headless) | think | standard |
 | Hard RCA / critical-path debugging | Opus | think harder | hard-rca |
 | Security review | Opus 5.5 + Codex astra | think harder | security |
 | Irreversible architecture decision | Opus | think hard | architecture |
-| Migration writing | Opus (Codex first) | think | standard |
+| Migration writing | Opus (headless) | think | standard |
 | Migration risk review | Sonnet | think | standard |
 | Self-managed interactive (writes specs or code) | Opus | think | standard |
 | Wake-driven soak watcher | Haiku | (none) | mining |
@@ -62,8 +62,8 @@ The Codex column names the **class** to pass to `codex-headroom.sh --route <clas
 |---|---|---|
 | Manager | `start_session` (`use_worktree: true`, `context: "fresh"`) | `model: "sonnet"`, `effort: "medium"` |
 | Spec or implementation child the human steers | `start_session` | `model: "opus"`, `effort: "medium"` (more only with a stated reason) |
-| Unattended spec or implementation lane, Codex (default for implementation) | `spawn-lane.sh --class standard --cwd <worktree>` (Codex by default), or `codex-dispatch.sh <class> …` for a spec document; both ask `~/.claude/scripts/codex-headroom.sh` | the gate's `--route <class>` |
-| Unattended spec or implementation lane, Claude (Codex does not fit) | `spawn-lane.sh --runtime claude --model opus --claude-reason "<why>"` | opus, medium |
+| Unattended spec or implementation lane (the default) | `spawn-lane.sh --runtime claude --model opus --class implementation --cwd <worktree>` | opus, medium |
+| Unattended lane on Codex (only if Claude cannot do it, or a Claude quota wall) | `spawn-lane.sh --runtime codex --codex-reason "<why>" --class standard --cwd <worktree>`, or `codex-dispatch.sh <class> …` for a document; both ask `~/.claude/scripts/codex-headroom.sh` | the gate's `--route <class>` |
 | Mechanical lane or child (mining, census, verification, grading) | `start_session`, `spawn-lane.sh` or `Agent` | `sonnet`/`haiku`, Codex `mining` |
 
 Grade every lane by its artifact, never its exit code: the spec file or commits exist, answer the mission, and name an opus or Codex author.

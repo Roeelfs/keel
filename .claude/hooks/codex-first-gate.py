@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""PreToolUse(Agent|Task|Workflow): qualifying lanes use Codex or headless runtimes.
+"""PreToolUse(Agent|Task|Workflow): delegated lanes run headless on Claude, not native.
 
-Native dispatch defaults to deny, regardless of role or model inheritance. Preserve the
-spec-author and sonnet/haiku mechanical exceptions, unless the prompt describes a large
+Headless-first: a lane goes to `spawn-lane.sh` (Claude by default); Codex only when the lane
+must (spawn-lane.sh owns that rule and its --codex-reason). This hook gates only the native
+surfaces. Native dispatch defaults to deny, regardless of role or model inheritance. Preserve
+the spec-author and sonnet/haiku mechanical exceptions, unless the prompt describes a large
 research/review pass (scope-wide or document-shaped). This is a conservative text heuristic,
 not a semantic proof of eligibility. A non-qualifying lane states one Native-why: reason
 (10+ trimmed characters): harness state, MCP servers, conversation context, interactive
 work, or a sub-minute lookup. Named/pinned agents use the same reason, never a name bypass.
 
+The filename predates headless-first; it is kept because the hook is registered by path.
 Workflow reads inline script, scriptPath and string args; only agent() scripts are native.
-Headless Bash launches are handled by spawn-lane.sh, not this hook.
 Kill switch: ~/.claude/run/codex-first-gate.off. Any error fails open (0, no stdout).
 Decisions, including mechanical/spec allowances, go to the existing analytics JSONL with
 dispatch_runtime=native and native_why. Logging failures never block a dispatch.
@@ -36,11 +38,10 @@ WF_MODEL_RE = re.compile(r"""\bmodel["']?\s*:\s*["'`]([A-Za-z0-9_.-]+)["'`]""")
 WF_AGENT_RE = re.compile(r"\bagent\s*\(")
 SCRIPT_MAX_BYTES = 512 * 1024
 
-CODEX_COMMANDS = (
-    "  document or report:  ~/.claude/scripts/codex-dispatch.sh standard <promptfile> <outfile> [workdir]\n"
-    "  commits in ONE worktree:  ~/.claude/scripts/spawn-lane.sh --mission <promptfile> --cwd <worktree> "
-    "--class implementation\n"
-    "(class `standard` routes to sol through codex-headroom.sh; spawn-lane.sh runs Codex by default.)"
+HEADLESS_COMMANDS = (
+    "  ~/.claude/scripts/spawn-lane.sh --runtime claude --model opus --mission <promptfile> "
+    "--cwd <worktree> --class implementation\n"
+    "  (a report or other read-only lane: same command with --class research; mechanical: --model sonnet)"
 )
 
 
@@ -141,7 +142,7 @@ def decide(d):
     spec = bool(ROLE_SPEC_RE.search(text)) and (tool != "Workflow" or calls == 1)
     exempt = (mechanical or spec) and not document_pass(text)
     detail = dict(detail, dispatch_runtime="native", native_why=reason[:300] if reason else None,
-                  eligibility="exception" if exempt else "codex-or-headless")
+                  eligibility="exception" if exempt else "headless")
     return ("allow" if reason or exempt else "deny"), detail
 
 
@@ -161,15 +162,15 @@ def log(d, verdict, detail):
 
 def deny_reason(detail):
     return (
-        "BLOCKED (codex-first gate): native %s dispatch requires a reason. Self-contained lanes "
-        "with a document or one-worktree deliverable and no harness state use Codex or headless lanes, "
-        "including large read-only research/review passes. Run:\n%s\n"
+        "BLOCKED (native-dispatch gate): native %s dispatch requires a reason. Delegated lanes run "
+        "as headless Claude lanes, including large read-only research/review passes. Run:\n%s\n"
         "For a native exception, add ONE line `Native-why: <reason>` (10+ characters) to the prompt. "
         "Reasons: needs harness state, MCP servers or conversation context; interactive work; "
         "a sub-minute lookup. Named agents (critic, verifier, security-reviewer) also need this line. "
-        "A quota wall is never a reason. Spec authors and sonnet/haiku mechanical lanes remain exempt "
-        "unless doing a large document-shaped research/review pass."
-        % (detail.get("surface"), CODEX_COMMANDS)
+        "Spec authors and sonnet/haiku mechanical lanes remain exempt unless doing a large "
+        "document-shaped research/review pass. Codex only if the lane must (Claude cannot do it, or "
+        "Claude is at a quota wall): spawn-lane.sh --runtime codex --codex-reason \"<why>\"."
+        % (detail.get("surface"), HEADLESS_COMMANDS)
     )
 
 

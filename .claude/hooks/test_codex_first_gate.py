@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Behavioral tests for codex-first-gate: run the real shim with a temp HOME and read its stdout."""
+"""Behavioral tests for the native-dispatch gate (codex-first-gate.sh): run the real shim with a temp HOME and read its stdout."""
 import json
 import os
 import subprocess
@@ -37,15 +37,20 @@ class GateTests(unittest.TestCase):
     def assertDenied(self, out):
         self.assertIsNotNone(out)
         self.assertEqual(out["permissionDecision"], "deny")
-        self.assertIn("codex-dispatch.sh standard <promptfile> <outfile> [workdir]",
-                      out["permissionDecisionReason"])
-        self.assertIn("Native-why:", out["permissionDecisionReason"])
+        reason = out["permissionDecisionReason"]
+        self.assertIn("spawn-lane.sh --runtime claude --model opus", reason)
+        self.assertIn("Native-why:", reason)
+        # Codex is the exception, mentioned after the headless Claude command, never pushed.
+        self.assertLess(reason.index("--runtime claude"), reason.index("--runtime codex"))
+        self.assertNotIn("codex-dispatch.sh", reason)
+        self.assertNotIn("Codex-no", reason)
 
     def test_opus_implementation_without_reason_is_denied(self):
         self.assertDenied(self.run_hook("Agent", {"prompt": "Role: implementation\nFix it.", "model": "opus"}))
         self.assertEqual(self.log_rows()[0]["verdict"], "deny")
-        self.assertIn("spawn-lane.sh --mission <promptfile> --cwd <worktree> --class implementation",
+        self.assertIn("--cwd <worktree> --class implementation",
                       self.run_hook("Agent", {"prompt": "Build it."})["permissionDecisionReason"])
+        self.assertEqual(self.log_rows()[0]["eligibility"], "headless")
 
     def test_unset_model_inherits_opus_and_is_gated(self):
         self.assertDenied(self.run_hook("Agent", {"prompt": "Role: implementation. Fix it."}))

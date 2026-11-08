@@ -78,6 +78,7 @@ exit "$RUNTIME_RC"
                "CHANGE": str(int(change)), "NO_COMMIT": str(int(no_commit)), "RUNTIME_RC": str(runtime_rc)}
         return subprocess.run([str(launcher), "--mission", str(self.mission),
                                "--cwd", str(self.base), "--runtime", runtime, "--class", "implementation",
+                               *(["--codex-reason", runtime_tests.CODEX_REASON] if runtime == "codex" else []),
                                "--ticket", "T-1", *(["--worktree", "named"] if named else []), *args], env=env, capture_output=True, text=True, timeout=15)
 
     def rows(self):

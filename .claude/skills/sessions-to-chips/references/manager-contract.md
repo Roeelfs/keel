@@ -69,7 +69,7 @@ owner of who may author what; `../prompts/model-routing.md` carries the per-lane
 | Manager (Claude `[Manager]`) | `start_session` `model: sonnet`, `effort: medium` | read, probe, dispatch, grade, integrate (push a graded lane branch, merge on the go-ahead), state files, tracker | write spec prose or a code diff; run review panels |
 | Manager (Codex root) | gate class `standard` | the same as above | the same as above |
 | Spec author (spec, design, proof ledger, ADR) | Claude `opus` lane, or a Codex lane through the gate | write and revise the spec from review findings | — |
-| Implementer (code, tests, migrations, config, review fixes) | per §Lane runtimes: a headless Codex lane (`spawn-lane.sh`, Codex by default), or a Claude `opus` lane with a stated reason (Q5) | commit diffs in its worktree | push without grading |
+| Implementer (code, tests, migrations, config, review fixes) | per §Lane runtimes: a headless Claude `opus` lane (`spawn-lane.sh`, Claude by default), or a Codex lane with a stated `--codex-reason` (Q5) | commit diffs in its worktree | push without grading |
 | Mechanical (mining, census, extraction, verification runs, grading against a checklist, procedural worker) | `haiku` / `sonnet`, Codex `mining` | produce reports, verdicts, receipts | author a spec or a diff |
 | Reviewer / judge | `opus` or Codex `astra`/`sol` for deep, security and final-gate review; `sonnet` for topical or coverage review | write a review artifact | edit the spec or diff it reviews (findings go back to the author lane) |
 
@@ -522,18 +522,19 @@ turn (nothing to diff). **Cache-diff:** if the survey matches the state file, re
 ## Lane runtimes — pick by deliverable, then by human need
 
 A lane goes interactive **only when it needs the human**. Everything else runs prompt-free.
-**Codex or headless lanes are the default (2026-11-07).** Every session relies heavily on
-`codex-dispatch.sh` and `spawn-lane.sh`, rather than native Agent/Task/Workflow `agent()`.
-A self-contained lane with a document or one-worktree deliverable and no harness state qualifies,
-regardless of its role. The `codex-first-gate` hook denies a native dispatch without one prompt line
-`Native-why: <reason>` (10+ trimmed characters). Reasons: needs harness state, MCP servers or this
-conversation's context; interactive work; a sub-minute lookup. Named agents pinned to a model
-(critic, verifier, security-reviewer) also carry that line. `Native-why` replaces `Codex-no`;
-there is one native escape. Sonnet/haiku mechanical lanes and `Role: spec` authors retain their
-exceptions, unless doing large read-only research/review passes with document-shaped output.
-The gate uses scope and deliverable words as a conservative heuristic, not semantic analysis.
-Headless Claude keeps `--runtime claude --claude-reason "<reason>"`; it is a separate runtime,
-not a native escape. Pick the runtime by walking these questions in order; the first "yes" wins.
+**Headless Claude lanes are the default (founder 2026-11-08, replacing Codex-first).** Every
+session relies on `spawn-lane.sh` (Claude by default), rather than native Agent/Task/Workflow
+`agent()`, and uses Codex **only if it must**: Claude cannot do the job, or Claude is at a quota
+wall. A Codex lane states that in `--codex-reason "<why>"` (10+ characters), which lands in its
+lane row; `spawn-lane.sh` is the one owner of that rule. The native-dispatch gate (hook file
+`codex-first-gate.py`, name kept for its registration) denies a native dispatch without one prompt
+line `Native-why: <reason>` (10+ trimmed characters). Reasons: needs harness state, MCP servers or
+this conversation's context; interactive work; a sub-minute lookup. Named agents pinned to a model
+(critic, verifier, security-reviewer) also carry that line; there is one native escape.
+Sonnet/haiku mechanical lanes and `Role: spec` authors retain their exceptions, unless doing large
+read-only research/review passes with document-shaped output. The gate uses scope and deliverable
+words as a conservative heuristic, not semantic analysis. Its deny message prints the headless
+Claude command first. Codex is a separate runtime, not a native escape. Pick the runtime by walking these questions in order; the first "yes" wins.
 
 **Security work is pinned to the top tier, whatever runtime the tree picks.** CVE/advisory
 triage, a security patch lane, its reachability or exposure check, security review and
@@ -552,24 +553,25 @@ Never sonnet, haiku, luna or sol for these, and never a cheaper fallback when th
    Keep it short and read-mostly;
    its reply lands in YOUR context and is re-paid every turn, so cap the return size.
 3. **Is the deliverable information** (report, verdict, census, research, mining, review,
-   falsifier pass) **with a self-contained prompt?** → **Codex document lane**:
-   `codex-dispatch.sh <luna|sol> <promptfile> <outfile> [repo]`. luna for mining, census and
-   extraction; sol for review, research and falsifiers; astra only for one final-gate judgment
-   per spec review. A multi-angle fan-out also uses Codex/headless lanes; native
-   `Workflow agent()` needs `Native-why`.
+   falsifier pass) **with a self-contained prompt?** → **headless Claude lane**:
+   `spawn-lane.sh --class research --cwd <repo>`, `--model sonnet` for mining, census and
+   extraction, `--model opus` for review, research and falsifiers. A multi-angle fan-out is
+   several such lanes; native `Workflow agent()` needs `Native-why`.
 4. **Is the deliverable a commit/branch in ONE worktree, from a written spec or mission?** →
-   **headless Codex lane**: `spawn-lane.sh --class <class> --cwd <worktree>` (Codex is the default runtime).
-   It commits, never pushes; you grade the diff, run the test gate it cannot run (a Codex lane
-   cannot run vitest here: give it typecheck plus a baseline/apply check and run the suite in CI
-   order yourself), then push once.
-5. **Shippable, but Codex does not fit?** It needs a static-credential MCP, network or push,
-   the live test loop inside the lane, repo hooks that write `$HOME`, or a lane came back
-   BLOCKED-ON-QUOTA → **headless Claude lane**: `spawn-lane.sh --runtime claude --model opus
-   --claude-reason "<which test fails>"` (a `Role: spec` mission needs no reason) for a spec or
-   implementation lane (§Model policy); `sonnet` only for a mechanical lane. An implementation
-   lane also passes `--class implementation`, so committing nothing exits 3 instead of reading as done.
-   Run `scripts/lane_probe.sh <model>` first: rc 1 (refused/capped) → in-session `Agent` or a desktop
-   session instead; a dead lane exits 0 with 0 tokens, so the probe never replaces grading by artifact.
+   **headless Claude lane**: `spawn-lane.sh --runtime claude --model opus --class implementation
+   --cwd <worktree>` for a spec or implementation lane (§Model policy); `sonnet` only for a
+   mechanical lane. `--class implementation` makes committing nothing exit 3 instead of reading
+   as done. Run `scripts/lane_probe.sh <model>` first: rc 1 (refused/capped) → Q5, or an
+   in-session `Agent` or desktop session; a dead lane exits 0 with 0 tokens, so the probe never
+   replaces grading by artifact.
+5. **Must it run on Codex?** Claude cannot do the job, or the probe or a lane came back at a
+   Claude quota wall → **Codex lane**, with the reason stated: `spawn-lane.sh --runtime codex
+   --codex-reason "<why Claude cannot or should not>" --class <class> --cwd <worktree>` for
+   commits, or `codex-dispatch.sh <luna|sol> <promptfile> <outfile> [repo]` for a document (luna
+   for mining, sol for review and research; astra only for one final-gate judgment per spec
+   review, which keeps its Codex seat for model diversity). A Codex lane commits, never pushes;
+   you grade the diff, run the test gate it cannot run (a Codex lane cannot run vitest here: give
+   it typecheck plus a baseline/apply check and run the suite in CI order yourself), then push once.
 6. **A handful of reads or one probe** to verify a fact before routing → do it **inline**. That is
    verification, not implementation; anything that edits code or runs a heavy gate is a lane.
 
@@ -577,10 +579,10 @@ Never sonnet, haiku, luna or sol for these, and never a cheaper fallback when th
 |---|---|---|---|
 | Child session (chip) | human judgment, steered work | one card + its note | run unattended |
 | `Agent` subagent | short answer needing desktop MCP or this conversation | its whole reply, every turn | outlive your turn cheaply |
-| Codex document lane | report, verdict, census | the slice of the outfile you read | use MCP, push, see this conversation |
-| Headless Codex lane | commits in one worktree | the graded diff | push, run vitest, use MCP |
-| Headless Claude lane | branch/PR | its completion note | (the fallback; costs Claude time) |
-| `Workflow agent()` | native exception with `Native-why`; otherwise Codex/headless fan-out | its returned paths | write files from the script itself |
+| Headless Claude lane (the default) | branch/PR, report | its completion note | see this conversation |
+| Codex document lane (only if you must) | report, verdict, census | the slice of the outfile you read | use MCP, push, see this conversation |
+| Headless Codex lane (only if you must) | commits in one worktree | the graded diff | push, run vitest, use MCP |
+| `Workflow agent()` | native exception with `Native-why`; otherwise headless fan-out | its returned paths | write files from the script itself |
 
 Grade every one by its artifact, never its completion message.
 
@@ -600,12 +602,10 @@ subagent that only shells out to Codex; that charges the window you are sparing.
 
 ### Which runtime a SHIPPABLE lane gets
 
-The headless row runs Codex by default and takes `--class <task-class>` (default `standard`). It consults
-the central headroom gate even with an explicit `--model` override, and applies the class effort.
-Claude leads user interaction, task acceptance, and integration, while independent bounded Codex
-lanes run through harness-tracked background Bash. Codex is a separate billing pool and Claude time
-is the scarce one, so use it whenever the lane's work fits (questions 3-5 above). The seam is
-narrower than "it ships":
+A shippable lane runs headless on Claude by default (§Lane runtimes Q4). A Codex lane
+(`--runtime codex --codex-reason "<why>"`, only when it must: Q5) takes `--class <task-class>`
+(default `standard`), consults the central headroom gate even with an explicit `--model` override,
+and applies the class effort. When a lane does go to Codex, the seam is narrower than "it ships":
 
 **A Codex lane commits; it does not push.** Egress is denied by default, so the lane has no push
 authority, and the manager pushes after grading the artifact. `--allow-network` re-opens egress
@@ -1097,8 +1097,8 @@ scoped to the touched area (an `Agent` lane) to answer it. Every build lane's mi
 build-start owner check and the 3rd-fix trigger from `lifecycle.md` Phase 2.
 
 Who may author what: §Model policy. Per-lane model and effort: `../prompts/model-routing.md`.
-Every dispatch names its model and effort on purpose. Spec and implementation lanes are `opus` or
-Codex by policy; ad-hoc mechanical delegation (mining, census, verification, grading) defaults to
+Every dispatch names its model and effort on purpose. Spec and implementation lanes are `opus`
+(Codex only if they must) by policy; ad-hoc mechanical delegation (mining, census, verification, grading) defaults to
 **sonnet** or haiku, and `opus` there needs a one-line justification; the deep
 verify/judge/adversarial bucket is `opus` (the Claude ceiling) or Codex's bounded
 `adjudication`/`security` class at high effort. `codex-headroom.sh --route` owns the Codex model

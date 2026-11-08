@@ -1,6 +1,6 @@
 # Codex bounded-phase lane template
 
-Use one fresh task for one phase of **define → build → verify-release**. Dispatch it through `spawn-lane.sh --runtime codex --class <class>` or `codex-dispatch.sh`, both gated by `~/.claude/scripts/codex-headroom.sh`.
+Use one fresh task for one phase of **define → build → verify-release**. Use this template only when the lane must run on Codex (Claude cannot do it, or Claude is at a quota wall). Dispatch it through `spawn-lane.sh --runtime codex --codex-reason "<why>" --class <class>` or `codex-dispatch.sh`, both gated by `~/.claude/scripts/codex-headroom.sh`.
 
 ```text
 NAME: <lane-name>

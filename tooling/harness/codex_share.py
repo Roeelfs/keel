@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""codex_share.py — what share of delegated lanes ran on Codex, re-runnable over any window.
+"""codex_share.py — how delegated lanes split across runtimes, re-runnable over any window.
 
-One command reproduces the Codex-share measurement, so a re-measure uses the same method:
+One command reproduces the runtime-split measurement, so a re-measure uses the same method:
 
     python3 codex_share.py --since 2026-11-03 --until 2026-11-06 [--json]
 
@@ -27,14 +27,15 @@ SHARES:
   hand         hand-dispatched only, Workflows excluded:
                (spawn-lane codex + codex-dispatch.sh calls) /
                (that + Claude Agent-tool lanes + spawn-lane claude)
-  qualifying   the target metric: Codex hand-dispatched lanes / (Codex hand-dispatched + Claude opus
-               implementation lanes that state no reason to stay on Claude). A Claude lane counts
-               here when it is an Agent `Role: implementation` dispatch at opus (or unset model)
-               with no `Native-why:` line, or a `spawn-lane.sh` claude opus lane with no
-               `--claude-reason` whose mission (when still readable) is not `Role: spec`.
+  runtime_split  executed lanes by runtime (headless-first, 2026-11-08: Claude headless is the
+               default, Codex only when a lane must, native only with Native-why):
+               headless_claude (spawn-lane claude) / codex (Codex gate rows) / native (Claude
+               subagent lanes). The earlier Codex-share target is retired; `all` and `hand` stay
+               as trend lines.
 
-RUNTIME OF A spawn-lane CALL: explicit `--runtime`; else `--model sonnet|haiku|opus` means claude;
-else claude before --codex-default-from (the launcher defaulted to claude) and codex after it.
+RUNTIME OF A spawn-lane CALL: explicit `--runtime`; else `--model gpt-*` means codex and
+`--model sonnet|haiku|opus` means claude; else codex inside [--codex-default-from,
+--claude-default-from) (the launcher's Codex-default window) and claude outside it.
 
 CAVEATS: meta.json mtime is the window filter for Claude subagent lanes; Codex gate rows include
 lanes asked for but killed before running. Read the numbers as a trend measured one way every time.
@@ -104,27 +105,16 @@ def model_family(model):
     return m
 
 
-def spawn_runtime(argv, ts, codex_default_from):
+def spawn_runtime(argv, ts, codex_default_from, claude_default_from):
     rt = flag(argv, "--runtime")
     if rt:
         return rt
-    if model_family(flag(argv, "--model")) in DEEP + CLAUDE_MECH:
+    fam = model_family(flag(argv, "--model"))
+    if fam.startswith("gpt-"):
+        return "codex"
+    if fam in DEEP + CLAUDE_MECH:
         return "claude"
-    return "codex" if ts >= codex_default_from else "claude"
-
-
-def mission_is_spec(argv, cwd):
-    path = flag(argv, "--mission")
-    if not path or path == "-":
-        return False
-    for base in (flag(argv, "--cwd") or "", cwd or "", ""):
-        p = os.path.expanduser(os.path.join(base, path) if base else path)
-        try:
-            with open(p, encoding="utf-8", errors="replace") as fh:
-                return bool(re.search(r"(?i)Role:\s*spec\b", fh.read(65536)))
-        except OSError:
-            continue
-    return False
+    return "codex" if codex_default_from <= ts < claude_default_from else "claude"
 
 
 def extract(home, since, until):
@@ -265,7 +255,7 @@ def pct(a, b):
     return round(100.0 * a / b, 1) if b else None
 
 
-def measure(home, since, until, codex_default_from):
+def measure(home, since, until, codex_default_from, claude_default_from):
     gate = codex_gate_rows(home, since, until)
     meta = claude_meta(home, since, until)
     recs = extract(home, since, until)
@@ -274,9 +264,9 @@ def measure(home, since, until, codex_default_from):
     top_agents = [r for r in agents if not r["nested"]]
     spawns = [r for r in recs if r["kind"] == "spawn"]
     for r in spawns:
-        r["runtime"] = spawn_runtime(r["argv"], r["ts"], codex_default_from)
+        r["runtime"] = spawn_runtime(r["argv"], r["ts"], codex_default_from, claude_default_from)
         r["model"] = model_family(flag(r["argv"], "--model") or ("sonnet" if r["runtime"] == "claude" else ""))
-        r["claude_reason"] = bool(flag(r["argv"], "--claude-reason"))
+        r["codex_reason"] = bool(flag(r["argv"], "--codex-reason"))
     disp = [r for r in recs if r["kind"] == "codex_dispatch"]
     spawn_claude = [r for r in spawns if r["runtime"] == "claude"]
     spawn_codex = [r for r in spawns if r["runtime"] == "codex"]
@@ -285,9 +275,7 @@ def measure(home, since, until, codex_default_from):
     codex_hand = len(spawn_codex) + len(disp)
     impl = [r for r in top_agents if r["role"] == "implementation"]
     impl_deep = [r for r in impl if model_family(r["model"]) in DEEP or not r["model"]]
-    agent_unjustified = [r for r in impl_deep if not r["native_why"]]
-    spawn_unjustified = [r for r in spawn_claude if r["model"] in DEEP and not r["claude_reason"]
-                         and not mission_is_spec(r["argv"], r.get("cwd"))]
+    split = {"headless_claude": len(spawn_claude), "codex": len(gate), "native": len(meta)}
 
     def is_mgr(r):
         return tt.get(r["session"], "").startswith("[Manager]")
@@ -304,7 +292,8 @@ def measure(home, since, until, codex_default_from):
 
     decisions = gate_log(home, since, until)
     return {
-        "window": {"since": since, "until": until, "codex_default_from": codex_default_from},
+        "window": {"since": since, "until": until, "codex_default_from": codex_default_from,
+                   "claude_default_from": claude_default_from},
         "codex_lanes": {"gate_rows": len(gate),
                         "by_model": dict(collections.Counter(r.get("model") for r in gate)),
                         "refuse": sum(1 for r in gate if r.get("verdict") == "refuse")},
@@ -321,7 +310,7 @@ def measure(home, since, until, codex_default_from):
         "workflow_invocations": sum(1 for r in recs if r["kind"] == "workflow" and not r["nested"]),
         "spawn_lane": {"total": len(spawns), "claude": len(spawn_claude), "codex": len(spawn_codex),
                        "claude_by_model": dict(collections.Counter(r["model"] or "unset" for r in spawn_claude)),
-                       "claude_with_reason": sum(r["claude_reason"] for r in spawn_claude)},
+                       "codex_with_reason": sum(r["codex_reason"] for r in spawn_codex)},
         "codex_dispatch_calls": len(disp),
         "managers": by_side,
         "dispatch_gate": decisions,
@@ -333,27 +322,27 @@ def measure(home, since, until, codex_default_from):
             "all": pct(len(gate), len(gate) + len(meta) + len(spawn_claude)),
             "hand": pct(codex_hand, codex_hand + len(meta_agent) + len(spawn_claude)),
             "spawn_lane_codex": pct(len(spawn_codex), len(spawns)),
-            "qualifying": pct(codex_hand, codex_hand + len(agent_unjustified) + len(spawn_unjustified)),
         },
-        "qualifying_inputs": {"codex_hand": codex_hand, "claude_agent_opus_impl_no_reason": len(agent_unjustified),
-                              "claude_spawn_opus_no_reason": len(spawn_unjustified)},
+        "codex_hand": codex_hand,
+        "runtime_split": dict(split, pct={k: pct(v, sum(split.values())) for k, v in split.items()}),
     }
 
 
 def render(r):
     s, w = r["shares_pct"], r["window"]
-    q = r["qualifying_inputs"]
     a = r["top_level_agent_dispatches"]
+    sp = r["runtime_split"]
     lines = [
-        "Codex share %s .. %s" % (w["since"], w["until"]),
+        "Runtime split %s .. %s" % (w["since"], w["until"]),
+        "  RUNTIME SPLIT:        headless Claude %d (%s%%) / Codex %d (%s%%) / native %d (%s%%)"
+        % (sp["headless_claude"], sp["pct"]["headless_claude"], sp["codex"], sp["pct"]["codex"],
+           sp["native"], sp["pct"]["native"]),
         "  all delegated lanes:  %s%%  (Codex gate rows %d; Claude subagent lanes %d; Claude headless %d)"
         % (s["all"], r["codex_lanes"]["gate_rows"], r["claude_subagent_lanes"]["total"], r["spawn_lane"]["claude"]),
         "  hand-dispatched:      %s%%  (Codex %d = spawn-lane %d + codex-dispatch.sh %d; Claude Agent-tool %d)"
-        % (s["hand"], q["codex_hand"], r["spawn_lane"]["codex"], r["codex_dispatch_calls"],
+        % (s["hand"], r["codex_hand"], r["spawn_lane"]["codex"], r["codex_dispatch_calls"],
            r["claude_subagent_lanes"]["agent_tool"]),
         "  spawn-lane on Codex:  %s%%  (%d of %d)" % (s["spawn_lane_codex"], r["spawn_lane"]["codex"], r["spawn_lane"]["total"]),
-        "  QUALIFYING (target):  %s%%  (Codex %d vs Claude opus impl with no reason: Agent %d + spawn-lane %d)"
-        % (s["qualifying"], q["codex_hand"], q["claude_agent_opus_impl_no_reason"], q["claude_spawn_opus_no_reason"]),
         "  opus implementation Agent dispatches: %d, mentioning Codex %d, with Native-why %d"
         % (a["opus_implementation"], a["opus_implementation_mentioning_codex"], a["opus_implementation_with_native_why"]),
         "  managers: %s" % json.dumps(r["managers"]["manager"]),
@@ -371,10 +360,13 @@ def main(argv=None):
     ap.add_argument("--until", default=iso(now), help="UTC date or ISO time (exclusive)")
     ap.add_argument("--codex-default-from", default="2026-11-06",
                     help="when spawn-lane.sh began defaulting to codex (UTC date or ISO time)")
+    ap.add_argument("--claude-default-from", default="2026-11-08",
+                    help="when spawn-lane.sh went back to defaulting to claude (UTC date or ISO time)")
     ap.add_argument("--claude-home", default=os.path.expanduser("~/.claude"))
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
-    r = measure(a.claude_home, iso(parse_ts(a.since)), iso(parse_ts(a.until)), iso(parse_ts(a.codex_default_from)))
+    r = measure(a.claude_home, iso(parse_ts(a.since)), iso(parse_ts(a.until)), iso(parse_ts(a.codex_default_from)),
+                iso(parse_ts(a.claude_default_from)))
     print(json.dumps(r, indent=2) if a.json else render(r))
     return 0
 
