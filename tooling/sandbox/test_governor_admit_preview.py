@@ -8,6 +8,7 @@ verify-route.mjs's own checks (mirrored here as the "contract"):
     never a string, never None) -- verify-route does `typeof p.eta_total_s === 'number'`.
 Never queues (no queue/ ticket is written) and never claims a slot (no lease is written).
 """
+import fcntl
 import json
 import os
 import subprocess
@@ -48,6 +49,13 @@ class AdmitPreviewFunctionTests(unittest.TestCase):
         self.env_patch.start()
         self.addCleanup(self.env_patch.stop)
 
+    def hold_slot(self, slot):
+        # Admission counts held locks or live process groups, not lease files alone.
+        # The synthetic leases below have no live group, so model the supervisor's lock.
+        stream = heavy_runner.slot_path(self.heavy_dir, slot).open('a')
+        self.addCleanup(stream.close)
+        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
     def test_no_leases_admits_via_the_fast_path_and_never_writes_a_ticket_or_lease(self):
         result = heavy_runner.admit_preview(self.heavy_dir, Policy(max_load_per_core=0, protected_apps=()), 'other-heavy')
         assert_contract(self, result)
@@ -58,6 +66,7 @@ class AdmitPreviewFunctionTests(unittest.TestCase):
 
     def test_full_slots_denies_and_reports_numeric_eta_fields(self):
         policy = Policy(slots=1, max_slots=1)
+        self.hold_slot(1)
         write_record(self.heavy_dir / 'lease.1.json',
                       {'job_id': 'j1', 'class': 'cynap-verify-quick', 'pgid': 999999999,
                        'started': time.time() - 5, 'cwd': None})
@@ -75,6 +84,7 @@ class AdmitPreviewFunctionTests(unittest.TestCase):
         # class-stats.json absent. Before the fix this returned eta_*_s: 0.0 on a deny.
         policy = Policy(slots=2, max_slots=2)
         for slot in (1, 2):
+            self.hold_slot(slot)
             write_record(self.heavy_dir / f'lease.{slot}.json', {
                 'job_id': f'j{slot}', 'supervisor_pid': 1, 'supervisor_identity': 'x',
                 'pgid': 999999990 + slot, 'cwd': '/repo', 'executable': 'cynap-sandbox',
@@ -108,6 +118,7 @@ class AdmitPreviewFunctionTests(unittest.TestCase):
 
     def test_a_cached_jev_verdict_can_flip_a_d_rule_deny_to_admit_without_a_live_call(self):
         policy = Policy(slots=1, max_slots=1, jev_admission='enforce', governor_mode='enforce')
+        self.hold_slot(1)
         write_record(self.heavy_dir / 'lease.1.json',
                       {'job_id': 'j1', 'class': 'other-heavy', 'pgid': 999999999,
                        'started': time.time(), 'cwd': None})
@@ -126,6 +137,7 @@ class AdmitPreviewFunctionTests(unittest.TestCase):
         # 2026-09-30: in shadow the slot loop admits only below policy.slots, so a preview that
         # applied JEV's admit promised a slot the loop would not give.
         policy = Policy(slots=1, max_slots=6, jev_admission='shadow')
+        self.hold_slot(1)
         write_record(self.heavy_dir / 'lease.1.json',
                       {'job_id': 'j1', 'class': 'other-heavy', 'pgid': 999999999,
                        'started': time.time(), 'cwd': None})
@@ -162,6 +174,7 @@ class AdmitPreviewFunctionTests(unittest.TestCase):
         # Live 2026-09-30: 7 queued seconds-long jobs were priced at cynap-sandbox's p90 each,
         # reporting a 76-minute wait against a real worst case of ~8 minutes.
         policy = Policy(slots=1, max_slots=1)
+        self.hold_slot(1)
         self._history('cynap-sandbox', 600)
         self._history('pnpm', 10)
         write_record(self.heavy_dir / 'lease.1.json',
@@ -177,6 +190,7 @@ class AdmitPreviewFunctionTests(unittest.TestCase):
 
     def test_eta_prices_a_classless_ticket_as_the_callers_class(self):
         policy = Policy(slots=1, max_slots=1)
+        self.hold_slot(1)
         self._history('cynap-sandbox', 600)
         write_record(self.heavy_dir / 'lease.1.json',
                       {'job_id': 'j1', 'executable': 'cynap-sandbox', 'pgid': 999999999,
