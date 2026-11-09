@@ -116,6 +116,15 @@ class ValidateReviewReportTests(unittest.TestCase):
         undated = report + rows.replace("2026-11-14", "after deploy")
         self.assertTrue(any("close-by date" in f for f in vrr.validate(undated)[1]))
 
+    def test_standard_tier_runtime_path_needs_a_drive_row(self):
+        head = "## Spec Review — Final Report\n### Profile: standard (tier standard) — runtime path: services/api/handler"
+        report = PASSING_REPORT.replace("## Spec Review — Final Report", head)
+        self.assertTrue(any("PRE-MERGE DRIVE" in f for f in vrr.validate(report)[1]))
+        row = "| PRE-MERGE DRIVE | staging probe of the changed seam | drive: `probe-seam.sh` against the test org | the author | 2026-11-12 |\n"
+        self.assertTrue(vrr.validate(report + row)[0], vrr.validate(report + row)[1])
+        none = PASSING_REPORT.replace("## Spec Review — Final Report", head.replace("services/api/handler", "none"))
+        self.assertFalse(any("PRE-MERGE DRIVE" in f for f in vrr.validate(none)[1]))
+
     def test_prints_per_lane_verdict_counts(self):
         _, _, summary = vrr.validate(PASSING_REPORT)
         joined = "\n".join(summary)
