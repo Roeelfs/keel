@@ -691,6 +691,7 @@ def main(argv=None):
     for k in ("--lane", "--parent", "--runtime", "--model", "--outfile", "--worktree", "--claude-reason"):
         lr.add_argument(k, default="")
     lr.add_argument("--pid", type=int, required=True)
+    lr.add_argument("--account-preferred", choices=("true", "false"), default=None)
     mg = sub.add_parser("migrate")
     mg.add_argument("--program")
     mg.add_argument("--all", action="store_true")
@@ -766,7 +767,9 @@ def main(argv=None):
             return 0
         if a.cmd == "lane-row":
             _emit(st.append_lane_row(a.lane, a.parent, a.runtime, a.model, a.pid, a.outfile, a.worktree,
-                                    claude_reason=a.claude_reason))
+                                    claude_reason=a.claude_reason,
+                                    account_preferred=None if a.account_preferred is None
+                                    else a.account_preferred == "true"))
             return 0
         if a.cmd == "migrate":
             import work_state_migrate as wm

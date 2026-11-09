@@ -430,14 +430,18 @@ def pid_start(pid):
 
 
 def append_lane_row(lane, parent, runtime, model, pid, outfile, worktree, path=None, now=None,
-                    claude_reason=""):
+                    claude_reason="", account_preferred=None):
     """The ONE lane-row writer (spawn-lane.sh and codex-dispatch.sh call `work_state.py lane-row`).
-    A Claude lane's `--claude-reason` (why it is not on Codex) is kept as `claude_reason`."""
+    A Claude lane's `--claude-reason` (why it is not on Codex) is kept as `claude_reason`.
+    `account_preferred` is a boolean only (is the lane's terminal Claude login the preferred
+    account?); None means unknown and is omitted. Never an email: the account name stays private."""
     row = {"lane": lane, "parent": parent, "runtime": runtime, "model": model, "pid": int(pid),
            "pid_start": pid_start(pid), "outfile": outfile or "", "worktree": worktree or "",
            "ts": now_iso(now)}
     if claude_reason:
         row["claude_reason"] = claude_reason
+    if account_preferred is not None:
+        row["account_preferred"] = bool(account_preferred)
     path = path or LANE_ROWS
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "a") as fh:
