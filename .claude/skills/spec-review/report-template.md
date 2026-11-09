@@ -23,7 +23,7 @@ CRITICAL keeps its severity (downgrade guard). Never inject EC/Sec/Obs/DRIFT tab
 ## Spec Review — Final Report
 
 ### Spec: <filename>
-### Profile: <full | standard | light | hotfix> (tier <critical | standard | light | hotfix>) — dropped lanes: <none | list, each `SKIPPED (gate: <reason>)`>
+### Profile: <full | standard | light | hotfix> (tier <critical | standard | light | hotfix>) — runtime path: <touched runtime or portal path | none> — dropped lanes: <none | list, each `SKIPPED (gate: <reason>)`>
 ### Lane plan: <the block the pipeline gave you, verbatim: tier, planned vs ran lane counts, advisory budget, manifest files, per-lane reasons>
 ### Lane manifest
 (Reproduce the manifest table the pipeline gave you VERBATIM: every lane is `run`, `FAILED`, `DEAD: <status>`, or `SKIPPED (gate: <reason>)`. Add the Investigation Workflow as `run (brief: <path>)` or `SKIPPED (gate: <reason>)`.)

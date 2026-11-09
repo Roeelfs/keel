@@ -413,7 +413,7 @@ row's receipt; the PR's spec-axis review (standards-spec-review) fails it on an 
 | tier | proof owed before merge | after deploy |
 |---|---|---|
 | light | the targeted test | - |
-| standard, runtime or portal behavior | one named PRE-MERGE DRIVE row: portal, a preview with real auth; backend, a staging/test-org probe of the changed seam; interaction UI, a browser scenario | - |
+| standard, runtime or portal behavior (the Profile line states `runtime path: <path>`; the validator then requires the row) | one named PRE-MERGE DRIVE row: portal, a preview with real auth; backend, a staging/test-org probe of the changed seam; interaction UI, a browser scenario | - |
 | critical | the PRE-MERGE DRIVE row | a POST-DEPLOY BAKE row |
 
 Drive, bake and any owed proof carry an owner and a close-by date (YYYY-MM-DD); the validator refuses one without,

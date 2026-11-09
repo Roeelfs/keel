@@ -107,11 +107,13 @@ def carried_errors(text, surviving_ids):
     """P1/P3: every surviving CRITICAL/MAJOR id sits in a carried row with a named proof; a drive, bake or
     owed proof names an owner and a close-by date; a critical-tier report carries both boundary rows."""
     critical = re.search(r"\(tier critical\)", text, re.IGNORECASE) is not None
-    if not surviving_ids and not critical:
+    rt = re.search(r"\(tier standard\)[^\n]*?runtime path:\s*([^\n;—]+)", text, re.IGNORECASE)
+    standard_runtime = rt is not None and rt.group(1).strip().strip("`<>").lower() not in ("", "none", "n/a")
+    if not surviving_ids and not critical and not standard_runtime:
         return []
     body = carried_block(text)
     if body is None:
-        what = f"SURVIVING CRITICAL/MAJOR finding(s) present ({', '.join(surviving_ids)})" if surviving_ids else "tier critical"
+        what = f"SURVIVING CRITICAL/MAJOR finding(s) present ({', '.join(surviving_ids)})" if surviving_ids else "tier critical or a standard-tier runtime path"
         return [f"{what} but no '## Carried obligations' section exists."]
     header, rows = carried_rows(body)
     col = {name: next((i for i, h in enumerate(header) if name in h.lower()), None) for name in ("proof", "owner", "close-by")}
@@ -136,6 +138,8 @@ def carried_errors(text, surviving_ids):
         for need in (DRIVE, BAKE):
             if not any(need in " | ".join(r).upper() for r in rows):
                 errors.append(f"tier critical: '## Carried obligations' needs a '{need}' row with owner and close-by date")
+    if standard_runtime and not any(DRIVE in " | ".join(r).upper() for r in rows):
+        errors.append(f"tier standard with a runtime path: '## Carried obligations' needs a '{DRIVE}' row with owner and close-by date")
     return errors
 
 
