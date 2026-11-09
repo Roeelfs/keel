@@ -7,7 +7,8 @@ Reads every owner (manifest, work-state snapshot, AT-WAKE through the Stop guard
 payload into the one template. Never writes a source. Prints one compact JSON line for the manager.
 --context prints the same payload as a short plain-text brief instead (state_brief.py) and writes no page: the
 manager reads it at every wake and session start, works the map from it, updates `## VIEW` and re-renders.
-Exit 0 = page written; 1 = unknown program or failed write. RENDER_STATE_NO_OPEN=1 skips Chrome; otherwise the one
+Exit 0 = page written; 1 = unknown program or failed write. After a written page it refreshes the founder overview
+(build_overview.py, debounced, best-effort). RENDER_STATE_NO_OPEN=1 skips Chrome; otherwise the one
 Chrome tab on the state pages shows the index.
 Owners and rules: ../specs/2026-11-03-manager-state-viewer.md
 """
@@ -816,9 +817,21 @@ def main(argv=None, run=subprocess.run):
         except (OSError, ValueError) as exc:
             print(f"render_state: cannot rewrite {out} with its diagram: {exc}", file=sys.stderr)
     print(json.dumps({"out": out, "problems": len(payload["problems"]), "stale": payload["stale"]["stale"],
-                      "author": payload["author"], "index": index_note,
+                      "author": payload["author"], "index": index_note, "overview": refresh_overview(),
                       "chrome": show_in_chrome(index_path)}))
     return 0
+
+
+def refresh_overview():
+    """Rebuild the founder overview's deterministic parts (build_overview.py). Best-effort: a failure is one stderr
+    line and a note in the output, never a failed render."""
+    try:
+        import build_overview
+        return build_overview.build()
+    except Exception as exc:  # noqa: BLE001 - any overview failure must leave the render's exit code alone
+        note = f"overview not refreshed: {type(exc).__name__}: {exc}"[:200]
+        print(f"render_state: {note}", file=sys.stderr)
+        return note
 
 
 def write_index(path, now):

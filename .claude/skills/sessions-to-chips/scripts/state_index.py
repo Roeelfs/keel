@@ -114,16 +114,18 @@ def _held_ids(h):
     return [x for x in ids if isinstance(x, str) and x]
 
 
-def build_index(now, titles=None):
+def build_index(now, titles=None, programs_dir=None):
     """Every sidecar, no network. One row per live program, named as its manager session is; stale and unrendered
-    ones collapse. A program whose name cannot be read keeps its slug and is counted in `problems`."""
+    ones collapse. A program whose name cannot be read keeps its slug and is counted in `problems`. Also the
+    program list of the founder overview (build_overview.py), so the two never disagree on which programs are live."""
+    programs_dir = programs_dir or st.PROGRAMS
     try:
-        titles = pf.program_titles(st.PROGRAMS) if titles is None else titles
+        titles = pf.program_titles(programs_dir) if titles is None else titles
     except OSError:
         titles = {}
     rows, quiet, blockers, problems, unnamed = [], [], [], [], []
     sidecars = {}
-    for path in sorted(glob.glob(os.path.join(st.PROGRAMS, "*.state.json"))):
+    for path in sorted(glob.glob(os.path.join(programs_dir, "*.state.json"))):
         try:
             with open(path) as fh:
                 data = json.load(fh)
@@ -137,7 +139,7 @@ def build_index(now, titles=None):
             owners.setdefault(t, s["program"])
         for pr in s.get("open_prs") or []:
             owners.setdefault(pr, s["program"])
-    for path in sorted(glob.glob(os.path.join(st.PROGRAMS, "*.json"))):
+    for path in sorted(glob.glob(os.path.join(programs_dir, "*.json"))):
         name = os.path.basename(path)[:-5]
         if "." in name:
             continue
