@@ -253,6 +253,15 @@ class ViewBlock(unittest.TestCase):
             _, _, problems = self.read(view_block(body))
             self.assertTrue(any(needle in p for p in problems), (body, problems))
 
+    def test_a_bare_string_row_is_its_required_field(self):
+        lines = [f"Decision {i}" for i in range(5)]
+        view, _, problems = self.read(view_block({"decisions": lines, "outcomes": ["Ship it"]}))
+        self.assertEqual(view["decisions"], [{"decision": d} for d in lines])
+        self.assertEqual(view["outcomes"], [{"outcome": "Ship it"}])
+        self.assertEqual(problems, [])
+        _, _, problems = self.read(view_block({"decisions": ["  "]}))
+        self.assertTrue(any("decisions[0] needs a text `decision`" in p for p in problems), problems)
+
     def test_v1_keys_stay_visible_and_name_their_v2_home(self):
         _, legacy, problems = self.read(view_block({"explanation": "Builds it.", "proven": [{"claim": "c", "evidence": "e"}]}))
         self.assertEqual({(x["key"], x["home"]) for x in legacy},
@@ -358,6 +367,18 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(side["holdings"][REPO]["prs"], {"8": ["apps/pay/a.ts"]})
         _, index = payload_of(os.path.join(PROGRAMS, "index.state.html"))
         self.assertIn("e2e", [r["program"] for r in index["rows"]])
+
+    def test_string_and_object_decisions_both_render_and_satisfy_the_author_line(self):
+        lines = [f"Decision {i}" for i in range(5)]
+        for slug, decisions, want in (("dec-strings", lines, lines),
+                                      ("dec-objects", VIEW["decisions"], [d["decision"] for d in VIEW["decisions"]])):
+            base = write_program(slug, state=AT_WAKE + "\n" + view_block(dict(VIEW, decisions=decisions)))
+            rc, line = render(slug)
+            self.assertEqual(rc, 0)
+            _, data = payload_of(base + ".state.html")
+            self.assertEqual([d["decision"] for d in data["history"]["decisions"]], want)
+            self.assertNotIn("decisions: none written", line["author"] + data["author"])
+            self.assertFalse(any("decisions[" in p["detail"] for p in data["problems"]), data["problems"])
 
     def test_a_canceled_bake_keeps_its_outcome_on_now(self):
         write_program("bake")
