@@ -90,6 +90,15 @@ prompt: |
   - Does the spec creep beyond declared scope?
   - Does it omit things declared in-scope?
 
+  ### G. Consumer and sibling census
+  For every contract, value, allowlist, projection, vocabulary or entry point
+  the spec changes, enumerate EVERY consumer and copy, not only the one the
+  spec names: offline, CLI, proof, golden-file and test-fixture callers;
+  every mirrored copy of an allowlist, projection or vocabulary; every deployed
+  entry point whose call graph reaches the change. Print the search command
+  you ran and its hit count. A consumer or copy the spec leaves unchanged and
+  does not rule out is a MAJOR gap (CRITICAL when it fails silently).
+
   ## Output Format
 
   ```
@@ -115,6 +124,10 @@ prompt: |
 
   ### Requirements Coverage: [PASS / N ISSUES]
   - [severity] user said "X" → spec [has it at section Y / MISSING]
+  ...
+
+  ### Consumer Census: [PASS / N ISSUES]
+  - search: `<command>` → <N> hits; [severity] <consumer/copy> at <path> — <unchanged and not ruled out>
   ...
 
   ### Summary

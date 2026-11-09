@@ -35,15 +35,18 @@ MANIFEST = run_dir.load_manifest()
 # runs in every profile; Step 1 names it and its advisory-feed failure rule, both main-loop decisions.
 # 2026-10-25: 10029 -> 11800. Mandatory-by-tier review: Step 1 now owns the tier choice and the lanePlan
 # (main-loop decisions), the plan command, and the no-skip process gate; the Opt-in and When-NOT-to-use text is gone.
-# 2026-10-27 (TKT-3219): 11800 -> 13500. The script-runner wrapper agents are gone, so the Bash gates (stage.py) and the
+# 2026-10-27: 11800 -> 13500. The script-runner wrapper agents are gone, so the Bash gates (stage.py) and the
 # stage-by-stage launch sequence are main-loop steps that must be named here; the old Step 2-4 prose is deleted.
-# 2026-10-27 (TKT-3222): 13500 -> 13950. Depth ladder R1-R4 (critical only for a cynap floor-domain spec, fix-verify vs
+# 2026-10-27: 13500 -> 13950. Depth ladder R1-R4 (critical only for a cynap floor-domain spec, fix-verify vs
 # delta re-review, frame.json repo/harnessOnly/floorDomain) is a Step 1/2 launcher decision; superseded text was trimmed.
-# 2026-10-27 (TKT-3222): 13950 -> 14500. Tightened liveSurface/cutover trigger wording, the tier-from-changed-surface
+# 2026-10-27: 13950 -> 14500. Tightened liveSurface/cutover trigger wording, the tier-from-changed-surface
 # clause (docs-only is no downgrade) and the evidence-quote rule are main-loop gate decisions; superseded wording was replaced.
-# 2026-11-04 (TKT-3219): no growth (14419 -> 14498 under 14500). liveSurface narrowed to runtime behavior of a live
+# 2026-11-04: no growth (14419 -> 14498 under 14500). liveSurface narrowed to runtime behavior of a live
 # system; the full trigger list and the 40-of-40 rationale live in reference.md.
-MAX_SKILL_BYTES = 14500
+# 2026-11-09: 14500 -> 15700. Escape-analysis rules: the externalShape gate, the keepFrom census and path-floor plan
+# refusals (frame fields + `plan --spec`) are Step 1 decisions, and review-to-build closure with proof per tier is a
+# Step 5c duty; the trigger list, the tier table and the rationale live in reference.md.
+MAX_SKILL_BYTES = 15700
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
 SUPPLEMENTS = {"adr-auditor", "legal-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "system1-elevation", "critic-hotfix", "critic-adversarial", "critic-frontier", "dependency-currency"}
@@ -103,16 +106,33 @@ class ManifestTests(unittest.TestCase):
             e = next(x for x in MANIFEST["lanes"] if x["label"] == sub)
             self.assertEqual((e["agentType"], e["model"]), ("critic", "opus"))
         hotfix = {e["label"] for e in MANIFEST["lanes"] if "hotfix" in e["profiles"]}
-        # 2026-10-22 (founder): module shape is checked even in a hotfix. 2026-11-04 (TKT-3219): dependency/CVE
+        # 2026-10-22 (founder): module shape is checked even in a hotfix. 2026-11-04: dependency/CVE
         # currency runs in a hotfix only when the dependencyChange gate fired.
         self.assertEqual(hotfix, {"codebase-verifier", "critic-hotfix", "codex-frontier", "architecture-auditor"})
 
     def test_gated_lanes_use_declared_gates(self):
         for e in MANIFEST["lanes"]:
-            if e.get("gate"):
-                self.assertIn(e["gate"], MANIFEST["gates"])
+            self.assertLessEqual(set(run_dir.lane_gates(e)), set(MANIFEST["gates"]), e["label"])
         for g in MANIFEST["gates"]:
-            self.assertTrue(any(e.get("gate") == g for e in MANIFEST["lanes"]), f"gate {g} gates no lane")
+            self.assertTrue(any(g in run_dir.lane_gates(e) for e in MANIFEST["lanes"]), f"gate {g} gates no lane")
+            self.assertIn(f"`{g}`", SKILL, f"SKILL.md does not name gate {g}")
+
+    def test_escape_analysis_rules_are_wired(self):
+        le = next(x for x in MANIFEST["lanes"] if x["label"] == "live-evidence-auditor")
+        self.assertEqual(le["gate"], ["liveSurface", "externalShape"])
+        comp = next(x for x in MANIFEST["lanes"] if x["label"] == "completeness-reviewer")
+        self.assertEqual(comp["keepFrom"], "standard")
+        self.assertEqual({p["class"] for p in MANIFEST["pathFloors"]},
+                         {"auth-session", "billing-ledger", "migrations", "infra-stack", "credentials-kms", "shared-reader"})
+        ref = (SKILL_DIR / "reference.md").read_text()
+        for needle in ("## Closure: carried obligations and proof per tier", "PRE-MERGE DRIVE", "POST-DEPLOY BAKE",
+                       "Invariant restored:", "Siblings swept:", "Found by:", "**Path-derived floor (R5", "**externalShape gate"):
+            self.assertIn(needle, ref)
+        self.assertIn("--spec <spec>", SKILL)
+        self.assertIn("CAPTURED", (PROMPTS_DIR / "live-evidence-auditor.md").read_text())
+        self.assertIn("NEEDS-LIVE-EVIDENCE", (PROMPTS_DIR / "finding-falsifier.md").read_text())
+        tpl = (SKILL_DIR / "report-template.md").read_text()
+        self.assertIn("| ID | Obligation | Proof | Owner | Close-by |", tpl)
 
     def test_codex_lanes_have_class_and_prompts(self):
         for e in MANIFEST["lanes"]:
@@ -127,7 +147,7 @@ class ManifestTests(unittest.TestCase):
                         "the lane reads the improve-codebase-architecture skill as its lens")
 
     def test_adr_and_dependency_lanes_are_gate_only(self):
-        """TKT-3219: each runs only when its trigger fires, at every tier; SKILL.md names both gates."""
+        """Each runs only when its trigger fires, at every tier; SKILL.md names both gates."""
         for label, gate in (("adr-auditor", "adrTouched"), ("dependency-currency", "dependencyChange")):
             e = next(x for x in MANIFEST["lanes"] if x["label"] == label)
             self.assertEqual((e["gate"], e["profiles"]), (gate, []))
@@ -256,8 +276,7 @@ class SkillMdTests(unittest.TestCase):
         self.assertIn("docs-only spec that specifies a money, security, tenancy, credential or shared-infrastructure change keeps the floor", skill)
         self.assertIn("shared reader/writer used by every Lambda", skill)
         self.assertIn("gate_evidence_errors", ref)
-        self.assertIn("TKT-3023", ref)
-        self.assertIn("TKT-3160", ref)
+        self.assertIn("two replayed escapes", ref)
 
     def test_live_surface_gate_is_narrowed_to_runtime_behavior(self):
         skill = (SKILL_DIR / "SKILL.md").read_text()
@@ -265,7 +284,7 @@ class SkillMdTests(unittest.TestCase):
         self.assertIn("`liveSurface` (changes runtime behavior of a live system AND names it", skill)
         self.assertIn("merge-is-deploy alone never fires it, nor tooling, harness, skills, docs, CI or lint", skill)
         self.assertNotIn("changes a deployed artifact AND names it", skill)
-        self.assertIn("**Narrowed liveSurface gate (TKT-3219", ref)
+        self.assertIn("**Narrowed liveSurface gate (founder 2026-11-04)", ref)
         self.assertIn("config that has no live runtime consumer", ref)
         for name in ("live-evidence-auditor.md", "performance-architect.md"):
             prompt = (SKILL_DIR / "prompts" / name).read_text()

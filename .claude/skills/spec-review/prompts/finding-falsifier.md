@@ -49,7 +49,11 @@ prompt: |
 
   ## Verdict (exactly one)
   - REFUTED: <the specific evidence that defeats it — spec §, file:line, or
-    existing mechanism>
+    existing mechanism>. If the finding is about EXTERNAL or DEPLOYED behavior
+    (a vendor/cloud/runtime response, live config or data, a deployed path),
+    REFUTED must cite a probe or test you EXECUTED, with its command and
+    output; reasoning alone is never an oracle there, so the verdict is
+    NEEDS-LIVE-EVIDENCE.
   - SURVIVES: <what you tried and why it failed to defeat the finding; note
     any strengthening evidence you found>
   - SURVIVES-BUT-FIX-REJECTED: <finding stands; the proposed fix is wrong

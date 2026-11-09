@@ -36,6 +36,8 @@ LANES_JSON = SKILL_DIR / "lanes.json"
 OVERRIDE_REL = ".claude/spec-review.lanes.json"
 RETUNABLE = ("model", "profiles", "codexClass")
 PROMPTS_DIR = SKILL_DIR / "prompts"
+# Depth order for `keepFrom` and the path floor; hotfix sits outside the ladder.
+TIER_ORDER = ("light", "standard", "critical")
 
 SEVERITIES = ("CRITICAL", "MAJOR", "MINOR", "ELEVATE", "CAUTION")
 FALSIFIED = ("CRITICAL", "MAJOR")
@@ -81,8 +83,10 @@ def validate_manifest(m, prompts_dir=PROMPTS_DIR):
             errors.append(f"{who}: agentType and idPrefix are required")
         if not set(e.get("profiles", [])) <= set(profiles):
             errors.append(f"{who}: profiles must be a subset of {profiles}")
-        if e.get("gate") is not None and e["gate"] not in gates:
-            errors.append(f"{who}: unknown gate {e['gate']}")
+        if not isinstance(e.get("gate"), (str, list, type(None))) or set(lane_gates(e)) - set(gates):
+            errors.append(f"{who}: unknown gate {e.get('gate')}")
+        if e.get("keepFrom") is not None and e["keepFrom"] not in TIER_ORDER:
+            errors.append(f"{who}: keepFrom must be one of {list(TIER_ORDER)}")
         if e.get("prompt"):
             if not (Path(prompts_dir) / e["prompt"]).is_file():
                 errors.append(f"{who}: prompt file {e['prompt']} not found")
@@ -103,7 +107,34 @@ def validate_manifest(m, prompts_dir=PROMPTS_DIR):
         missing = [p for p in profiles if p not in e.get("profiles", [])]
         if missing:
             errors.append(f"{e['label']}: floor lane must run in every profile (missing {missing})")
+    for e in (x for x in m.get("lanes", []) if x.get("keepFrom") in TIER_ORDER):
+        need = [m["tiers"][t]["profile"] for t in kept_tiers(e) if t in m.get("tiers", {})]
+        missing = [p for p in need if p not in e.get("profiles", [])]
+        if missing:
+            errors.append(f"{e['label']}: keepFrom {e['keepFrom']} lane must run in profile(s) {missing}")
+    for pf in m.get("pathFloors", []):
+        try:
+            re.compile(pf["pattern"])
+        except (KeyError, TypeError, re.error) as ex:
+            errors.append(f"pathFloors {pf!r}: needs a class and a valid regex pattern ({ex})")
     return errors
+
+
+def lane_gates(e):
+    """A lane's domain gate(s): null, one gate name, or a list (any one fired runs the lane)."""
+    g = e.get("gate")
+    return [g] if isinstance(g, str) else list(g or [])
+
+
+def fired_gate(e, gates):
+    """The first of the lane's gates that fired, else None."""
+    return next((g for g in lane_gates(e) if (gates.get(g) or {}).get("run")), None)
+
+
+def kept_tiers(e):
+    """Tiers where a `keepFrom` lane is non-droppable: keepFrom and every tier above it."""
+    k = e.get("keepFrom")
+    return TIER_ORDER[TIER_ORDER.index(k):] if k in TIER_ORDER else ()
 
 
 def merge_override(base, ov):
@@ -119,8 +150,8 @@ def merge_override(base, ov):
         e = by.get(label)
         if not e:
             errors.append(f"disable: unknown lane {label}")
-        elif e.get("floor") or e.get("gate") or e.get("substituteFor"):
-            errors.append(f"disable: {label} is non-droppable (floor, domain-gate or substitute lane)")
+        elif e.get("floor") or e.get("gate") or e.get("substituteFor") or e.get("keepFrom"):
+            errors.append(f"disable: {label} is non-droppable (floor, domain-gate, keepFrom or substitute lane)")
     m["lanes"] = [e for e in m["lanes"] if e["label"] not in lanes.get("disable", [])]
     for label, changes in lanes.get("retune", {}).items():
         e = by.get(label)
@@ -1131,11 +1162,37 @@ def tier_rule_errors(m, tier, gates, scope, cynap):
     return []
 
 
-def skip_reason(e, g, profile, tier):
-    if g:
-        r = (g.get("reason") or "").strip()
-        return f"gate: {e['gate']} not fired" + (f" ({r})" if r.lower() not in ("", "none", "n/a", "na") else "")
+def skip_reason(e, gates, profile, tier):
+    names = lane_gates(e)
+    if names:
+        rs = [(gates[n].get("reason") or "").strip() for n in names]
+        rs = [r for r in rs if r.lower() not in ("", "none", "n/a", "na")]
+        return f"gate: {'/'.join(names)} not fired" + (f" ({'; '.join(rs)})" if rs else "")
     return f"gate: not in tier {tier} (profile {profile})"
+
+
+SPEC_PATH_RE = re.compile(r"[\w.@-]+(?:/[\w.@-]+)+/?|\b[\w-]+\.(?:py|tsx?|jsx?|mjs|go|rs|sql|tf|ya?ml|json|sh)\b")
+
+
+def spec_paths(text):
+    """Every path-like token a spec names (URLs excluded)."""
+    return sorted({p.strip("./") or p for p in SPEC_PATH_RE.findall(re.sub(r"https?://\S+", " ", text))})
+
+
+def path_floor_errors(m, tier, paths, scope):
+    """R5: a spec naming a floor-class path (lanes.json `pathFloors`) cannot run below critical unless
+    frame.pathFloorReasons.<class> gives a reason that names one of the hit paths."""
+    if tier not in ("standard", "light") or scope.get("harnessOnly"):
+        return []
+    hits = {}
+    for pf in m.get("pathFloors", []):
+        hit = [p for p in paths if re.search(pf["pattern"], p, re.I)]
+        if hit:
+            hits[pf["class"]] = hit
+    waivers = scope.get("pathFloorReasons") or {}
+    return [f"tier {tier} refused (R5): the spec names {pf_class} path(s) {hit[:5]}; run critical (set frame.floorDomain), "
+            f"or set frame.pathFloorReasons.{pf_class} to a reason that names the path"
+            for pf_class, hit in hits.items() if not any(p in str(waivers.get(pf_class, "")) for p in hit)]
 
 
 def plan_lanes(m, tier, gates, lane_plan, scope=None):
@@ -1154,12 +1211,13 @@ def plan_lanes(m, tier, gates, lane_plan, scope=None):
     if errors:
         return None, errors
     errors += tier_rule_errors(m, tier, gates, scope, cynap)
+    errors += path_floor_errors(m, tier, scope.get("specPaths") or [], scope)
     fired = [g for g in m["gates"] if gates[g]["run"]]
     if tier == "light" and fired:
         errors.append(f"tier light is below the floor: gate(s) {fired} fired (a fired gate forces standard or critical)")
     add, drop, why = lane_plan.get("add", []), lane_plan.get("drop", []), lane_plan.get("reasons", {})
     lanes = {e["label"]: e for e in m["lanes"] if not e.get("substituteFor")}
-    gate_of = lambda e: gates[e["gate"]] if e.get("gate") else None
+    runtime_path = str(scope.get("runtimePath") or "").strip()
     for label in add + drop:
         if label not in lanes:
             errors.append(f"lanePlan: unknown lane label {label}")
@@ -1170,23 +1228,28 @@ def plan_lanes(m, tier, gates, lane_plan, scope=None):
             errors.append(f"lanePlan.reasons: unknown lane label {label}")
     run, skipped, reasons = [], [], {}
     for e in lanes.values():
-        g = gate_of(e)
+        g = fired_gate(e, gates)
         label = e["label"]
+        census = tier == "light" and runtime_path and e.get("keepFrom")
         if e.get("cynapOnly") and not cynap:
             skipped.append({"label": label, "reason": f"gate: cynap-only lane, repo {scope.get('repo')} is not a cynap repo"})
         elif label in drop:
             if tier == "critical":
                 errors.append(f"lanePlan: {label} cannot be dropped at tier critical (only add)")
-            elif e.get("floor") or (g and g["run"]):
+            elif e.get("floor") or g:
                 errors.append(f"lanePlan: {label} is non-droppable (floor lane or its gate fired)")
+            elif tier in kept_tiers(e) or census:
+                errors.append(f"lanePlan: {label} is non-droppable at tier {tier} (keepFrom {e['keepFrom']}; light keeps it when frame.runtimePath is set)")
             elif not (profile in e["profiles"] or label in add):
                 errors.append(f"lanePlan: drop {label} is not in tier {tier}'s set")
             skipped.append({"label": label, "reason": f"gate: lanePlan drop: {why.get(label, '')}"})
-        elif profile in e["profiles"] or (g and g["run"]) or label in add:
+        elif profile in e["profiles"] or g or label in add or census:
             run.append(e)
-            reasons[label] = why.get(label) or (f"gate {e['gate']} fired: {g['reason']}" if g and g["run"] and profile not in e["profiles"] else f"tier {tier} default set")
+            reasons[label] = why.get(label) or (f"gate {g} fired: {gates[g]['reason']}" if g and profile not in e["profiles"]
+                                                else f"runtime path touched: {runtime_path}" if census and profile not in e["profiles"]
+                                                else f"tier {tier} default set")
         else:
-            skipped.append({"label": label, "reason": skip_reason(e, g, profile, tier)})
+            skipped.append({"label": label, "reason": skip_reason(e, gates, profile, tier)})
     if not errors and not any(e["label"] == "codex-frontier" for e in run):
         errors.append("the Astra frontier lane is non-droppable in every tier")
     if errors:
@@ -1218,11 +1281,16 @@ def cmd_plan(a):
         return emit({"ok": False, "errors": errors, "files": files}, False)
     if not isinstance(frame.get("repo"), str) or not frame["repo"]:
         return emit({"ok": False, "errors": ["frame.repo (the repo name the spec belongs to) is required"], "files": files}, False)
-    scope = {"repo": frame["repo"], "harnessOnly": bool(frame.get("harnessOnly")), "floorDomain": str(frame.get("floorDomain") or "")}
+    spec = Path(a.spec) if a.spec else None
+    if not spec or not spec.is_file():
+        return emit({"ok": False, "errors": [f"--spec must name the spec file (got {a.spec!r}): the path floor reads its named paths"], "files": files}, False)
+    scope = {"repo": frame["repo"], "harnessOnly": bool(frame.get("harnessOnly")), "floorDomain": str(frame.get("floorDomain") or ""),
+             "runtimePath": str(frame.get("runtimePath") or ""), "pathFloorReasons": frame.get("pathFloorReasons") or {},
+             "specPaths": spec_paths(spec.read_text(encoding="utf-8", errors="replace"))}
     plan, errors = plan_lanes(manifest, frame["lanePlan"].get("tier"), frame["gates"], frame["lanePlan"], scope)
     if errors:
         return emit({"ok": False, "errors": errors, "files": files}, False)
-    plan["files"], plan["scope"] = files, scope
+    plan["files"], plan["scope"] = files, {k: v for k, v in scope.items() if k != "specPaths"}
     write(run / "manifest.json", json.dumps(manifest, indent=1))
     write(run / "plan.json", json.dumps(plan, indent=1))
     return emit({"ok": True, "tier": plan["tier"], "profile": plan["profile"], "files": files, "planned": plan["planned"],
@@ -1242,7 +1310,7 @@ def main(argv=None):
         p.set_defaults(fn=fn)
         return p
 
-    add("plan", cmd_plan, "root", "input")
+    add("plan", cmd_plan, "root", "input", "spec")
     add("init", cmd_init, "spec", "root", "sid", "runtime", "skill-dir")
     add("extract-finish", cmd_extract_finish)
     add("lanes", cmd_lanes, "spec", "lanes")

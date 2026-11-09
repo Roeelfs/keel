@@ -6,7 +6,8 @@ The pipeline checks mechanically (scripts/run_dir.py `check-report` + scripts/va
 the one canonical `### Falsifier wave:` line with the real counts; every CRITICAL/MAJOR id from any lane
 envelope present with a REFUTED/SURVIVES verdict on its line (SURVIVES with a "not falsified at tier" note when the tier's falsifier scope excludes it); every lane in the manifest as run or
 `SKIPPED (gate: <reason>)`; a Codex Frontier (Astra) or critic-frontier result; no unfilled placeholders;
-a `### Carried obligations` section whenever an Obs-/Sec-/LE- CRITICAL/MAJOR survives.
+a `### Carried obligations` table with a non-empty Proof cell for every surviving CRITICAL/MAJOR id (any lane),
+and, at tier critical, a PRE-MERGE DRIVE and a POST-DEPLOY BAKE row with owner and close-by date.
 
 Severity vocabulary: CRITICAL (security, data loss, compliance, rollback safety; block ship) / MAJOR
 (correctness, availability, contract break; fix before release) / MINOR (performance, cosmetic, edge
@@ -211,11 +212,21 @@ Kept in its own section on purpose — elevation suggestions are NOT severity-ra
 ...
 
 ### Carried obligations
-One line per SURVIVING CRITICAL/MAJOR Obs-/Sec-/LE- finding, by ID — these are the
-findings that were real, not auto-applied as a spec-prose fix (a live-surface gap the
-spec's scope can't absorb, a policy violation routed to a follow-up issue, an
-observability gap left for the build to instrument), and so must not silently vanish
-when the review closes. Omit the section only when there are none.
-- Obs-2 — SURVIVES: <what remains true and why it wasn't fixed here> — tracked as: <follow-up issue / build-time proof obligation>
-...
+The review-to-build closure table: one row per SURVIVING CRITICAL/MAJOR finding from ANY lane
+(EC/Sec/Obs/LE ids and every F-N unit; one row may list several ids), whether it was fixed in spec
+prose or left for the build, plus one `UX-N` row per interaction/UX acceptance line the spec states.
+Proof names the test, probe, drive or bake that closes the row ("TBD" or "owed" alone is refused).
+Tier rows: `standard` with runtime or portal behavior adds a PRE-MERGE DRIVE row (portal: preview with
+real auth; backend: staging/test-org probe of the changed seam; interaction UI: a browser scenario);
+`critical` adds a PRE-MERGE DRIVE and a POST-DEPLOY BAKE row. Drive, bake and owed rows need an owner
+and a close-by date (YYYY-MM-DD). The build PR reproduces this table with each row's receipt.
+Omit the section only when no finding survived and the tier is not critical.
+
+| ID | Obligation | Proof | Owner | Close-by |
+|---|---|---|---|---|
+| F-1, EC-3 | <what must be true in the build> | test: `<test name>` | - | - |
+| Obs-2 | <the instrumentation the build owes> | probe: `<command>` | - | - |
+| UX-1 | <the stated interaction acceptance line> | drive: <browser scenario> | <owner> | <YYYY-MM-DD> |
+| PRE-MERGE DRIVE | <the changed seam> | drive: <preview / staging probe / browser scenario> | <owner> | <YYYY-MM-DD> |
+| POST-DEPLOY BAKE | <the live signal watched> | bake: <metric/alarm and window> | <owner> | <YYYY-MM-DD> |
 ```

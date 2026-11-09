@@ -269,16 +269,19 @@ when its `profiles` list holds the tier's profile OR its domain gate fired OR th
 |---|---|---|---|
 | critical | `full` | the full 13-lane set (incl. legal, provider-fit, observability, drift, 3 extra Codex) | every CRITICAL, plus each MAJOR only one lane raised (`uncorroborated`) |
 | standard | `standard` | completeness, codebase-verifier, edge-case, codex-frontier | CRITICAL only |
-| light | `light` | codebase-verifier, edge-case, codex-frontier; refused if any gate fired | off |
+| light | `light` | codebase-verifier, edge-case, codex-frontier (plus completeness when `frame.runtimePath` is set); refused if any gate fired | off |
 | hotfix | `hotfix` | codebase-verifier, architecture, critic-hotfix, codex-frontier | every CRITICAL/MAJOR (`all`) |
 
 Findings outside the falsifier scope still appear in the report (verdict word SURVIVES with a
 "not falsified at tier" note naming why: corroborated by a second lane, outside the tier scope or ceiling stop); only the falsifier dispatch is narrowed (`run_dir.py` `FALSIFIER_MODES`). `uncorroborated` is decided per merged unit after the merge: a MAJOR unit whose members come from two or more distinct lanes skips the falsifier; any unit with a CRITICAL member is always falsified.
-`floor` lanes (codex-frontier, codebase-verifier) are non-droppable, as is any lane whose gate fired.
+`floor` lanes (codex-frontier, codebase-verifier) are non-droppable, as is any lane whose gate fired. A lane's `gate`
+may be a list (live-evidence-auditor: `liveSurface` or `externalShape`); any one fired runs it. A `keepFrom` lane
+(completeness-reviewer, `keepFrom: standard`) cannot be dropped, disabled or retuned out of its profiles at that tier
+and above, nor at `light` when `runtimePath` is set: a "reduced round" never loses the consumer census (P4).
 
 **lanePlan** (main loop, Step 1): `{tier, add, drop, reasons}`, validated by `run_dir.py plan`
-(unknown label, drop at critical, drop of a floor/gate-fired lane, light with a gate fired,
-missing reason: all errors). Reasons print in the report's `### Lane plan` block either way.
+(unknown label, drop at critical, drop of a floor/gate-fired/`keepFrom` lane, light with a gate fired,
+a `pathFloors` hit below critical with no naming reason, missing reason: all errors). Reasons print in the report's `### Lane plan` block either way.
 
 **Per-repo override** `<project root>/.claude/spec-review.lanes.json`, merged over `lanes.json` and
 validated by the same `validate_manifest`; both file paths are logged in the plan and the report:
@@ -293,12 +296,12 @@ validated by the same `validate_manifest`; both file paths are logged in the pla
 ```
 
 Added lanes are `kind: claude` with an inline brief. Retunable fields: `model`, `profiles`, `codexClass`.
-Floor, gate and substitute lanes cannot be disabled.
+Floor, gate, `keepFrom` and substitute lanes cannot be disabled.
 
 **Budget dials**: `maxLanes`, `maxCodexLanes` (advisory: the plan warns and the report prints planned vs ran),
 `falsifier` (`all|uncorroborated|critical|off`) and `tokenCeiling`, which is calibrated and ENFORCED.
 
-**Token ceilings (TKT-3219).** Calibrated at about 0.7x the measured means (64.6M critical, 32.3M standard):
+**Token ceilings.** Calibrated at about 0.7x the measured means (64.6M critical, 32.3M standard):
 critical 45,000,000, standard 22,000,000, light 2,000,000, hotfix 3,000,000. Spend is Claude lane tokens
 (`lane_spend.py`: input + cache + output per `ROLE:` lane, counting only agents whose prompt names this run dir)
 plus the `tokens used` of this run's Codex dispatches. Every gate in `stage.py` re-measures it into
@@ -314,7 +317,7 @@ launched before any spend is known, so the stop governs only the later waves; no
 already running cannot be stopped either: one lane can cross 1.5x on its own, and the synthesis report still runs
 (the review is mandatory). At the stop its brief is lean: envelopes, merged units, verdicts and lane files only.
 
-**Quota stop and dead-agent cap (TKT-3231).** The first session/weekly limit message in any of this run's Claude
+**Quota stop and dead-agent cap.** The first session/weekly limit message in any of this run's Claude
 agents (a synthetic `rate_limit` assistant message, `quota_hits` in `lane_spend.py`) or a Codex lane graded QUOTA
 sets a sticky `quotaStopped` in `state.json` and `lane-spend.json`; `post-review`, `synth-prep`, `falsify-prep` and
 `falsify-check` then refuse (exit 1, `quotaStopped:true`, one `QUOTA STOP` line) and launch nothing, so a limit is
@@ -326,7 +329,7 @@ agent with no result is DEAD, retried once, then the stage fails (the workflow's
 
 ## Why gate
 
-A pre-flight check (TKT-3239) that runs BEFORE `prepare`, so no review token is spent on a spec that should not be
+A pre-flight check that runs BEFORE `prepare`, so no review token is spent on a spec that should not be
 built as written. One Opus 5.5 lane (`why-gate` in `lanes.json` `support`, brief `prompts/why-gate.md`, no fan-out)
 answers six questions: (1) what real trigger or evidence makes this needed now; (2) can the playground (ADR-0036:
 customer config, flows, MCP) or an existing primitive already do it; (3) the smallest version that delivers the
@@ -350,7 +353,7 @@ lists it in `lane-spend.json` and counts it in the tier's `tokenCeiling` account
 
 ## Run costs (what this skill spends)
 
-The measured study (TKT-3219) found Claude lanes carry 99.6% of spec-review tokens and cache reads dominate, so
+The measured study found Claude lanes carry 99.6% of spec-review tokens and cache reads dominate, so
 cost follows turns x context. The levers, all in this skill: no LLM agent runs a command (every Bash step is a
 `stage.py` gate the main loop runs); the dossier and decisions miners and the Codex envelope extraction run on
 Codex (`verify` / `luna` / `luna`), with the Claude lane as the fallback only when the Codex lane is DEAD,
@@ -374,11 +377,52 @@ floor domain exists (security or cutover gate fired, the cutover being shared-st
 otherwise run `standard`, where every fired gate still adds its lane. Lanes marked `cynapOnly` (legal-auditor,
 operator-plane-architect) are skipped, with that reason, in any other repo.
 
-**Gate evidence (TKT-3222, founder 2026-10-27).** `run_dir.py plan` rejects a fired gate whose reason quotes no path, file:line, backticked token or snake_case/camelCase identifier (`gate_evidence_errors`). liveSurface fires only for a changed, named runtime behavior of a live system (narrowed by TKT-3219 below); cutover only for a removed/replaced owner with a stated switch-over step. Tier follows the changed surface: "docs only" is never a downgrade for a money, security, tenancy, credential or shared-infrastructure spec (a docs PR specifying a money migration stays on the floor), and a shared reader/writer used by every Lambda or process/sandbox-killing code stays critical (replay cases TKT-3023, TKT-3160).
+**Path-derived floor (R5, P6).** The floor check was one-directional: a fired gate or `floorDomain` could raise the
+tier, but nothing read the spec's own paths. `plan --spec` now extracts every path the spec names (URLs excluded)
+and matches it against `lanes.json` `pathFloors`, a small table of generic classes (auth-session, billing-ledger,
+migrations, infra-stack, credentials-kms, shared-reader; each a `class` and a regex). A hit refuses `standard` and
+`light` unless `frame.pathFloorReasons.<class>` is a reason that contains one of the hit paths (e.g. "reads
+`src/auth/flags.ts` for a label only; no auth decision changes"). A harness-only spec is exempt (it tops out at
+standard by R2), as is `hotfix`. Retune the table in `lanes.json`; keep classes generic.
 
-**Gated ADR and dependency lanes (TKT-3219, founder 2026-11-04).** `adr-auditor` and `dependency-currency` were always-on (critical+standard, dependency-currency also hotfix) and were among the costliest non-falsifier lanes (adr 95M, dependency 134M tokens over 36 reviews; critical reviews averaged 48.5M vs the 45M ceiling). Each now runs at any tier only when its gate fires: `adrTouched` (the spec adds, changes or supersedes an Accepted ADR or platform invariant, or edits a `docs/adr/` file) and `dependencyChange` (the spec adds, upgrades, removes or pins a package, vendor, SDK or runtime version). An unfired gate skips the lane with `gate: <name> not fired` in the plan; a fired gate makes the lane non-droppable and forbids `light`. The ADR hard stop is unchanged once the lane is planned (`founder_approval_needed` without `founder_approval_marker_present`, or a missing envelope, stops the review), so firing `adrTouched` is the main loop's duty whenever an ADR or invariant moves. The dependency lane checks installed vs latest versions, CVE/GHSA advisories joined to CISA KEV with reachability, changelogs since the installed version, current vendor docs via Context7, and workarounds a newer version removes. Falsifier policy and ceilings are unchanged.
+**Gate evidence (founder 2026-10-27).** `run_dir.py plan` rejects a fired gate whose reason quotes no path, file:line, backticked token or snake_case/camelCase identifier (`gate_evidence_errors`). liveSurface fires only for a changed, named runtime behavior of a live system (narrowed below); cutover only for a removed/replaced owner with a stated switch-over step. Tier follows the changed surface: "docs only" is never a downgrade for a money, security, tenancy, credential or shared-infrastructure spec (a docs PR specifying a money migration stays on the floor), and a shared reader/writer used by every Lambda or process/sandbox-killing code stays critical (two replayed escapes: a docs-only money spec and a shared process-tree killer).
 
-**Narrowed liveSurface gate (TKT-3219, founder 2026-11-04).** In cynap merging a PR is a prod deploy, so "changes a deployed artifact AND names it" was true of nearly every spec: liveSurface fired in 40 of 40 recent plans, and its two lanes (`live-evidence-auditor`, 163M tokens; `performance-architect`) ran on every review. The gate now fires only when the spec changes RUNTIME BEHAVIOR of a live system: request handlers, dispatch or queues, webhooks, billing or money paths, auth or credentials, data migrations or schema on live stores, deployed infrastructure wiring, or a model/LLM boundary. It does not fire for a spec that only changes tooling, the harness, skills, docs, CI config, dev scripts, lint rules, or config that has no live runtime consumer, even though merging it deploys something. The evidence rule is unchanged: a fired liveSurface reason must quote the runtime surface (a path, file:line or identifier), or `run_dir.py plan` rejects it. Lane membership, ceilings, falsifier policy and the other gates are unchanged.
+**Gated ADR and dependency lanes (founder 2026-11-04).** `adr-auditor` and `dependency-currency` were always-on (critical+standard, dependency-currency also hotfix) and were among the costliest non-falsifier lanes (adr 95M, dependency 134M tokens over 36 reviews; critical reviews averaged 48.5M vs the 45M ceiling). Each now runs at any tier only when its gate fires: `adrTouched` (the spec adds, changes or supersedes an Accepted ADR or platform invariant, or edits a `docs/adr/` file) and `dependencyChange` (the spec adds, upgrades, removes or pins a package, vendor, SDK or runtime version). An unfired gate skips the lane with `gate: <name> not fired` in the plan; a fired gate makes the lane non-droppable and forbids `light`. The ADR hard stop is unchanged once the lane is planned (`founder_approval_needed` without `founder_approval_marker_present`, or a missing envelope, stops the review), so firing `adrTouched` is the main loop's duty whenever an ADR or invariant moves. The dependency lane checks installed vs latest versions, CVE/GHSA advisories joined to CISA KEV with reachability, changelogs since the installed version, current vendor docs via Context7, and workarounds a newer version removes. Falsifier policy and ceilings are unchanged.
+
+**Narrowed liveSurface gate (founder 2026-11-04).** In the product repo merging a PR is a prod deploy, so "changes a deployed artifact AND names it" was true of nearly every spec: liveSurface fired in 40 of 40 recent plans, and its two lanes (`live-evidence-auditor`, 163M tokens; `performance-architect`) ran on every review. The gate now fires only when the spec changes RUNTIME BEHAVIOR of a live system: request handlers, dispatch or queues, webhooks, billing or money paths, auth or credentials, data migrations or schema on live stores, deployed infrastructure wiring, or a model/LLM boundary. It does not fire for a spec that only changes tooling, the harness, skills, docs, CI config, dev scripts, lint rules, or config that has no live runtime consumer, even though merging it deploys something. The evidence rule is unchanged: a fired liveSurface reason must quote the runtime surface (a path, file:line or identifier), or `run_dir.py plan` rejects it. Lane membership, ceilings, falsifier policy and the other gates are unchanged.
+
+**externalShape gate (P2, 2026-11-09).** The dominant escape class was a spec asserting the shape of something
+unit tests cannot instantiate, then a fixture encoding the same invented value, so green tests defended the bug.
+The gate fires when the spec asserts a shape, behavior, limit or lifecycle of: a vendor response or event body, a
+cloud audit/log/query dialect, a managed-runtime lifecycle (init/freeze/thaw), a serverless or remote DB client
+versus the embedded one used in tests, a KMS/IAM decision, a real production head or fixture, or an LLM following
+an instruction. When fired, live-evidence-auditor runs at every tier and cannot be dropped, `light` is refused (any
+fired gate forces `standard`+), and the spec must attach a CAPTURED real sample or a printed probe (command +
+date). spec-test-plan builds the fixture from that sample, never an invented value; an instruction-following
+assumption needs an eval row, not prose.
+
+## Closure: carried obligations and proof per tier
+
+A review finding is closed by the build, not by the report (P1). `### Carried obligations` in the report is a table
+`| ID | Obligation | Proof | Owner | Close-by |` with one row per surviving CRITICAL/MAJOR finding from ANY lane
+(EC/Sec/Obs/LE and every F-N unit; a row may list several ids) and per interaction/UX acceptance line the spec
+states (`UX-N`). Proof names a test, probe, drive or bake. `validate_review_report.py` refuses a missing id, a
+table with no Proof column and an empty or "TBD"/"owed" proof. The build PR body reproduces the table with each
+row's receipt; the PR's spec-axis review (standards-spec-review) fails it on an unproven row.
+
+| tier | proof owed before merge | after deploy |
+|---|---|---|
+| light | the targeted test | - |
+| standard, runtime or portal behavior | one named PRE-MERGE DRIVE row: portal, a preview with real auth; backend, a staging/test-org probe of the changed seam; interaction UI, a browser scenario | - |
+| critical | the PRE-MERGE DRIVE row | a POST-DEPLOY BAKE row |
+
+Drive, bake and any owed proof carry an owner and a close-by date (YYYY-MM-DD); the validator refuses one without,
+and a `(tier critical)` report without both rows (P3). A proof owed with no named closing step is refused. A proof
+later closed with a different result than the PR claimed is logged as an escape (LEARNINGS escape ledger).
+
+**Fix receipt (P4).** A fix PR with no spec still carries three lines: `Invariant restored:` what is true again;
+`Siblings swept:` the command that enumerated every consumer, mirrored copy and entry point, and its count;
+`Found by:` the alarm, user report, review or probe that surfaced it.
 
 **Applied flag.** Each merged unit in `merged.json` carries `applied` (null until the fixing step records it with
 `stage.py mark-applied --ids F-1,F-3 [--status false]`), so value per token is measured, not guessed. The merge

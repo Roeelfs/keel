@@ -37,8 +37,13 @@ Obs-1 SURVIVES the falsifier wave — no correlation id exists yet.
 - F-1 — SURVIVES: kept as a real defect; fixed in spec prose.
 
 ## Carried obligations
-- Obs-1 — SURVIVES: no correlation id exists yet; tracked as a mandatory invariant proof obligation.
+| ID | Obligation | Proof | Owner | Close-by |
+|---|---|---|---|---|
+| Obs-1 | thread a correlation id end to end | test: `request_id_threads_through_worker` | - | - |
+| F-1 | the spec-prose fix holds in the build | test: `rejects_max_plus_one` | - | - |
 """
+
+CARRIED_OBS_ROW = "| Obs-1 | thread a correlation id end to end | test: `request_id_threads_through_worker` | - | - |\n"
 
 
 def strip_falsifier_line(text):
@@ -77,26 +82,39 @@ class ValidateReviewReportTests(unittest.TestCase):
         self.assertTrue(any("EC-1" in f for f in failures))
 
     def test_surviving_obs_critical_without_carried_block_is_rejected(self):
-        report = PASSING_REPORT.replace(
-            "\n## Carried obligations\n"
-            "- Obs-1 — SURVIVES: no correlation id exists yet; "
-            "tracked as a mandatory invariant proof obligation.\n",
-            "",
-        )
+        report = PASSING_REPORT.split("## Carried obligations")[0]
         ok, failures, _ = vrr.validate(report)
         self.assertFalse(ok)
         self.assertTrue(any("Carried obligations" in f for f in failures))
 
     def test_surviving_obs_critical_with_bare_carried_heading_is_rejected(self):
         # A heading with no matching row must also fail (not just a missing section).
-        report = PASSING_REPORT.replace(
-            "- Obs-1 — SURVIVES: no correlation id exists yet; "
-            "tracked as a mandatory invariant proof obligation.\n",
-            "",
-        )
+        report = PASSING_REPORT.replace(CARRIED_OBS_ROW, "")
         ok, failures, _ = vrr.validate(report)
         self.assertFalse(ok)
         self.assertTrue(any("Obs-1" in f and "Carried obligations" in f for f in failures))
+
+    def test_surviving_finding_from_any_lane_is_carried(self):
+        report = PASSING_REPORT.replace("| F-1 | the spec-prose fix holds in the build | test: `rejects_max_plus_one` | - | - |\n", "")
+        ok, failures, _ = vrr.validate(report)
+        self.assertFalse(ok)
+        self.assertTrue(any("missing: F-1" in f for f in failures))
+
+    def test_carried_row_without_a_proof_is_rejected(self):
+        report = PASSING_REPORT.replace("test: `request_id_threads_through_worker`", "TBD")
+        self.assertTrue(any("no named proof" in f for f in vrr.validate(report)[1]))
+        bulleted = PASSING_REPORT.split("| ID |")[0] + "- Obs-1, F-1 — tracked as a follow-up\n"
+        self.assertTrue(any("Proof column" in f for f in vrr.validate(bulleted)[1]))
+
+    def test_critical_tier_needs_a_drive_and_a_bake_row_with_owner_and_date(self):
+        report = PASSING_REPORT.replace("## Spec Review — Final Report", "## Spec Review — Final Report\n### Profile: full (tier critical)")
+        failures = vrr.validate(report)[1]
+        self.assertTrue(any("PRE-MERGE DRIVE" in f for f in failures) and any("POST-DEPLOY BAKE" in f for f in failures))
+        rows = ("| PRE-MERGE DRIVE | staging probe of the changed seam | drive: `probe-seam.sh` against the test org | the author | 2026-11-12 |\n"
+                "| POST-DEPLOY BAKE | 24h error-rate parity | bake: alarm on the changed handler | the author | 2026-11-14 |\n")
+        self.assertTrue(vrr.validate(report + rows)[0], vrr.validate(report + rows)[1])
+        undated = report + rows.replace("2026-11-14", "after deploy")
+        self.assertTrue(any("close-by date" in f for f in vrr.validate(undated)[1]))
 
     def test_prints_per_lane_verdict_counts(self):
         _, _, summary = vrr.validate(PASSING_REPORT)

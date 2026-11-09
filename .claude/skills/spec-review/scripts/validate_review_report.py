@@ -79,16 +79,64 @@ def id_has_verdict_elsewhere(report_id, text):
     return False
 
 
-def extract_carried_obligations_ids(text):
-    """IDs listed under the '## Carried obligations' section, if present."""
+CARRIED_ID_RE = re.compile(r"\b(?:EC|Sec|Obs|LE|F)-\d+\b")
+EMPTY_CELLS = ("", "-", "—", "tbd", "todo", "none", "n/a", "na", "owed", "proof owed", "?")
+DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+DRIVE, BAKE = "PRE-MERGE DRIVE", "POST-DEPLOY BAKE"
+
+
+def carried_block(text):
+    """The body of the '## Carried obligations' section, or None."""
     m = re.search(r"^#+\s*Carried obligations\s*$", text, re.MULTILINE)
     if not m:
-        return None, False
+        return None
     start = m.end()
     next_heading = re.search(r"^#+\s+\S", text[start:], re.MULTILINE)
-    body = text[start : start + next_heading.start()] if next_heading else text[start:]
-    ids = set(re.findall(r"\b(?:Obs|Sec|LE)-\d+\b", body))
-    return ids, True
+    return text[start : start + next_heading.start()] if next_heading else text[start:]
+
+
+def carried_rows(body):
+    """(header cells, data rows as cell lists) of the first table in the carried block."""
+    lines = [l.strip() for l in body.splitlines() if l.strip().startswith("|")]
+    cells = [[c.strip().strip("*`").strip() for c in l.strip("|").split("|")] for l in lines]
+    rows = [c for c in cells if not all(re.fullmatch(r":?-{3,}:?", x) for x in c if x)]
+    return (rows[0], rows[1:]) if rows else ([], [])
+
+
+def carried_errors(text, surviving_ids):
+    """P1/P3: every surviving CRITICAL/MAJOR id sits in a carried row with a named proof; a drive, bake or
+    owed proof names an owner and a close-by date; a critical-tier report carries both boundary rows."""
+    critical = re.search(r"\(tier critical\)", text, re.IGNORECASE) is not None
+    if not surviving_ids and not critical:
+        return []
+    body = carried_block(text)
+    if body is None:
+        what = f"SURVIVING CRITICAL/MAJOR finding(s) present ({', '.join(surviving_ids)})" if surviving_ids else "tier critical"
+        return [f"{what} but no '## Carried obligations' section exists."]
+    header, rows = carried_rows(body)
+    col = {name: next((i for i, h in enumerate(header) if name in h.lower()), None) for name in ("proof", "owner", "close-by")}
+    if col["proof"] is None:
+        return ["'## Carried obligations' needs a table with a Proof column (| ID | Obligation | Proof | Owner | Close-by |)."]
+    cell = lambda r, k: r[col[k]] if col[k] is not None and col[k] < len(r) else ""
+    errors = []
+    listed = set()
+    for r in rows:
+        row_text = " | ".join(r)
+        listed |= set(CARRIED_ID_RE.findall(row_text))
+        proof = cell(r, "proof")
+        if proof.lower() in EMPTY_CELLS:
+            errors.append(f"carried row '{r[0]}' has no named proof (test, probe, drive or bake): {proof!r}")
+        boundary = DRIVE in row_text.upper() or BAKE in row_text.upper() or "owed" in proof.lower()
+        if boundary and (cell(r, "owner").lower() in EMPTY_CELLS or not DATE_RE.search(cell(r, "close-by"))):
+            errors.append(f"carried row '{r[0]}' is a drive, bake or owed proof without an owner and a close-by date (YYYY-MM-DD)")
+    missing = [i for i in surviving_ids if i not in listed]
+    if missing:
+        errors.append("'## Carried obligations' is missing: " + ", ".join(missing) + " (each surviving CRITICAL/MAJOR id needs a table row).")
+    if critical:
+        for need in (DRIVE, BAKE):
+            if not any(need in " | ".join(r).upper() for r in rows):
+                errors.append(f"tier critical: '## Carried obligations' needs a '{need}' row with owner and close-by date")
+    return errors
 
 
 def validate(text):
@@ -129,32 +177,14 @@ def validate(text):
             "anywhere in the report: " + ", ".join(missing_verdict)
         )
 
-    # SR4: surviving Obs-/Sec-/LE- CRITICAL/MAJOR findings need a
-    # '## Carried obligations' block listing each such ID.
-    surviving_carry_families = ("Obs", "Sec", "LE")
+    # P1: every surviving CRITICAL/MAJOR finding, from any lane, is carried to the build with a named proof.
     surviving_ids = sorted(
         rid
         for rid in ids
-        if rid.split("-", 1)[0] in surviving_carry_families
-        and id_has_verdict_elsewhere(rid, text)
+        if id_has_verdict_elsewhere(rid, text)
         and not _id_verdict_is(rid, text, ("REFUTED",))
     )
-    if surviving_ids:
-        carried_ids, block_present = extract_carried_obligations_ids(text)
-        if not block_present:
-            failures.append(
-                "SURVIVING CRITICAL/MAJOR Obs-/Sec-/LE- finding(s) present "
-                f"({', '.join(surviving_ids)}) but no '## Carried obligations' "
-                "section exists."
-            )
-        else:
-            missing_from_block = [i for i in surviving_ids if i not in carried_ids]
-            if missing_from_block:
-                failures.append(
-                    "'## Carried obligations' section exists but is missing: "
-                    + ", ".join(missing_from_block)
-                    + " (a bare heading with no matching row is a fail)."
-                )
+    failures += carried_errors(text, surviving_ids)
 
     for family in ("EC", "Sec", "Obs", "LE", "F"):
         rows = by_family.get(family, [])
