@@ -175,8 +175,37 @@ record_lane_row() {
   [ -n "${CLAUDE_SESSION_ID:-}" ] || return 0
   python3 -I "$LANE_SCRIPT_DIR/work_state.py" lane-row --lane "$1" --parent "$CLAUDE_SESSION_ID" \
     --runtime "$2" --model "$MODEL" --pid "$$" --outfile "${3:-}" --worktree "${WORKTREE:-$(pwd -P)}" \
-    --claude-reason "$CLAUDE_REASON" \
+    --claude-reason "$CLAUDE_REASON" ${ACCOUNT_PREFERRED:+--account-preferred "$ACCOUNT_PREFERRED"} \
     >/dev/null 2>&1 || true
+}
+
+# ---- Claude account preflight (two accounts; references/manager-contract.md §Lane runtimes) --
+# A headless Claude lane runs on the terminal `claude auth login`, not the desktop login. The
+# preferred account is named in a private one-line file; its email never leaves that file: only
+# a boolean reaches the row and stderr. Absent file, failing or slow `claude auth status`, or no
+# email → unknown, skipped silently. A mismatch warns once and NEVER blocks the lane.
+ACCOUNT_PREFERRED=""
+claude_account_preflight() {
+  local pref="$HOME/.claude/run/preferred-claude-account"
+  [ -r "$pref" ] || return 0
+  ACCOUNT_PREFERRED="$(python3 -I -c '
+import json, subprocess, sys
+want = open(sys.argv[1]).read().strip().lower()
+if not want:
+    sys.exit(0)
+try:
+    out = subprocess.run(["claude", "auth", "status", "--json"], capture_output=True, text=True,
+                         timeout=15, stdin=subprocess.DEVNULL)
+    got = json.loads(out.stdout).get("email") if out.returncode == 0 else None
+except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):
+    got = None
+if isinstance(got, str) and got.strip():
+    print("true" if got.strip().lower() == want else "false")
+' "$pref" 2>/dev/null)" || ACCOUNT_PREFERRED=""
+  if [ "$ACCOUNT_PREFERRED" = false ]; then
+    echo "spawn-lane.sh: lane runs on a non-preferred Claude login; run \`claude auth login\` as the preferred account" >&2
+  fi
+  return 0
 }
 
 
@@ -366,6 +395,7 @@ ARGS+=( -p --output-format json --permission-prompts none )
 # is_error:true and rc=1: indistinguishable from a work failure unless the result text is read.
 LANE_OUT="$(mktemp "${TMPDIR:-/tmp}/spawn-lane-out.XXXXXX")"
 trap 'rm -f "$LANE_OUT"; cleanup' EXIT
+claude_account_preflight
 record_lane_row "$LANE_SESSION" claude "${LANE_RECORD_OUTFILE:-}"
 # Run claude as a child we can signal: with `exec` a kill of this pid killed claude, and
 # capturing the envelope must not turn a lane cancel into an orphaned, still-working lane.

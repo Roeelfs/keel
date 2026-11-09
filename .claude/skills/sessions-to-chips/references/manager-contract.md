@@ -541,6 +541,16 @@ secret-rotation analysis run on Codex `astra` (`--model frontier`) or Claude `op
 ceiling (founder, 2026-10-24: "max should be opus 5.5"; this replaces the 10-22 Astra/Fable pin).
 Never sonnet, haiku, luna or sol for these, and never a cheaper fallback when the top tier is slow.
 
+**Two Claude accounts: let the preferred one carry longer (founder, 2026-11-09).** Headless Claude
+lanes run on the terminal `claude auth login` account; desktop sessions (managers, children) run
+on the desktop login. The preferred account is named only in the private file
+`~/.claude/run/preferred-claude-account`; always prioritize it (its limit ends Saturday, the
+other's Sunday). Work that can be a headless lane goes to one, so the preferred account carries
+longer. `spawn-lane.sh` checks the
+terminal login, warns once on a mismatch (never blocks), and records `account_preferred: true|false`
+in the lane row. A manager never switches accounts itself and never copies the file's content
+into a report, row or ticket; the fix for a mismatch is the human running `claude auth login`.
+
 1. **Does the work need the human?** Grilling, a decision the founder must make, a login, password,
    consent screen or identity-browser capture, or a unit the founder wants to watch and steer over
    many turns → **child session** (`start_session`, a chip). From an automated turn it lands as a

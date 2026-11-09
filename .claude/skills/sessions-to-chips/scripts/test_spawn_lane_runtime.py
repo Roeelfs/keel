@@ -15,7 +15,10 @@ SCRIPT = Path(__file__).resolve().parent / "spawn-lane.sh"
 STUB = '#!/bin/bash\nprintf "%s\\n" "$@" > "$STUB_OUT"\n'
 # The claude stub also records the two env settings a headless lane must carry, and can
 # answer with a canned JSON envelope + exit code (an auth death is is_error:true, rc=1).
-CLAUDE_STUB = STUB + (
+# `claude auth status` answers STUB_AUTH_JSON / STUB_AUTH_RC and leaves the lane argv file alone.
+CLAUDE_AUTH = ('[ "${1:-}" = auth ] && { printf "%s\\n" "$*" >> "${STUB_AUTH_LOG:-/dev/null}"; '
+               'printf "%s" "${STUB_AUTH_JSON:-}"; exit "${STUB_AUTH_RC:-0}"; }\n')
+CLAUDE_STUB = "#!/bin/bash\n" + CLAUDE_AUTH + STUB.split("\n", 1)[1] + (
     'printf "FORK=%s\\nHEADLESS=%s\\n" "${CLAUDE_CODE_FORK_SUBAGENT-unset}" '
     '"${CYNAP_HEADLESS_LANE-unset}" > "$STUB_ENV"\n'
     '[ -n "${STUB_ENVELOPE:-}" ] && printf "%s" "$STUB_ENVELOPE"\n'
@@ -188,6 +191,75 @@ class RuntimeTests(unittest.TestCase):
                 r, _ = self.spawn(self.base, "--runtime", "claude")
                 self.assertEqual(r.returncode, 1, r.stderr)
                 self.assertEqual(r.stdout, env)
+
+    # ---- Claude account preflight: preferred login is named in a private file -----------
+    # Synthetic addresses only (example.invalid): this repo is public.
+    PREFERRED = "lane-owner@example.invalid"
+    OTHER = "someone-else@example.invalid"
+
+    def account_spawn(self, auth_json=None, auth_rc="0", pref=PREFERRED, runtime="claude"):
+        rows_path = self.home / ".claude/state/lane-parents.jsonl"
+        if rows_path.exists():
+            rows_path.unlink()
+        pref_file = self.home / ".claude/run/preferred-claude-account"
+        pref_file.parent.mkdir(parents=True, exist_ok=True)
+        if pref is None:
+            pref_file.unlink(missing_ok=True)
+        else:
+            pref_file.write_text(pref + "\n")
+        self.run_env = {"CLAUDE_SESSION_ID": "mgr-acct", "STUB_AUTH_RC": auth_rc,
+                        "STUB_AUTH_LOG": str(self.root / "auth.log"),
+                        "STUB_AUTH_JSON": auth_json if auth_json is not None else ""}
+        r, argv = self.spawn(self.base, "--runtime", runtime)
+        row = json.loads(rows_path.read_text().splitlines()[-1])
+        return r, argv, row
+
+    def assert_no_email(self, r, row):
+        for text in (r.stdout, r.stderr, json.dumps(row)):
+            self.assertNotIn("@example.invalid", text)
+
+    def test_preferred_login_matches_quietly(self):
+        r, argv, row = self.account_spawn(json.dumps({"loggedIn": True, "email": self.PREFERRED.upper()}))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("-p", argv)
+        self.assertNotIn("non-preferred", r.stderr)
+        self.assertIs(row["account_preferred"], True)
+        self.assertEqual((self.root / "auth.log").read_text().split(), ["auth", "status", "--json"])
+        self.assert_no_email(r, row)
+
+    def test_non_preferred_login_warns_once_and_continues(self):
+        r, argv, row = self.account_spawn(json.dumps({"loggedIn": True, "email": self.OTHER}))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("-p", argv, "a mismatch must never block the lane")
+        self.assertEqual(r.stderr.count("lane runs on a non-preferred Claude login; run "
+                                        "`claude auth login` as the preferred account"), 1)
+        self.assertIs(row["account_preferred"], False)
+        self.assert_no_email(r, row)
+
+    def test_absent_preference_file_skips_silently(self):
+        r, argv, row = self.account_spawn(json.dumps({"email": self.OTHER}), pref=None)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("-p", argv)
+        self.assertNotIn("non-preferred", r.stderr)
+        self.assertNotIn("account_preferred", row)
+        self.assertFalse((self.root / "auth.log").exists(), "no file → no auth probe at all")
+
+    def test_failing_or_unusable_auth_status_is_skipped(self):
+        for auth_json, rc in (("", "1"), (json.dumps({"email": self.OTHER}), "1"),
+                              ("not json", "0"), (json.dumps({"loggedIn": False}), "0"),
+                              (json.dumps(["x"]), "0")):
+            with self.subTest(auth_json=auth_json, rc=rc):
+                r, argv, row = self.account_spawn(auth_json, auth_rc=rc)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("-p", argv)
+                self.assertNotIn("non-preferred", r.stderr)
+                self.assertNotIn("account_preferred", row)
+
+    def test_codex_lane_does_not_probe_the_claude_login(self):
+        r, _, row = self.account_spawn(json.dumps({"email": self.OTHER}), runtime="codex")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("account_preferred", row)
+        self.assertFalse((self.root / "auth.log").exists())
 
     def test_codex_runtime_grants_the_git_dir(self):
         _, argv = self.spawn(self.base, "--runtime", "codex")
