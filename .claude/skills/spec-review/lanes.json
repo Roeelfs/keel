@@ -3,14 +3,22 @@
   "tiers": {
     "critical": {"profile": "full", "budget": {"maxLanes": 24, "maxCodexLanes": 6, "falsifier": "uncorroborated", "tokenCeiling": 45000000}},
     "standard": {"profile": "standard", "budget": {"maxLanes": 11, "maxCodexLanes": 2, "falsifier": "critical", "tokenCeiling": 22000000}},
-    "light": {"profile": "light", "budget": {"maxLanes": 3, "maxCodexLanes": 2, "falsifier": "off", "tokenCeiling": 2000000}},
+    "light": {"profile": "light", "budget": {"maxLanes": 4, "maxCodexLanes": 2, "falsifier": "off", "tokenCeiling": 2000000}},
     "hotfix": {"profile": "hotfix", "budget": {"maxLanes": 5, "maxCodexLanes": 3, "falsifier": "all", "tokenCeiling": 3000000}}
   },
   "agentTurnCaps": {"synthesis-writer": 40, "context-dossier-miner": 80},
   "cynapRepos": ["cynap-monorepo-next"],
-  "gates": ["liveSurface", "security", "cutover", "runtimeWiring", "operatorSurface", "legalSurface", "decisionSurface", "adrTouched", "dependencyChange"],
+  "gates": ["liveSurface", "security", "cutover", "runtimeWiring", "operatorSurface", "legalSurface", "decisionSurface", "adrTouched", "dependencyChange", "externalShape"],
+  "pathFloors": [
+    {"class": "auth-session", "pattern": "(^|/)(auth[nz]?|sessions?|login|oauth|sso)([/._-]|$)"},
+    {"class": "billing-ledger", "pattern": "(^|/)(billing|ledger|payments?|invoic[a-z]*|wallet)([/._-]|$)"},
+    {"class": "migrations", "pattern": "(^|/)migrations?/"},
+    {"class": "infra-stack", "pattern": "(^|/)(infra|infrastructure|terraform|cdk|stacks?)/|\\.tf$"},
+    {"class": "credentials-kms", "pattern": "(credential|secret|kms|keystore|vault)"},
+    {"class": "shared-reader", "pattern": "(^|/)shared/"}
+  ],
   "lanes": [
-    {"label": "completeness-reviewer", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "completeness-reviewer.md", "profiles": ["full", "standard"], "gate": null, "idPrefix": "COMP", "tags": ["completeness"]},
+    {"label": "completeness-reviewer", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "completeness-reviewer.md", "profiles": ["full", "standard"], "gate": null, "idPrefix": "COMP", "tags": ["completeness"], "keepFrom": "standard"},
     {"label": "codebase-verifier", "kind": "codex", "agentType": "codex-dispatch", "model": "gpt-6-sol", "prompt": "codebase-verifier.md", "profiles": ["full", "standard", "light", "hotfix"], "gate": null, "idPrefix": "CB", "tags": ["codebase"], "codexClass": "verify", "codexContract": true, "floor": true},
     {"label": "architecture-auditor", "kind": "codex", "agentType": "codex-dispatch", "model": "gpt-6-sol", "prompt": "architecture-auditor.md", "profiles": ["full", "hotfix"], "gate": null, "idPrefix": "ARCH", "tags": ["architecture"], "codexClass": "falsifier", "codexContract": true},
     {"label": "adr-auditor", "kind": "claude", "agentType": "adr-auditor", "model": null, "prompt": null, "profiles": [], "gate": "adrTouched", "idPrefix": "ADR", "tags": [], "brief": "# ADR-conformance gate\n\nAudit the spec at {{SPEC_PATH}} (project root {{PROJECT_ROOT}}): classify EVERY spec decision CONFORMS | STRAYS | NEEDS-APPROVAL against the Accepted ADRs and platform invariants. Any spec that changes an Accepted ADR or invariant without an explicit founder-approval marker is a HARD STOP: record it as a CRITICAL finding. In your envelope JSON (both the file and the final reply) also set founder_approval_needed (true when the spec changes an Accepted ADR/invariant) and founder_approval_marker_present (true when an explicit founder-approval marker for that change exists in the spec or dossier)."},
@@ -21,7 +29,7 @@
     {"label": "edge-case-miner", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "edge-case-miner.md", "profiles": ["full", "standard", "light"], "gate": null, "idPrefix": "EC", "tags": ["edge-case"]},
     {"label": "security-miner", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "security-miner.md", "profiles": ["full"], "gate": "security", "idPrefix": "Sec", "tags": ["security"]},
     {"label": "observability-auditor", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "observability-auditor.md", "profiles": ["full"], "gate": null, "idPrefix": "Obs", "tags": ["observability"]},
-    {"label": "live-evidence-auditor", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "live-evidence-auditor.md", "profiles": [], "gate": "liveSurface", "idPrefix": "LE", "tags": ["live-evidence"]},
+    {"label": "live-evidence-auditor", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "live-evidence-auditor.md", "profiles": [], "gate": ["liveSurface", "externalShape"], "idPrefix": "LE", "tags": ["live-evidence"]},
     {"label": "performance-architect", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "performance-architect.md", "profiles": [], "gate": "liveSurface", "idPrefix": "PERF", "tags": ["performance"]},
     {"label": "operator-plane-architect", "kind": "claude", "agentType": "general-purpose", "model": "sonnet", "prompt": "operator-plane-architect.md", "profiles": [], "cynapOnly": true, "gate": "operatorSurface", "idPrefix": "OP", "tags": []},
     {"label": "dependency-currency", "kind": "claude", "agentType": "general-purpose", "model": "opus", "prompt": "dependency-currency.md", "profiles": [], "gate": "dependencyChange", "idPrefix": "DEP", "tags": ["dependency"]},

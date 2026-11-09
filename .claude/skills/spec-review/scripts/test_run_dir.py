@@ -73,7 +73,7 @@ class LanePlanTests(unittest.TestCase):
             self.assertTrue(any("must quote the evidence" in e and "liveSurface" in e for e in errs), bad)
         for good in ("edits apps/backend/src/x.ts:12", "changes `handler_wrapper`", "flips runtimeWiring flag", "table org_erasure"):
             self.assertEqual(plan("standard", {**GATES_OFF, "cutover": {"run": True, "reason": good}})[1], [], good)
-        # TKT-3219: the narrowed liveSurface still needs a quoted runtime surface when fired
+        # the narrowed liveSurface still needs a quoted runtime surface when fired
         for bad in ("changes request handler behavior", "merging deploys it"):
             _, errs = plan("standard", {**GATES_OFF, "liveSurface": {"run": True, "reason": bad}})
             self.assertTrue(any("must quote the evidence" in e and "liveSurface" in e for e in errs), bad)
@@ -128,8 +128,45 @@ class LanePlanTests(unittest.TestCase):
         _, errs = plan("standard", gates(dependencyChange="pins `zod`"), drop=["dependency-currency"], reasons={"dependency-currency": "x"})
         self.assertTrue(any("non-droppable" in e for e in errs))
 
+    def test_external_shape_gate_runs_live_evidence_and_forbids_light(self):
+        p, errs = plan("standard", gates(externalShape="asserts the `ListObjects` response body"))
+        self.assertEqual(errs, [])
+        self.assertIn("live-evidence-auditor", {e["label"] for e in p["run"]})
+        self.assertIn("gate externalShape fired", p["laneReasons"]["live-evidence-auditor"])
+        _, errs = plan("standard", gates(externalShape="`x_y`"), drop=["live-evidence-auditor"], reasons={"live-evidence-auditor": "x"})
+        self.assertTrue(any("non-droppable" in e for e in errs))
+        self.assertTrue(any("below the floor" in e for e in plan("light", gates(externalShape="`x_y`"))[1]))
+        why = {s["label"]: s["reason"] for s in plan("standard")[0]["skipped"]}
+        self.assertEqual(why["live-evidence-auditor"], "gate: liveSurface/externalShape not fired")
+
+    def test_completeness_census_is_kept_from_standard_and_in_light_on_a_runtime_path(self):
+        _, errs = plan("standard", drop=["completeness-reviewer"], reasons={"completeness-reviewer": "reduced round"})
+        self.assertTrue(any("non-droppable at tier standard" in e for e in errs))
+        self.assertNotIn("completeness-reviewer", {e["label"] for e in plan("light")[0]["run"]})
+        p, errs = plan("light", runtimePath="src/worker/handler.ts")
+        self.assertEqual(errs, [])
+        self.assertEqual(p["laneReasons"]["completeness-reviewer"], "runtime path touched: src/worker/handler.ts")
+        _, errs = plan("light", drop=["completeness-reviewer"], reasons={"completeness-reviewer": "x"}, runtimePath="src/a.ts")
+        self.assertTrue(any("non-droppable" in e for e in errs))
+        for bad in ({"lanes": {"disable": ["completeness-reviewer"]}}, ):
+            self.assertTrue(run_dir.merge_override(MANIFEST, bad)[1], bad)
+        m, _ = run_dir.merge_override(MANIFEST, {"lanes": {"retune": {"completeness-reviewer": {"profiles": ["full"]}}}})
+        self.assertTrue(any("keepFrom standard" in e for e in run_dir.validate_manifest(m)))
+
+    def test_path_floor_refuses_standard_and_light_unless_a_reason_names_the_path(self):
+        paths = run_dir.spec_paths("Edit `services/billing/ledger.ts` and see https://example.com/auth/x and lib/util.ts.")
+        self.assertEqual(paths, ["lib/util.ts", "services/billing/ledger.ts"])
+        for tier in ("standard", "light"):
+            errs = plan(tier, specPaths=paths)[1]
+            self.assertTrue(any("R5" in e and "billing-ledger" in e for e in errs), tier)
+        self.assertEqual(plan("standard", specPaths=paths, pathFloorReasons={"billing-ledger": "reads services/billing/ledger.ts for a label only"})[1], [])
+        self.assertTrue(plan("standard", specPaths=paths, pathFloorReasons={"billing-ledger": "read-only"})[1], "a reason must name the path")
+        self.assertEqual(plan("critical", specPaths=paths, floorDomain="money")[1], [])
+        self.assertEqual(plan("standard", specPaths=paths, harnessOnly=True)[1], [])
+        self.assertEqual(plan("standard", specPaths=["lib/util.ts", "docs/readme.md"])[1], [])
+
     def test_adr_and_dependency_lanes_run_only_when_their_gate_fired(self):
-        """TKT-3219 (founder 2026-11-04): adr-auditor and dependency-currency are gated, not always-on."""
+        """adr-auditor and dependency-currency are gated, not always-on (founder 2026-11-04)."""
         for tier in ("critical", "standard", "hotfix"):
             p, errs = plan(tier, floorDomain="money")
             self.assertEqual(errs, [], tier)
@@ -184,7 +221,10 @@ class LanePlanTests(unittest.TestCase):
             (root / ".claude" / "spec-review.lanes.json").write_text(json.dumps({"tiers": {"standard": {"budget": {"maxLanes": 3}}}}))
             frame = Path(tmp) / "frame.json"
             frame.write_text(json.dumps({"repo": "cynap-monorepo-next", "gates": GATES_OFF, "lanePlan": {"tier": "standard", "add": [], "drop": [], "reasons": {}}}))
-            rc, out = call("plan", "--run", str(run), "--root", str(root), "--input", str(frame))
+            spec = Path(tmp) / "spec.md"
+            spec.write_text("# Spec\nTouches lib/util.ts only.\n")
+            self.assertEqual(call("plan", "--run", str(run), "--root", str(root), "--input", str(frame))[0], 1, "--spec is required")
+            rc, out = call("plan", "--run", str(run), "--root", str(root), "--input", str(frame), "--spec", str(spec))
             self.assertEqual(rc, 0, out)
             self.assertEqual(len(out["files"]), 2)
             self.assertEqual(out["budget"]["maxLanes"], 3)
@@ -192,7 +232,7 @@ class LanePlanTests(unittest.TestCase):
             self.assertEqual(run_dir.falsifier_severities(run), ("CRITICAL",))
             self.assertEqual(run_dir.load_manifest(run)["tiers"]["standard"]["budget"]["maxLanes"], 3)
             frame.write_text(json.dumps({"gates": GATES_OFF, "lanePlan": {"tier": "bogus"}}))
-            self.assertEqual(call("plan", "--run", str(run), "--root", str(root), "--input", str(frame))[0], 1)
+            self.assertEqual(call("plan", "--run", str(run), "--root", str(root), "--input", str(frame), "--spec", str(spec))[0], 1)
 
     def test_scoped_findings_follow_the_tier(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -474,7 +514,8 @@ class BatchingTests(unittest.TestCase):
                 "### Lane manifest\n| edge-case-miner | run | x |\n| security-miner | SKIPPED (gate: no authz surface) | - |\n| codex-frontier | run | x |\n\n"
                 "### Edge Cases\n| EC-ID | E | B | Spec Coverage | R | Severity |\n|---|---|---|---|---|---|\n"
                 "| EC-1 | w | m | MISSING | fix | CRITICAL | SURVIVES\n\n"
-                "### Consensus Issues\n1. [F-1] [MAJOR] frontier risk (AST-1) REFUTED by falsifier\n" + extra + "x" * 400)
+                "### Consensus Issues\n1. [F-1] [MAJOR] frontier risk (AST-1) REFUTED by falsifier\n" + extra
+                + "\n### Carried obligations\n| ID | Obligation | Proof |\n|---|---|---|\n| EC-1 | cap holds | test: `rejects_max_plus_one` |\n\n" + "x" * 400)
 
     def test_check_report_passes_and_publishes_then_catches_missing_id(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -601,7 +642,7 @@ class BatchingTests(unittest.TestCase):
             self.assertEqual((out["hardStop"], out["hardStopReasons"]), (False, []))
 
     def test_fired_adr_gate_plans_the_lane_and_an_unapproved_adr_change_still_stops(self):
-        """TKT-3219: gating adr-auditor must not weaken the ADR hard stop once adrTouched fired."""
+        """Gating adr-auditor must not weaken the ADR hard stop once adrTouched fired."""
         p, errs = plan("standard", gates(adrTouched="supersedes docs/adr/0036-x.md"))
         self.assertEqual(errs, [])
         planned = ",".join(e["label"] for e in p["run"])

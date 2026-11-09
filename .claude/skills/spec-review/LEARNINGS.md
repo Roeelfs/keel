@@ -95,6 +95,20 @@ migrations, data pipelines). They are starting wisdom, not project-specific.
 
 ---
 
+## Escape ledger (2026-11-09)
+
+A backtest of reviewed specs whose builds still shipped defects found the escapes cluster in a few classes; each now has a rule. Taxonomy for future entries: SCOPE-GAP, STALE-ASSUMPTION, RT-BLIND/UNMOCKABLE, NO-BAKE, BUILD-DIVERGED, PARTIAL-FIX, VERIF-LAYER, NO-REVIEW. Pipeline DRE = findings caught by review / (those + escapes traced back to a reviewed spec).
+
+- **RT-BLIND/UNMOCKABLE (largest class).** The spec asserted the shape of something tests cannot instantiate (a vendor event body, a cloud audit-rule or log dialect, a managed-runtime freeze/thaw, a serverless DB client vs the embedded one in tests, an LLM obeying an instruction), and the fixture encoded the same invented value. Rule: the `externalShape` gate, which demands a captured sample or printed probe.
+- **SCOPE-GAP / PARTIAL-FIX.** The fix covered the named consumer and missed a mirrored allowlist, an offline/CLI caller or a second entry point; reduced rounds had dropped the census lane. Rule: completeness-reviewer is non-droppable from standard, and in light when a runtime path is touched; fix PRs carry a three-line receipt.
+- **NO-BAKE / BUILD-DIVERGED.** Findings survived review but nothing tied them to the build, so the PR closed without the proof. Rule: every surviving CRITICAL/MAJOR is a carried row with a named proof, plus a pre-merge drive and, at critical, a post-deploy bake with owner and date.
+- **STALE-ASSUMPTION.** A falsifier refuted a deployed-behavior finding by reasoning alone. Rule: REFUTED on external or deployed behavior needs an executed probe, else NEEDS-LIVE-EVIDENCE.
+- **Under-tiered.** Specs naming auth, billing, migration, infra or credential paths ran at standard because the floor check never read the paths. Rule: the path-derived floor (R5).
+- Edge classes the miner lacked: write-then-append orphans, long-lived process lifetime, replay after a half-applied state.
+- Not caught by any rule (kept honest): a reversed sync direction an adjacent finding nearly named, a semantic merge conflict (a repo merge-queue setting, not review), operator-owned files in git, identity-browser tooling.
+
+---
+
 ## Open Questions
 
 - (none yet — append uncertainties here as runs surface them)

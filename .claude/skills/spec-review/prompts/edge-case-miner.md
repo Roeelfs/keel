@@ -30,7 +30,7 @@ prompt: |
   not wait on, reference, or spawn any other agent.
 
   For every entity, parameter, state, or operation the spec defines, ask the
-  15 boundary questions below. Skip categories that genuinely don't apply —
+  18 boundary questions below. Skip categories that genuinely don't apply —
   but say so explicitly with one line ("spec has no time-dependent inputs →
   time boundaries N/A"), do not silently omit.
 
@@ -109,7 +109,24 @@ prompt: |
   write/heal/join pick the survivor deterministically (explicit ORDER BY on the
   survivor property), or an arbitrary row?
 
-  ### 15. Enum-can-express-the-prose
+  ### 15. Side-effect ordering vs the publishing commit
+  For every write, upload, message or append the spec performs around the
+  commit that makes it visible: what is left when the step between them fails?
+  (Write-then-append orphan: the blob lands, the index append fails, nothing
+  references or cleans the blob.) Name the order and the cleanup owner.
+
+  ### 16. Long-lived process lifetime
+  For any worker, holder, sidecar or daemon the spec keeps alive: temp-dir and
+  handle cleanup across restarts; what happens when the holder dies mid-task;
+  standby/takeover (two holders, split brain, stale lock); and single-failure
+  isolation (one bad item or tenant must not wedge the process for all).
+
+  ### 17. Retry/replay after a half-applied state
+  When a queue or job is retried or replayed after a partial success: which
+  effects re-run, which are skipped, and does the replay see the half-applied
+  state as done, as new, or as a conflict? Enumerate per effect.
+
+  ### 18. Enum-can-express-the-prose
   For each enum/status/state the spec defines: can it express every prose
   sentence that references it, and can the row shape hold every legacy datum
   the spec absorbs (e.g. a NOT NULL user FK vs recipients who have no user row)?
@@ -135,9 +152,9 @@ prompt: |
   - ≥ 3 lifecycle rows
   - ≥ 2 identity/tenancy rows
   - ≥ 1 row from each of categories 4–10
-  - ≥ 1 row from each of categories 11–15 when the spec has a write path,
-    a "latest"-scoped operation, a bulk read, or defines an enum (N/A line
-    otherwise)
+  - ≥ 1 row from each of categories 11–18 when the spec has a write path,
+    a "latest"-scoped operation, a bulk read, a long-lived process, a retried
+    queue, or defines an enum (N/A line otherwise)
   - **Total ≥ 18 rows for any non-trivial spec**
   - For trivial specs (< 50 lines, single feature), ≥ 8 rows is acceptable
 

@@ -79,8 +79,7 @@ def hard_text(reasons):
 
 def protected(entry, plan):
     """Lanes a spend stop never drops: floor lanes and lanes whose gate fired."""
-    gate = entry.get("gate")
-    return bool(entry.get("floor") or (gate and plan["gates"].get(gate, {}).get("run")))
+    return bool(entry.get("floor") or rd.fired_gate(entry, plan["gates"]))
 
 
 def lane_meta(e, wiring_type=None):
@@ -274,7 +273,7 @@ def build_delta(run, prior, plan):
         reason = None
         if e.get("floor"):
             reason = "tier floor lane"
-        elif protected(e, plan) and (mode == "delta" or e.get("gate") in new_gates):
+        elif protected(e, plan) and (mode == "delta" or set(rd.lane_gates(e)) & set(new_gates)):
             reason = "fired-gate lane" if mode == "delta" else "newly fired gate"
         elif env is None:
             reason = "no usable prior result"
@@ -736,7 +735,7 @@ def report_prompt(run, plan, st, sp, a):
         f"- Falsifier scope at this tier is {mode} ({scope}). A CRITICAL/MAJOR id outside that scope was not falsified: its report line carries the verdict word SURVIVES with the note \"(not falsified at tier {P['tier']}: <corroborated by lane X | outside scope | ceiling stop>)\".",
         f"- The falsifier line is exactly: ### Falsifier wave: {fals_line}",
         "- REFUTED findings go to the Resolved section with the refuting evidence; an unrefuted CRITICAL keeps its severity (no downgrade without a REFUTED verdict).",
-        '- Surviving Obs-/Sec-/LE- CRITICAL/MAJOR not applied as spec prose go under "Carried obligations".',
+        '- "### Carried obligations" is a table | ID | Obligation | Proof | Owner | Close-by | with one row per SURVIVING CRITICAL/MAJOR id from ANY lane (EC/Sec/Obs/LE ids and every F-N unit, fixed in prose or not; a row may list several ids) and one UX-N row per interaction/UX acceptance line the spec states. Proof names a test, probe, drive or bake, never TBD. Drive, bake and owed rows carry an owner and a YYYY-MM-DD close-by date. Tier critical adds a PRE-MERGE DRIVE row and a POST-DEPLOY BAKE row; tier standard with runtime or portal behavior adds a PRE-MERGE DRIVE row.',
         "- Lanes marked 'carried forward' were not re-run on this delta re-review: their envelopes come from the prior run (minus REFUTED and already-applied findings); say so in their lane lines.",
         '- The Lane manifest section reproduces this table verbatim (a lane with status FAILED or DEAD keeps that status; verdict lines say "timed-out/<status> -- backfilled by <substitute>" where a substitute ran):',
         "| Lane | Status | Agent / model |", "|---|---|---|", *rows,

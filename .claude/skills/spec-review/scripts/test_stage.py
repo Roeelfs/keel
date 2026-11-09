@@ -50,7 +50,7 @@ def new_run(tmp, tier="standard", name="run", spec=SPEC_V1, fired=None, repo="cy
     (root / "spec.md").write_text(spec)
     frame = Path(tmp) / f"{name}-frame.json"
     frame.write_text(json.dumps({"repo": repo, **({"floorDomain": "test floor"} if tier == "critical" else {}), **scope, "gates": gates(**(fired or {})), "lanePlan": {"tier": tier, "add": [], "drop": [], "reasons": {}}}))
-    rc, out = rcall("plan", "--run", str(run), "--root", str(root), "--input", str(frame))
+    rc, out = rcall("plan", "--run", str(run), "--root", str(root), "--input", str(frame), "--spec", str(root / "spec.md"))
     assert rc == 0, out
     for d in ("inputs", "envelopes", "lanes", "codex", "prompts", "falsifiers"):
         (run / d).mkdir(parents=True, exist_ok=True)
@@ -182,7 +182,7 @@ class ReviewFlowTests(unittest.TestCase):
             self.assertEqual((rc, out["needReview2"], out["hardStop"]), (0, False, False), out)
 
     def test_adr_and_dependency_lanes_follow_their_gates_through_finish_prepare(self):
-        """TKT-3219: unfired -> absent with its reason printed once; fired -> a review lane."""
+        """Unfired -> absent with its reason printed once; fired -> a review lane."""
         with tempfile.TemporaryDirectory() as tmp:
             run, root = new_run(tmp, tier="critical")
             out = full_prepare(run, root)
@@ -637,7 +637,8 @@ class SynthesizeTests(unittest.TestCase):
             labels = "\n".join(f"| {l} | SKIPPED (gate: n/a) | - |" if l in skipped else f"| {l} | run | x |" for l in stage.load_state(run)["manifestLabels"])
             (run / "report.md").write_text(
                 "## Spec Review - Final Report\n\n### Falsifier wave: 1 dispatched over 1 CRITICAL/MAJOR — 0 REFUTED, 1 SURVIVES.\n\n"
-                f"### Lane manifest\n{labels}\n\n1. [F-1] [CRITICAL] CB-1 SURVIVES\n" + "x" * 500)
+                f"### Lane manifest\n{labels}\n\n1. [F-1] [CRITICAL] CB-1 SURVIVES\n"
+                "\n### Carried obligations\n| ID | Obligation | Proof |\n|---|---|---|\n| F-1 | fix holds | test: `t` |\n\n" + "x" * 500)
             rc, out = scall("report-check", "--run", str(run))
             self.assertEqual(rc, 0, out)
             self.assertTrue(review_path.is_file())
@@ -671,11 +672,11 @@ class WhyGateTests(unittest.TestCase):
             run, root = why_run(tmp)
             rc, out = prepare(run, root)
             self.assertEqual((rc, out["hardStop"], out["hardStopReasons"]), (1, True, ["why-gate"]))
-            rc, out = why(run, "--ticket", "TKT-3239")
+            rc, out = why(run, "--ticket", "TICKET-1")
             self.assertEqual((rc, out["whyGate"], out["workflow"]["stage"]), (0, "pending", "why"))
             prompt = (run / "prompts" / "why-gate.md").read_text()
             self.assertTrue(prompt.startswith("ROLE: why-gate\n"))
-            self.assertIn("TKT-3239", prompt)
+            self.assertIn("TICKET-1", prompt)
             self.assertIn("Goal: g", prompt)
             self.assertIn(str(run), prompt, "the run dir must be named so lane_spend counts this lane")
             self.assertEqual(run_dir.find_placeholders(prompt), [])

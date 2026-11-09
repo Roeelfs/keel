@@ -3,7 +3,7 @@ ROLE: live-evidence-auditor
 
 Extracts the spec's load-bearing premises and FALSIFIES each against live evidence — deployed config, live schema/rows, DNS, log/invocation counts, measured latencies — instead of prose. The single biggest reviewed-spec miss class is an unverified premise about live state: a flag assumed off that prod runs on, a dead upstream trigger pipeline the bake plan takes as given, a "pure projection" claim one `SELECT DISTINCT` would have refuted, a DNS design one `dig` would have killed.
 
-**Gate:** fires only for specs that change RUNTIME BEHAVIOR of a live system (request handlers, dispatch/queues, webhooks, billing/money paths, auth/credentials, live-store migrations or schema, deployed infrastructure wiring, model/LLM boundaries). Specs that only change tooling, harness, skills, docs, CI config, dev scripts, lint rules or config with no live runtime consumer do not fire it: skip this lane and say so in the report.
+**Gate:** `liveSurface` (specs that change RUNTIME BEHAVIOR of a live system: request handlers, dispatch/queues, webhooks, billing/money paths, auth/credentials, live-store migrations or schema, deployed infrastructure wiring, model/LLM boundaries) or `externalShape` (the spec asserts a shape, limit or lifecycle unit tests cannot instantiate: a vendor response/event body, a cloud audit/log/query dialect, a managed-runtime lifecycle, a remote DB client versus the embedded one in tests, a KMS/IAM decision, a real production fixture, an LLM following an instruction). Specs that only change tooling, harness, skills, docs, CI config, dev scripts, lint rules or config with no live runtime consumer fire neither: skip this lane and say so in the report.
 
 **Agent type:** `general-purpose`
 **Model:** `opus`
@@ -38,6 +38,9 @@ prompt: |
   - "operation completes within budget B" / "the backstop is C seconds"
   - "the data is migratable / dedupable / uniquely keyed as specified"
   - "the bake plan in §N can actually run"
+  - "the vendor/cloud/runtime/LLM returns or does S" (an externalShape assertion:
+    payload field names and types, a log or query dialect, a lifecycle hook, a
+    remote client's semantics, an IAM/KMS decision, a model following an instruction)
 
   ## Step 2 — falsify each premise with ONE live check
 
@@ -62,6 +65,13 @@ prompt: |
   - Bake feasibility — walk the spec's own §bake/test plan: is the trigger
     alive, the auth path reachable from the stated environment, the metric it
     watches actually emitted? "The bake cannot run as written" is a MAJOR.
+  - External shapes — demand a CAPTURED real sample (a recorded payload, log
+    line, query result, lifecycle trace) or a PRINTED probe (exact command +
+    date + output) for every externalShape assertion. Run the probe yourself
+    when a sanctioned read-only surface exists. A shape the spec asserts with
+    neither is MAJOR (CRITICAL on a money, auth or data-loss path): the test
+    fixture would encode the same invented value and defend the bug. An
+    instruction-following assumption needs an eval row, not prose.
 
   ## Step 3 — report
 
@@ -87,6 +97,10 @@ prompt: |
   (measurement / named constant / NOTHING)
 
   ### Bake feasibility: <runnable | THEATRE — reason>
+
+  ### External-shape evidence
+  | Assertion (spec §) | Captured sample or printed probe (command + date) | Verdict |
+  (CAPTURED / PROBED / INVENTED — an INVENTED row is a finding)
   ```
 
   Rules:
