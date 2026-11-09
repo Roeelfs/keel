@@ -55,6 +55,8 @@ def check_time(value, where, now, problems):
 def _row(key, n, row, now, problems):
     required, allowed, enums, dates = LISTS[key]
     where = f"{key}[{n}]"
+    if isinstance(row, str):  # a bare line is the row's required field, e.g. "decisions": ["Use one template"]
+        row = {required: row}
     if not isinstance(row, dict) or not isinstance(row.get(required), str) or not row[required].strip():
         problems.append(problem("VIEW", f"{where} needs a text `{required}`; it was not shown"))
         return None
