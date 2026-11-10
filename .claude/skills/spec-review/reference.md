@@ -274,6 +274,7 @@ when its `profiles` list holds the tier's profile OR its domain gate fired OR th
 
 Findings outside the falsifier scope still appear in the report (verdict word SURVIVES with a
 "not falsified at tier" note naming why: corroborated by a second lane, outside the tier scope or ceiling stop); only the falsifier dispatch is narrowed (`run_dir.py` `FALSIFIER_MODES`). `uncorroborated` is decided per merged unit after the merge: a MAJOR unit whose members come from two or more distinct lanes skips the falsifier; any unit with a CRITICAL member is always falsified.
+Only the critical tier adds `fable-frontier-judge`, a final-gate judge on `fable` (Fable 5.1 today; re-probe the alias when 5.2 exists) that runs beside the Astra judge, never instead of it, and whose dispatch first line `ROLE: fable-frontier-judge` is the marker the harness model gate allows.
 `floor` lanes (codex-frontier, codebase-verifier) are non-droppable, as is any lane whose gate fired. A lane's `gate`
 may be a list (live-evidence-auditor: `liveSurface` or `externalShape`); any one fired runs it. A `keepFrom` lane
 (completeness-reviewer, `keepFrom: standard`) cannot be dropped, disabled or retuned out of its profiles at that tier
