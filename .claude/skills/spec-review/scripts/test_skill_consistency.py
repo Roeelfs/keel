@@ -49,7 +49,7 @@ MANIFEST = run_dir.load_manifest()
 MAX_SKILL_BYTES = 15700
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
-SUPPLEMENTS = {"adr-auditor", "legal-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "system1-elevation", "critic-hotfix", "critic-adversarial", "critic-frontier", "dependency-currency"}
+SUPPLEMENTS = {"adr-auditor", "legal-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "system1-elevation", "critic-hotfix", "critic-adversarial", "critic-frontier", "dependency-currency", "fable-frontier-judge"}
 
 
 def declared(text, key):
@@ -109,6 +109,15 @@ class ManifestTests(unittest.TestCase):
         # 2026-10-22 (founder): module shape is checked even in a hotfix. 2026-11-04: dependency/CVE
         # currency runs in a hotfix only when the dependencyChange gate fired.
         self.assertEqual(hotfix, {"codebase-verifier", "critic-hotfix", "codex-frontier", "architecture-auditor"})
+
+    def test_fable_judge_is_critical_only_beside_astra(self):
+        # 2026-11-10: fable reopened for the critical-tier final-gate judge lane only.
+        fable = [e for e in run_dir.all_entries(MANIFEST) if e.get("model") == "fable"]
+        self.assertEqual([e["label"] for e in fable], ["fable-frontier-judge"])
+        e = fable[0]
+        self.assertEqual((e["kind"], e["agentType"], e["profiles"], e["gate"]), ("critic", "critic", ["full"], None))
+        self.assertEqual(MANIFEST["tiers"]["critical"]["profile"], "full")
+        self.assertIn("full", next(x for x in MANIFEST["lanes"] if x["label"] == "codex-frontier")["profiles"])
 
     def test_gated_lanes_use_declared_gates(self):
         for e in MANIFEST["lanes"]:
