@@ -64,6 +64,7 @@ class PolicyTuningTests(unittest.TestCase):
         self.assertEqual((policy.slots, policy.max_slots), (3, 3))
         self.assertEqual((policy.min_free_percent, policy.run_min_free_percent), (20, 10))
         self.assertEqual(heavy_runner.effective_rss_cap('wt-verify.sh', policy, {}), 8192)
+        self.assertEqual(heavy_runner.effective_rss_cap('git', policy, {}), 8192)
         self.assertEqual(heavy_runner.effective_rss_cap('unknown', policy, {}), 6144)
         self.assertEqual(heavy_runner.effective_rss_cap(
             'wt-verify.sh', policy, {'KEEL_HEAVY_MAX_RSS_MB': '4096'}), 4096)
