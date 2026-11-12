@@ -65,12 +65,38 @@ def evidence(before, cwd, actual_cwd=None, worktree_name=""):
             "dirty": bool(git(target, "status", "--porcelain"))}
 
 
+def foreign_links(worktree):
+    """node_modules symlinks (root, apps/*, packages/*) resolving outside the worktree."""
+    root = Path(worktree).resolve()
+    candidates = [root / "node_modules", *root.glob("apps/*/node_modules"),
+                  *root.glob("packages/*/node_modules")]
+    hits = []
+    for link in candidates:
+        if not link.is_symlink():
+            continue
+        target = link.resolve()
+        if target != root and root not in target.parents:
+            hits.append((link, target))
+    return hits
+
+
+def warn_foreign_links(worktree):
+    """Best-effort: one line per foreign link plus its removal command; never deletes or fails."""
+    try:
+        for link, target in foreign_links(worktree) if worktree else []:
+            print("spawn-lane.sh: FOREIGN LINK %s -> %s (lanes never link another checkout; "
+                  "remove: rm %s)" % (link, target, link), file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - advisory must never fail the lane
+        print("spawn-lane.sh: foreign-link check skipped: %s" % exc, file=sys.stderr)
+
+
 def main():
     if sys.argv[1] == "snapshot":
         print(json.dumps(snapshot(sys.argv[2])))
         return 0
     before = json.loads(Path(sys.argv[2]).read_text())
     result = evidence(before, sys.argv[3], worktree_name=sys.argv[5] if len(sys.argv) > 5 else "")
+    warn_foreign_links(result.get("worktree"))
     if result.get("error"):
         print("spawn-lane.sh: commit check deferred: " + result["error"], file=sys.stderr)
         return 75

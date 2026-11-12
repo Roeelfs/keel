@@ -33,6 +33,7 @@ Hard rules:
 - Never sleep or poll CI/deploy. External wait/readiness failure gets one blocker/resume artifact and ends the task.
 - A spawned child owned by the accepted task group is internal work, not an external wait. Give it an explicit lease; consume its terminal result before final, or interrupt it once on lease expiry and continue from its durable handoff.
 - Never start a third identical failing command.
+- Never symlink into another checkout (node_modules, dist, .next, .turbo). The orchestrator provisions dependencies with `wt-setup`; a lane never runs it. A lane without dependencies runs no dependency-bound command.
 - Review protocol is finite: one broad pass, one consolidation/falsification, one changed-seam closure. No restart/follow-up loop without a changed artifact.
 - Commit with project conventions and verify the declared artifact exists outside /tmp.
 
