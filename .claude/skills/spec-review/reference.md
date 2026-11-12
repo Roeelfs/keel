@@ -372,6 +372,9 @@ fix-verify re-runs a gate lane only if its gate is newly fired. Every other lane
 findings copied minus REFUTED and applied findings, listed as "carried forward". Re-run briefs get the delta block.
 Merge and falsifier waves run over carried + new findings. No new dossier in either mode; a prior run without
 `inputs/spec.snapshot.md` cannot seed a re-review: run a full review. No spec is ever skipped by this ladder.
+`report-check` archives every run dir it passes (`stage.py` `archive_run`: `$SPEC_REVIEW_ARCHIVE/<spec stem>/<run name>`,
+default base `~/.claude/spec-review/runs`) and prints it as `archivePath`; `mark-applied` updates the archived
+`merged.json` too, so the archive is a complete `--prior` seed after the session's scratchpad is gone.
 
 **Tier rules (R2-R4)**, enforced by `run_dir.py plan` from `frame.json` (`repo`, `harnessOnly`, `floorDomain`):
 `critical` is refused unless the repo is in `lanes.json` `cynapRepos`, the spec is not tooling/harness-only, and a
@@ -455,7 +458,11 @@ one after another. Four report tables move that discovery to review time and tur
 - **Unknowns (F3).** Every claim nothing has proven: an uncaptured external sample, a deployed limit, a read-only
   dry run per seam on real target bytes (per seam, because the first failure masks the next), fixture readiness for
   each drive or bake leg, and for a performance goal a full-path per-hop trace before any fix. Each row is a
-  read-only, time-boxed probe ticket with a document deliverable. All probes dispatch in one message; at
+  read-only, time-boxed probe ticket with a document deliverable. **At most 3 probes per spec** by default:
+  merge probes that share a seam, and go over only with a `probe cap override: <reason>` line under the table
+  (the validator refuses a 4th row without it). Probes route to the cheapest lane class: Codex `luna` document
+  lanes first, `sonnet` or `haiku` when Codex is unavailable, never `opus`; an uncapped probe wave on the top
+  model is the one way this section can cost more than the late missions it saves. All probes dispatch in one message; at
   `standard`/`critical` a build ticket on a probed seam is blocked by its probe, at `light` the probe is advisory.
   Results amend the spec once (`--prior`, fix-verify).
 - **Founder decisions owed (F7).** Every open default, ruling, signature and ADR status change the ships need, each

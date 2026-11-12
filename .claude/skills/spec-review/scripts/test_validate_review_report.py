@@ -178,6 +178,17 @@ class ValidateReviewReportTests(unittest.TestCase):
         self.assertTrue(vrr.validate(with_follow_on(PASSING_REPORT, probe + unknowns))[0])
         self.assertTrue(any("empty time-box" in f for f in vrr.validate(with_follow_on(PASSING_REPORT, probe + unknowns.replace("| 1h |", "| - |")))[1]))
 
+    def test_unknowns_cap_probes_at_three_unless_overridden_with_a_reason(self):
+        head = "### Unknowns\n| U-ID | Claim | Why unproven | Probe | Time-box | Blocks ship |\n|---|---|---|---|---|---|\n"
+        rows = lambda n: "".join(f"| U-{i} | claim {i} | never measured | `probe {i}`, expect ok | 1h | ship 1 |\n" for i in range(1, n + 1))
+        self.assertTrue(vrr.validate(with_follow_on(PASSING_REPORT, head + rows(3) + "\n"))[0])
+        over = vrr.validate(with_follow_on(PASSING_REPORT, head + rows(4) + "\n"))
+        self.assertTrue(any("over the cap of 3" in f for f in over[1]), over[1])
+        self.assertTrue(any("over the cap of 3" in f for f in vrr.validate(with_follow_on(PASSING_REPORT, head + rows(4) + "\nprobe cap override:\n\n"))[1]),
+                        "an override with no reason is refused")
+        ok = vrr.validate(with_follow_on(PASSING_REPORT, head + rows(4) + "\nprobe cap override: four independent vendor limits, no shared seam\n\n"))
+        self.assertTrue(ok[0], ok[1])
+
     def test_founder_decisions_need_a_recommended_answer(self):
         block = ("### Founder decisions owed\n| D-ID | Decision | Recommended answer | Blocks |\n|---|---|---|---|\n"
                  "| D-1 | default retention | 30 days | ship 1 |\n\n")

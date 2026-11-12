@@ -13,7 +13,7 @@ ceiling, report brief) and prints ONE JSON object with the exact args of the nex
   synth-prep     Codex status, substitute critics, envelope check, merge check
   falsify-prep   merge validation, spend gate, falsifier plan -> batches
   falsify-check  verdict coverage, then writes the synthesis-writer brief
-  report-check   mechanical report check; publishes it; writes lane-spend.json
+  report-check   mechanical report check; publishes it; writes lane-spend.json; archives the run dir
   mark-applied   record which merged findings the fixing step applied
   extract-plan   list the OK Codex lanes whose prose output needs an envelope (luna extraction)
   extract-envelopes   validate and write the envelopes the luna extraction produced
@@ -28,6 +28,7 @@ import datetime
 import difflib
 import io
 import json
+import os
 import re
 import shutil
 import sys
@@ -736,7 +737,7 @@ def report_prompt(run, plan, st, sp, a):
         f"- The falsifier line is exactly: ### Falsifier wave: {fals_line}",
         "- REFUTED findings go to the Resolved section with the refuting evidence; an unrefuted CRITICAL keeps its severity (no downgrade without a REFUTED verdict).",
         '- "### Carried obligations" is a table | ID | Obligation | Proof | Owner | Close-by | with one row per SURVIVING CRITICAL/MAJOR id from ANY lane (EC/Sec/Obs/LE ids and every F-N unit, fixed in prose or not; a row may list several ids) and one UX-N row per interaction/UX acceptance line the spec states. Proof names a test, probe, drive or bake, never TBD. Drive, bake and owed rows carry an owner and a YYYY-MM-DD close-by date. Tier critical adds a PRE-MERGE DRIVE row and a POST-DEPLOY BAKE row; tier standard with runtime or portal behavior adds a PRE-MERGE DRIVE row.',
-        '- "### Follow-on dispositions" reproduces the completeness-reviewer\'s Follow-on Census as | # | Candidate | Class | Evidence | Disposition | Tracker | Trigger | (one disposition per row: IN, PARALLEL-TICKET, PROBE, DEFER -> <target> with a trigger, OUT: <why>; Tracker is "to-file" on PARALLEL-TICKET/DEFER rows (the main loop files them in Step 5c; never invent an id); no candidates -> "no candidates: <classes checked>"). Every PROBE and every unproven external, deployed-limit, per-seam dry-run or fixture claim from any lane is a "### Unknowns" row | U-ID | Claim | Why unproven | Probe | Time-box | Blocks ship |. Every open default, ruling or signature a ship needs is a "### Founder decisions owed" row with a recommended answer.',
+        '- "### Follow-on dispositions" reproduces the completeness-reviewer\'s Follow-on Census as | # | Candidate | Class | Evidence | Disposition | Tracker | Trigger | (one disposition per row: IN, PARALLEL-TICKET, PROBE, DEFER -> <target> with a trigger, OUT: <why>; Tracker is "to-file" on PARALLEL-TICKET/DEFER rows (the main loop files them in Step 5c; never invent an id); no candidates -> "no candidates: <classes checked>"). Every PROBE and every unproven external, deployed-limit, per-seam dry-run or fixture claim from any lane is a "### Unknowns" row | U-ID | Claim | Why unproven | Probe | Time-box | Blocks ship |; at most 3 rows (merge claims that share a seam), else a line "probe cap override: <reason>" under the table. Every open default, ruling or signature a ship needs is a "### Founder decisions owed" row with a recommended answer.',
         "- Lanes marked 'carried forward' were not re-run on this delta re-review: their envelopes come from the prior run (minus REFUTED and already-applied findings); say so in their lane lines.",
         '- The Lane manifest section reproduces this table verbatim (a lane with status FAILED or DEAD keeps that status; verdict lines say "timed-out/<status> -- backfilled by <substitute>" where a substitute ran):',
         "| Lane | Status | Agent / model |", "|---|---|---|", *rows,
@@ -783,6 +784,28 @@ def cmd_falsify_check(a):
                     "hardStop": s["hardStop"], "hardStopReasons": s["hardStopReasons"], "notes": notes, "spend": spend_brief(sp)})
 
 
+# ---------------------------------------------------------------------------
+# archive: a run dir lives in a session scratchpad, which a later session cannot read. Without a durable
+# copy a re-review after fixes cannot pass --prior and pays for a full review again.
+# ---------------------------------------------------------------------------
+ARCHIVE_ENV = "SPEC_REVIEW_ARCHIVE"
+
+
+def archive_base():
+    return Path(os.environ.get(ARCHIVE_ENV) or Path.home() / ".claude" / "spec-review" / "runs")
+
+
+def archive_run(run, review_path):
+    """Copy the whole run dir to <base>/<spec stem>/<run name> and return that path (the next --prior)."""
+    run = Path(run).resolve()
+    name = Path(review_path).name if review_path else ""
+    stem = name[: -len(".review.md")] if name.endswith(".review.md") else (Path(name).stem or "unnamed")
+    dest = archive_base().resolve() / stem / run.name
+    if dest != run:
+        shutil.copytree(run, dest, dirs_exist_ok=True)
+    return dest
+
+
 def cmd_report_check(a):
     run = Path(a.run)
     st = load_state(run)
@@ -796,6 +819,11 @@ def cmd_report_check(a):
         note = spend_note(sp, "final")
         if note:
             out["spendNote"] = note
+        st["archivePath"] = str(archive_run(run, st.get("reviewPath")))
+        save_state(run, st)
+        rd.write(Path(st["archivePath"]) / "state.json", json.dumps(st, indent=1))
+        out["archivePath"] = st["archivePath"]
+        out["notes"] = out.get("notes", []) + [f"run archived: a re-review after fixes passes `--prior {st['archivePath']}`"]
     return rd.emit(out, rc == 0)
 
 
@@ -816,6 +844,9 @@ def cmd_mark_applied(a):
         if u["id"] in want:
             u["applied"] = status
     rd.write(p, json.dumps(data, indent=1))
+    archived = (load_state(a.run) or {}).get("archivePath")
+    if archived and Path(archived).is_dir():
+        rd.write(Path(archived) / "merged.json", json.dumps(data, indent=1))
     tally = {"applied": 0, "notApplied": 0, "unmarked": 0}
     for u in data["units"]:
         tally["unmarked" if u.get("applied") is None else "applied" if u["applied"] else "notApplied"] += 1

@@ -234,7 +234,9 @@ Every claim the spec relies on that nothing has proven yet: an uncaptured extern
 (synth/diff, quota and import listings), a read-only dry run of EACH seam on real target bytes (per seam: the first
 failure masks the next), fixture readiness for every drive or bake leg, and for a performance goal a full-path trace
 with per-hop timing. Each row becomes a read-only, time-boxed probe ticket dispatched in parallel before build; build
-tickets on that seam are blocked by it, and probe results amend the spec once (fix-verify re-review).
+tickets on that seam are blocked by it, and probe results amend the spec once (fix-verify re-review). At most 3
+rows: merge probes that share a seam, or add `probe cap override: <reason>` under the table. Probes run on the
+cheapest lane class (Codex `luna` first, Sonnet or Haiku fallback, never Opus).
 
 | U-ID | Claim | Why unproven | Probe | Time-box | Blocks ship |
 |---|---|---|---|---|---|

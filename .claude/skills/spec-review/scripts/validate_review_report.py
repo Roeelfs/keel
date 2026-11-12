@@ -210,8 +210,13 @@ def follow_on_errors(text, final=False):
     return errors, has_probe
 
 
+PROBE_CAP = 3
+PROBE_CAP_OVERRIDE_RE = re.compile(r"probe cap override:\s*\S", re.IGNORECASE)
+
+
 def unknowns_errors(text, has_probe):
-    """F3: each unknown names a runnable probe (command, target, expected), a time-box and what ship it blocks."""
+    """F3: each unknown names a runnable probe (command, target, expected), a time-box and what ship it blocks;
+    at most PROBE_CAP probes per spec unless the section states `probe cap override: <reason>`."""
     body = section_block(text, "Unknowns")
     if body is None:
         return ["a follow-on row is PROBE but no '### Unknowns' section exists."] if has_probe else []
@@ -223,6 +228,9 @@ def unknowns_errors(text, has_probe):
     if has_probe and not rows:
         return ["a follow-on row is PROBE but '### Unknowns' has no rows."]
     errors = []
+    if len(rows) > PROBE_CAP and not PROBE_CAP_OVERRIDE_RE.search(body):
+        errors.append(f"'### Unknowns' has {len(rows)} probes, over the cap of {PROBE_CAP}: merge probes on one seam, "
+                      "or state 'probe cap override: <reason>' under the table")
     for r in rows:
         for n in ("probe", "time-box", "blocks"):
             if cell_of(r, col, n).lower() in EMPTY_CELLS:

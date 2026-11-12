@@ -49,7 +49,10 @@ MANIFEST = run_dir.load_manifest()
 # 2026-11-12: 15700 -> 16650. Follow-on rules: the ship-plan check is a Step 1 gate, filing and dispatching follow-on,
 # probe and DEFER rows plus the one founder grill are Step 5c duties, the --final validation is a Step 9 gate, and
 # "a spec merges once" is a process gate; the census classes, table shapes and rationale live in reference.md.
-MAX_SKILL_BYTES = 16650
+# 2026-11-12: 16650 -> 16900. Cost levers: passing the archived run dir as --prior is a Step 2 decision, the archive
+# printed by report-check is a Step 4 output, and the probe cap and lane class are Step 5c dispatch duties; the
+# archive layout, the override line and the rationale live in reference.md.
+MAX_SKILL_BYTES = 16900
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
 SUPPLEMENTS = {"adr-auditor", "legal-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "system1-elevation", "critic-hotfix", "critic-adversarial", "critic-frontier", "dependency-currency", "fable-frontier-judge"}

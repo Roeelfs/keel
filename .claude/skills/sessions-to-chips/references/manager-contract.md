@@ -84,6 +84,12 @@ An opus spec or implementation lane needs no further justification: this policy 
 `Model-why`. Native runtime exceptions and their `Native-why` line are governed by §Lane runtimes.
 Effort stays `medium` unless the mission states a reason for more.
 
+**Mechanical lanes default to Sonnet.** Census, inventory, mining and per-finding verification lanes
+dispatch on `sonnet` (or Codex `mining`) unless the dispatch states why the work needs judgment; a
+matched inventory pair cost about 60% less on Sonnet with the same artifact. Judgment lanes (analysis,
+synthesis, taxonomy, RCA) stay on `opus` until one such lane has been graded against an Opus twin on the
+same prompt and its artifact holds up; only then may that lane kind move down.
+
 **Violation, and its check (graded by artifact).** A spec or diff authored by the manager, or by
 a sonnet/haiku lane, is a contract violation. For every spec file and every commit the program
 lands, the author recorded on its ticket's binding (`carriers[].runtime` and `carriers[].model`, read
@@ -713,9 +719,12 @@ What differs from a vanilla wayfinder map: it is **living**. The manager adds to
   finding (including the review's Follow-on dispositions rows), a gate, a founder ruling with
   consequences, a bake that came back red. Apply the wayfinder join/defer rule: it JOINS iff a stated
   exit criterion cannot pass without it or it repairs a defect in work this map shipped. A JOIN becomes
-  a map ticket now; one with no dependency on in-flight work is dispatched now as its own parallel
-  ticket and never rides an open build (a defect inside an open PR's own changed seam stays on that
-  branch). A DEFER is filed at its named later map or ticket and written in Out of scope as
+  a map ticket now. **Where it ships is decided by seam, not by ticket:** independent follow-ups in the
+  same chain and the same seam that are ready the same day fold into ONE PR (the open one, or one shared
+  PR for the batch), and each ticket names the PR that carries it. A JOIN gets its own lane and PR only
+  when it touches a different seam, must ship separately for a stated reason (a repo split rule, a
+  different risk class or deploy), or the open PR it would join is blocked; then it dispatches now as its
+  own parallel ticket and never waits on that build. A DEFER is filed at its named later map or ticket and written in Out of scope as
   `-> <target>, trigger: <event>`; an OUT gets one line. No lane runs on work that is not a ticket
   under the map, and no carrier runs outside a binding (UNBOUND); there is no second list.
 - Specs, spec reviews (tier per the rule below), builds, verify-release and bakes are tickets or
@@ -860,7 +869,9 @@ exception and needs a reason (a true data or ordering dependency).
   from the reviewed spec's `## Ships` table, not from memory; ships typed `none` dispatch
   concurrently.
 - **Probe wave before build.** File every Unknowns row of the spec review as a read-only, time-boxed
-  probe ticket and dispatch all of them in one message (Codex document lanes through the gate). At
+  probe ticket and dispatch all of them in one message: Codex `luna` document lanes through the gate
+  first, a `sonnet`/`haiku` lane as the fallback, never `opus`. A review holds at most 3 probes unless
+  its report states `probe cap override: <reason>`. At
   standard/critical a build ticket on a probed seam is blocked by its probe; at light the probe is
   advisory. Probe results amend the spec once (a fix-verify re-review), then build dispatches.
 - **Not slicing.** Parallelism runs independent pieces side by side; it never splits one change
