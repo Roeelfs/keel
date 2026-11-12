@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Mock runtimes, real temporary git worktrees; never dispatch a real lane."""
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -10,6 +12,7 @@ import unittest
 
 import test_spawn_lane_runtime as runtime_tests
 from test_spawn_lane_runtime import git
+import lane_commit_guard
 import lane_proof
 
 HERE = Path(__file__).resolve().parent
@@ -270,6 +273,47 @@ class CountTests(unittest.TestCase):
                 lane_proof.append({"ticket": "T-1", "outcome": outcome}, p)
             with self.assertRaises(AssertionError):
                 self.assertEqual(namespace["failure_counts"](p)["T-1"], 0)
+
+
+class ForeignLinkTests(unittest.TestCase):
+    """Lane-end advisory: node_modules linked to another checkout is named, never deleted."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.wt = self.tmp / "lane"
+        self.other = self.tmp / "main-checkout" / "node_modules"
+        (self.wt / "apps" / "portal").mkdir(parents=True)
+        (self.wt / "packages" / "ui").mkdir(parents=True)
+        self.other.mkdir(parents=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_planted_foreign_symlink_is_flagged_and_kept(self):
+        link = self.wt / "apps" / "portal" / "node_modules"
+        link.symlink_to(self.other)
+        hits = lane_commit_guard.foreign_links(self.wt)
+        self.assertEqual([h[0].name for h in hits], ["node_modules"])
+        self.assertEqual(hits[0][1], self.other.resolve())
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            lane_commit_guard.warn_foreign_links(str(self.wt))
+        self.assertEqual(len(err.getvalue().splitlines()), 1)
+        self.assertIn("rm %s" % link.parent.resolve().joinpath("node_modules"), err.getvalue())
+        self.assertTrue(link.is_symlink())
+
+    def test_in_tree_symlink_and_real_directory_are_not_flagged(self):
+        (self.wt / "vendor-modules").mkdir()
+        (self.wt / "node_modules").symlink_to(self.wt / "vendor-modules")
+        (self.wt / "packages" / "ui" / "node_modules").mkdir()
+        self.assertEqual(lane_commit_guard.foreign_links(self.wt), [])
+
+    def test_missing_worktree_does_not_crash(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            lane_commit_guard.warn_foreign_links(str(self.tmp / "gone"))
+            lane_commit_guard.warn_foreign_links(None)
+        self.assertEqual(err.getvalue(), "")
 
 
 if __name__ == "__main__":
