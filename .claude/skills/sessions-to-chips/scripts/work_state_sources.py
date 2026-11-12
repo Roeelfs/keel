@@ -314,6 +314,7 @@ def build_ctx(slug, *, mode="snapshot", refresh=False, stdin_facts=None, program
         except (OSError, ValueError):
             continue  # An unreadable owner must never manufacture a recipient.
     ctx = {"now": now, "slug": slug, "map_id": (manifest.get("map") or {}).get("issue"),
+           "exit_criteria": (manifest.get("map") or {}).get("exit_criteria"),
            "absorbed": bool(manifest.get("absorbed_by")), "bindings": bindings, "tracker": tracker,
            "programs": ownership, "manager_session": manifest.get("manager_session") or manifest.get("orchestrator_session"),
            "tracker_age_s": t_age, "has_tracker_cmd": bool(tracker_cmd(manifest)[0]), "prs": prs, "gh_age_s": gh_age,

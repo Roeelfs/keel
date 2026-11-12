@@ -708,19 +708,32 @@ ticket that must wait carries a `blocks` relation on what it waits for, or a val
   Revised: founder 2026-11-03 (in-session approval of the work-state engine)
 
 What differs from a vanilla wayfinder map: it is **living**. The manager adds to it as it goes.
-- **Every new piece of work becomes a map ticket in the same turn it is discovered**, before any lane
+- **Every new piece of work is dispositioned in the same turn it is discovered**, before any lane
   is dispatched for it: a finding, a defect, a dead end that needs a replacement path, a review
-  finding, a gate, a founder ruling with consequences, a bake that came back red. No lane runs on
-  work that is not a ticket under the map, and no carrier runs outside a binding (UNBOUND); there is
-  no second list.
+  finding (including the review's Follow-on dispositions rows), a gate, a founder ruling with
+  consequences, a bake that came back red. Apply the wayfinder join/defer rule: it JOINS iff a stated
+  exit criterion cannot pass without it or it repairs a defect in work this map shipped. A JOIN becomes
+  a map ticket now; one with no dependency on in-flight work is dispatched now as its own parallel
+  ticket and never rides an open build (a defect inside an open PR's own changed seam stays on that
+  branch). A DEFER is filed at its named later map or ticket and written in Out of scope as
+  `-> <target>, trigger: <event>`; an OUT gets one line. No lane runs on work that is not a ticket
+  under the map, and no carrier runs outside a binding (UNBOUND); there is no second list.
 - Specs, spec reviews (tier per the rule below), builds, verify-release and bakes are tickets or
   phases of tickets under the map, so "review, workflow and rules" are visible on the map itself.
 - **The goal is the map's Destination.** The manager's job every turn is to advance the frontier: all
   independent unblocked tickets move in parallel (§Parallel by default); it never idles while the
-  frontier is non-empty. The map completes only when the Destination criteria are met and verified,
-  every child is Done or Canceled, and Not-yet-specified is empty. Then the end state is DONE.
+  frontier is non-empty. The map completes only when every Destination exit criterion's proof has run
+  green (the manifest's `map.exit_criteria`, below), every child is Done or Canceled, Not-yet-specified
+  is empty, and every DEFER line in Out of scope points at a live ticket elsewhere. Then the end state
+  is DONE.
+- **Exit criteria are charted, then probed.** A map without 3-7 `outcome -- proof -- expected` exit
+  lines gets them in a grill round before anything is dispatched (wayfinder §Exit criteria; this also
+  binds maps whose tickets have no spec). Declare them in the manifest as `map.exit_criteria: [{outcome,
+  proof, expected, green}]`; `green` is set only from a run of the proof, citing its output in the
+  `State as of` comment. Changing a criterion is a founder grill, never a new mission.
 - **The founder outline is the map.** Every manager report opens with the snapshot's `map_line`
-  (`Map <id>: done X / open Y / blocked Z; frontier now: …`) followed by `; needed from you: <the grill round,
+  (`Map <id>: done X / open Y / blocked Z; frontier now: …; exit k/n`, where `exit unset` means no
+  criteria are declared) followed by `; needed from you: <the grill round,
   recommended answer first, kits for human steps, or "nothing">`. That replaces ad-hoc status and
   tells the founder what is needed without a question from them.
 - **Arm yourself and drive to completion (founder, 2026-10-26).** A manager never ends a turn with
@@ -745,8 +758,9 @@ What differs from a vanilla wayfinder map: it is **living**. The manager adds to
   Revised: founder 2026-11-03 (in-session approval of the work-state engine)
   (3) one dated comment on the MAP headed `State as of <ISO time>` is posted anew at every turn that
   changes anything, at takeover (reconcile first: tickets for every gap the dispatcher's sweeps
-  found), and before any wrap-up: done/open/blocked, merged vs claimed vs unproven, and what is
-  owed from the founder. The Linear MCP cannot edit comments, so each refresh is a NEW comment and the newest `State as of` wins; never edit the old ones. A state file or a transcript that knows more than the map is a defect.
+  found), and before any wrap-up: done/open/blocked, merged vs claimed vs unproven, exit criteria
+  green, `discovered: N since charting` (the measurement counter, spec-review reference.md
+  §Follow-on census, unknowns and decisions), and what is owed from the founder. The Linear MCP cannot edit comments, so each refresh is a NEW comment and the newest `State as of` wins; never edit the old ones. A state file or a transcript that knows more than the map is a defect.
 
 ## Spec review is mandatory, depth by risk (founder, 2026-10-25)
 
@@ -842,6 +856,13 @@ exception and needs a reason (a true data or ordering dependency).
 - **A blocker blocks only its dependents.** Stack on the unmerged branch (§Autonomous stretches),
   dispatch the next spec lane while the last spec reviews, run research beside implementation, and grill
   open decisions while lanes run.
+- **Tickets come from the spec's Ships table.** Create the ship tickets and their `blockedBy` edges
+  from the reviewed spec's `## Ships` table, not from memory; ships typed `none` dispatch
+  concurrently.
+- **Probe wave before build.** File every Unknowns row of the spec review as a read-only, time-boxed
+  probe ticket and dispatch all of them in one message (Codex document lanes through the gate). At
+  standard/critical a build ticket on a probed seam is blocked by its probe; at light the probe is
+  advisory. Probe results amend the spec once (a fix-verify re-review), then build dispatches.
 - **Not slicing.** Parallelism runs independent pieces side by side; it never splits one change
   into many PRs.
 

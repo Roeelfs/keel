@@ -332,12 +332,13 @@ agent with no result is DEAD, retried once, then the stage fails (the workflow's
 
 A pre-flight check that runs BEFORE `prepare`, so no review token is spent on a spec that should not be
 built as written. One Opus 5.5 lane (`why-gate` in `lanes.json` `support`, brief `prompts/why-gate.md`, no fan-out)
-answers six questions: (1) what real trigger or evidence makes this needed now; (2) can the playground (ADR-0036:
+answers seven questions: (1) what real trigger or evidence makes this needed now; (2) can the playground (ADR-0036:
 customer config, flows, MCP) or an existing primitive already do it; (3) the smallest version that delivers the
 outcome and its explicit OUT list; (4) does the scope exceed that version, and why each extra item; (5) size in
 days, and above 5 the hard dependency that forbids a smaller first ship; (6) the cheapest proof it works and what
-would make us delete it. Its envelope (`<runDir>/why-gate.json`): `verdict` PROCEED | SIMPLIFY | WRONG-ROUTE,
-`answers` q1..q6 (one line each), `whyRecord` (about 10 lines, PROCEED only).
+would make us delete it; (7) which exit criterion of the parent map this advances and what remains
+toward the destination after it ships. Its envelope (`<runDir>/why-gate.json`): `verdict` PROCEED | SIMPLIFY | WRONG-ROUTE,
+`answers` q1..q7 (one line each), `whyRecord` (about 10 lines, PROCEED only).
 
 Commands (main loop): `stage.py why-gate --run --spec --root --ticket [--docs-only <reason>]` writes the filled
 prompt and prints the Workflow `{stage:"why"}` args; after the lane, `stage.py why-gate --run --check` validates the
@@ -436,3 +437,47 @@ commands only when no file gives the value, and each deliverable written once. A
 skill's scripts and multi-file `cat`s. Measured cause (spec-review-state-page-v2, light): a 53-row edge-case miner
 whose tool calls each stalled ~600s on an unreachable PreToolUse hook, past the 5-minute subagent cache, so its last
 8 turns re-created 173k-225k of context each.
+
+## Follow-on census, unknowns and decisions
+
+Why: in a backtest of mission chains (spec, fix, next spec, next fix), most unplanned follow-on missions were
+knowable before build, and about half had no data or contract dependency on the mission before them, yet they ran
+one after another. Four report tables move that discovery to review time and turn it into parallel work.
+
+- **Follow-on dispositions (F1).** completeness-reviewer section H, a premortem: "this spec merged 30 days ago and
+  more missions were needed; name them." High recall, filtered by evidence (a candidate with no spec line, file:line,
+  PR or ledger row is dropped). Seeded classes: every deployed host running the new path; refusal paths a bake can
+  match; the same defect class fixed elsewhere; release and version mechanics; recovery after a half-applied attempt;
+  each drive or bake leg reachable on its fixture. Dispositions: `IN`, `PARALLEL-TICKET`, `PROBE`, `DEFER -> <target>`
+  with a trigger, `OUT`. The join/defer rule decides `DEFER`: a need the spec's own goal (or its map's exit criteria)
+  cannot pass without is never deferred. Required where completeness runs; `no candidates: <classes checked>` is the
+  empty receipt.
+- **Unknowns (F3).** Every claim nothing has proven: an uncaptured external sample, a deployed limit, a read-only
+  dry run per seam on real target bytes (per seam, because the first failure masks the next), fixture readiness for
+  each drive or bake leg, and for a performance goal a full-path per-hop trace before any fix. Each row is a
+  read-only, time-boxed probe ticket with a document deliverable. All probes dispatch in one message; at
+  `standard`/`critical` a build ticket on a probed seam is blocked by its probe, at `light` the probe is advisory.
+  Results amend the spec once (`--prior`, fix-verify).
+- **Founder decisions owed (F7).** Every open default, ruling, signature and ADR status change the ships need, each
+  with a recommended answer, grilled in one round before the spec merges, so a spec merges once.
+- **Ship plan (F4).** The spec's `## Ships` table (`ship | scope items | files and contracts | blockedBy | dependency`)
+  is checked by `scripts/ship_plan.py`: a serial edge is never typed `none`, a typed dependency has an edge, a ship
+  holding both sides of a repo split rule (for example schema-before-caller) is refused, the after side must be
+  blocked by the before side, and every numbered scope item maps to a ship or a `DEFER` row with a tracker id.
+  Split rules are per repo (`<root>/.claude/split-rules.json`); they plan splits repo law already forces, never new
+  slicing. Tickets and `blockedBy` edges are created from this table; `none` ships dispatch concurrently. The check
+  is a separate script because every `stage.py` command is scoped to a run directory and the plan is checked on the
+  spec before a run exists.
+- **Sibling contract agreement (F5).** spec-drift-scout question 7: specs under one map that share a contract get
+  a `contract agreement` table; a disagreement is MAJOR, `amend-both` or `sequence-after`.
+
+`validate_review_report.py` refuses a candidate with no evidence or disposition, a `PARALLEL-TICKET`/`DEFER` with no
+tracker id (the synthesizer writes `to-file`; `--final` before the commit refuses it), a `DEFER` with no trigger, a
+`PROBE` with no Unknowns row, an unknown with no probe, time-box or blocked ship, and a decision with no recommended
+answer.
+
+**Measurement: discovered missions per map.** Not a gate. When a map closes, count the child tickets added after
+charting and label each with the chain taxonomy: knowable at spec, knowable with a spike, genuinely new, scope cut
+or deferred, end goal undefined, serial but parallelizable, split too early, gate-driven. Each `State as of` map
+comment reports the running count (`discovered: N since charting`). It is the data any future appetite or reference-class rule would need; no stop rule uses it until
+that data exists.

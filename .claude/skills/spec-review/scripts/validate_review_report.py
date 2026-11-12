@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """SR1/SR4: validate a spec-review `.review.md` report against the pipeline's
-hard rules (report-template.md + SKILL.md Step 5c).
+hard rules (report-template.md + SKILL.md Step 5c), including the follow-on
+dispositions, unknowns and founder-decisions tables.
 
 Usage:
-    python3 validate_review_report.py <report.md>
+    python3 validate_review_report.py [--final] <report.md>
+
+--final (Step 9, before the review is committed): a follow-on Tracker cell
+still reading `to-file` is refused; report-check accepts it because the main
+loop files those tickets in Step 5c.
 
 Exit 0 on pass, 1 on any failure. Prints one line per failure plus a
 per-lane verdict-count summary.
@@ -85,9 +90,9 @@ DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 DRIVE, BAKE = "PRE-MERGE DRIVE", "POST-DEPLOY BAKE"
 
 
-def carried_block(text):
-    """The body of the '## Carried obligations' section, or None."""
-    m = re.search(r"^#+\s*Carried obligations\s*$", text, re.MULTILINE)
+def section_block(text, title):
+    """The body of the '#… <title>' section, or None."""
+    m = re.search(r"^#+\s*" + re.escape(title) + r"\s*$", text, re.MULTILINE | re.IGNORECASE)
     if not m:
         return None
     start = m.end()
@@ -95,8 +100,13 @@ def carried_block(text):
     return text[start : start + next_heading.start()] if next_heading else text[start:]
 
 
+def carried_block(text):
+    """The body of the '## Carried obligations' section, or None."""
+    return section_block(text, "Carried obligations")
+
+
 def carried_rows(body):
-    """(header cells, data rows as cell lists) of the first table in the carried block."""
+    """(header cells, data rows as cell lists) of the first table in a section body."""
     lines = [l.strip() for l in body.splitlines() if l.strip().startswith("|")]
     cells = [[c.strip().strip("*`").strip() for c in l.strip("|").split("|")] for l in lines]
     rows = [c for c in cells if not all(re.fullmatch(r":?-{3,}:?", x) for x in c if x)]
@@ -143,7 +153,96 @@ def carried_errors(text, surviving_ids):
     return errors
 
 
-def validate(text):
+DISPOSITIONS = ("IN", "PARALLEL-TICKET", "PROBE", "DEFER", "OUT")
+NO_CANDIDATES_RE = re.compile(r"\bno candidates\b", re.IGNORECASE)
+TO_FILE = "to-file"
+
+
+def table(body, *names):
+    """(rows, column index per name or None) of the first table in a section body."""
+    header, rows = carried_rows(body)
+    return rows, {n: next((i for i, h in enumerate(header) if n in h.lower()), None) for n in names}
+
+
+def cell_of(row, col, name):
+    i = col[name]
+    return row[i] if i is not None and i < len(row) else ""
+
+
+def follow_on_required(text):
+    """F1: completeness-reviewer runs (and owns the census) at standard and critical, and at light with a
+    runtime path, so those reports carry the dispositions table."""
+    if re.search(r"\(tier (?:standard|critical)\)", text, re.IGNORECASE):
+        return True
+    rt = re.search(r"\(tier light\)[^\n]*?runtime path:\s*([^\n;—]+)", text, re.IGNORECASE)
+    return rt is not None and rt.group(1).strip().strip("`<>").lower() not in ("", "none", "n/a")
+
+
+def follow_on_errors(text, final=False):
+    """F1: every follow-on candidate has evidence and one disposition; PARALLEL-TICKET and DEFER name a tracker
+    id; DEFER names its trigger; any PROBE row needs an Unknowns table. Returns (errors, has_probe)."""
+    body = section_block(text, "Follow-on dispositions")
+    if body is None:
+        return (["tier runs the follow-on census but no '### Follow-on dispositions' section exists."]
+                if follow_on_required(text) else []), False
+    rows, col = table(body, "candidate", "evidence", "disposition", "tracker", "trigger")
+    if col["disposition"] is None:
+        return ["'### Follow-on dispositions' needs a table with a Disposition column "
+                "(| # | Candidate | Class | Evidence | Disposition | Tracker | Trigger |)."], False
+    if not rows and not NO_CANDIDATES_RE.search(body):
+        return ["'### Follow-on dispositions' has no rows; write 'no candidates: <classes checked>' as the receipt."], False
+    errors, has_probe = [], False
+    for r in rows:
+        name = cell_of(r, col, "candidate") or r[0]
+        lead = re.match(r"[A-Za-z-]+", cell_of(r, col, "disposition").strip())
+        disp = lead.group(0).upper() if lead else ""
+        if disp not in DISPOSITIONS:
+            errors.append(f"follow-on row '{name}' needs one disposition of {'/'.join(DISPOSITIONS)}, got {cell_of(r, col, 'disposition')!r}")
+            continue
+        has_probe |= disp == "PROBE"
+        if cell_of(r, col, "evidence").lower() in EMPTY_CELLS:
+            errors.append(f"follow-on row '{name}' cites no evidence (spec line, file:line, PR or ledger row); drop it or cite one")
+        tracker = cell_of(r, col, "tracker").lower()
+        if disp in ("PARALLEL-TICKET", "DEFER") and (tracker in EMPTY_CELLS or (final and tracker == TO_FILE)):
+            errors.append(f"follow-on row '{name}' is {disp} with no tracker id (file the ticket, then write its id)")
+        if disp == "DEFER" and cell_of(r, col, "trigger").lower() in EMPTY_CELLS:
+            errors.append(f"follow-on row '{name}' is DEFER with no trigger event")
+    return errors, has_probe
+
+
+def unknowns_errors(text, has_probe):
+    """F3: each unknown names a runnable probe (command, target, expected), a time-box and what ship it blocks."""
+    body = section_block(text, "Unknowns")
+    if body is None:
+        return ["a follow-on row is PROBE but no '### Unknowns' section exists."] if has_probe else []
+    rows, col = table(body, "claim", "probe", "time-box", "blocks")
+    missing = [n for n in ("claim", "probe", "time-box", "blocks") if col[n] is None]
+    if missing:
+        return ["'### Unknowns' needs columns | U-ID | Claim | Why unproven | Probe | Time-box | Blocks ship | (missing: "
+                + ", ".join(missing) + ")."]
+    if has_probe and not rows:
+        return ["a follow-on row is PROBE but '### Unknowns' has no rows."]
+    errors = []
+    for r in rows:
+        for n in ("probe", "time-box", "blocks"):
+            if cell_of(r, col, n).lower() in EMPTY_CELLS:
+                errors.append(f"unknown '{r[0]}' has an empty {n} cell")
+    return errors
+
+
+def decisions_errors(text):
+    """F7: every founder decision owed carries a recommended answer, so one grill round settles it."""
+    body = section_block(text, "Founder decisions owed")
+    if body is None:
+        return []
+    rows, col = table(body, "decision", "recommended")
+    if col["recommended"] is None:
+        return ["'### Founder decisions owed' needs a Recommended answer column."]
+    return [f"founder decision '{r[0]}' has no recommended answer" for r in rows
+            if cell_of(r, col, "recommended").lower() in EMPTY_CELLS]
+
+
+def validate(text, final=False):
     """Return (ok: bool, failures: list[str], summary_lines: list[str])."""
     failures = []
     summary = []
@@ -190,6 +289,10 @@ def validate(text):
     )
     failures += carried_errors(text, surviving_ids)
 
+    # F1/F3/F7: follow-on dispositions, unknowns with probes, founder decisions with a recommended answer.
+    fo_errors, has_probe = follow_on_errors(text, final)
+    failures += fo_errors + unknowns_errors(text, has_probe) + decisions_errors(text)
+
     for family in ("EC", "Sec", "Obs", "LE", "F"):
         rows = by_family.get(family, [])
         total = len(rows)
@@ -210,17 +313,19 @@ def _id_verdict_is(report_id, text, words):
 
 
 def main(argv):
-    if len(argv) != 2:
-        print("usage: validate_review_report.py <report.md>", file=sys.stderr)
+    final = "--final" in argv[1:]
+    args = [a for a in argv[1:] if a != "--final"]
+    if len(args) != 1:
+        print("usage: validate_review_report.py [--final] <report.md>", file=sys.stderr)
         return 1
-    path = argv[1]
+    path = args[0]
     try:
         text = open(path, encoding="utf-8").read()
     except OSError as e:
         print(f"FAIL: cannot read {path}: {e}")
         return 1
 
-    ok, failures, summary = validate(text)
+    ok, failures, summary = validate(text, final)
 
     print(f"Report: {path}")
     print("Per-lane verdict counts:")

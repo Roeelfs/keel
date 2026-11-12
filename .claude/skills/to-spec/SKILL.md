@@ -64,6 +64,19 @@ A list of testing decisions that were made. Include:
 - Which modules will be tested
 - Prior art for the tests (i.e. similar types of tests in the codebase)
 
+## Ships
+
+The ship plan as a typed dependency table: one row per PR, plus a `DEFER` row for any scope item that leaves this spec (its blockedBy cell names the ticket it moves to). Every numbered user story maps to a ship or a `DEFER` row.
+
+| Ship | Scope items | Files and contracts | blockedBy | Dependency |
+|---|---|---|---|---|
+| <name> | <user story numbers, e.g. 1-4, 7> | <modules or contracts it changes; a path glob only where a split rule matches on it> | <ship names, or -> | none / data / contract / gate-rule:<name> / bake-carve-out |
+
+- `none` means no serial edge: the ship dispatches concurrently with the others. A serial edge is never typed `none`.
+- `gate-rule:<name>` is a split the repo's own law already forces (for example schema-before-caller); name the rule from the repo's split-rules list. Never split for any other reason: one change stays one ship.
+- `bake-carve-out` is a fix only live traffic can confirm, shipped as sequential observable steps.
+- Tickets and their blocking edges are created from this table, not re-derived later.
+
 ## Out of Scope
 
 A description of the things that are out of scope for this spec.

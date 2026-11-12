@@ -197,6 +197,22 @@ class DerivedStates(unittest.TestCase):
         s = snap()
         self.assertEqual(s["frontier"], ["T-2", "T-3", "T-4", "T-6", "T-7"])
         self.assertTrue(s["map_line"].startswith("Map M-1: done 2 / open 7 / blocked 2; frontier now: T-2"))
+        self.assertTrue(s["map_line"].endswith("; exit unset"))
+
+    def test_exit_criteria_count_and_gate_done(self):
+        exits = [{"outcome": "p95 under 2s", "proof": "trace.sh", "expected": "<2000", "green": True},
+                 {"outcome": "zero refusals", "proof": "count.sql", "expected": "0", "green": None}]
+        self.assertTrue(snap(exit_criteria=exits)["map_line"].endswith("; exit 1/2"))
+        closed = copy.deepcopy(TRACKER)
+        for c in closed["children"]:
+            c["state"] = tstate("completed")
+        done = snap(tracker=closed, state={"status": "DONE"}, exit_criteria=exits)
+        self.assertIn("status_done_exit_not_green_1_of_2:no_exemption", done["notes"])
+        self.assertNotIn("exempt:status_done_zero_open", done["notes"])
+        exits[1]["green"] = True
+        self.assertIn("exempt:status_done_zero_open", snap(tracker=closed, state={"status": "DONE"}, exit_criteria=exits)["notes"])
+        unset = snap(tracker=closed, state={"status": "DONE"})
+        self.assertIn("exit_criteria_unset", unset["notes"])
 
     def test_relations_truncated_is_never_ready(self):  # R20: never truncate silently
         t = copy.deepcopy(TRACKER)

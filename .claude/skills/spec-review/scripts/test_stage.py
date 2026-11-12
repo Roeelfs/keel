@@ -648,7 +648,7 @@ class SynthesizeTests(unittest.TestCase):
 
 
 
-WHY_ANSWERS = {f"q{i}": f"answer {i}" for i in range(1, 7)}
+WHY_ANSWERS = {f"q{i}": f"answer {i}" for i in range(1, 8)}
 WHY_RECORD = "\n".join(f"record line {i}" for i in range(10))
 
 
@@ -718,6 +718,7 @@ class WhyGateTests(unittest.TestCase):
             self.assertEqual(why(run, "--check")[0], 1, "no envelope")
             for env in ({"verdict": "MAYBE", "answers": WHY_ANSWERS},
                         {"verdict": "PROCEED", "answers": {**WHY_ANSWERS, "q4": " "}, "whyRecord": WHY_RECORD},
+                        {"verdict": "PROCEED", "answers": {k: v for k, v in WHY_ANSWERS.items() if k != "q7"}, "whyRecord": WHY_RECORD},
                         {"verdict": "PROCEED", "answers": WHY_ANSWERS, "whyRecord": ""},
                         {"verdict": "PROCEED", "answers": WHY_ANSWERS, "whyRecord": "x\n" * 40}):
                 (run / "why-gate.json").write_text(json.dumps(env))
