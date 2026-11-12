@@ -557,11 +557,19 @@ terminal login, warns once on a mismatch (never blocks), and records `account_pr
 in the lane row. A manager never switches accounts itself and never copies the file's content
 into a report, row or ticket; the fix for a mismatch is the human running `claude auth login`.
 
-1. **Does the work need the human?** Grilling, a decision the founder must make, a login, password,
-   consent screen or identity-browser capture, or a unit the founder wants to watch and steer over
-   many turns → **child session** (`start_session`, a chip). From an automated turn it lands as a
-   card and waits for a click, so it is never the unattended runtime. Before starting, handing off or
-   archiving a chip, record its consolidation state ([consolidation.md](consolidation.md) §Before a chip).
+1. **Does the work need the human, or is it ongoing?** Grilling, a decision the founder must make, a
+   login, password, consent screen or identity-browser capture, or a unit the founder wants to watch and
+   steer over many turns → **child session** (`start_session`, a chip). Ongoing work goes there too
+   (founder, 2026-11-12): a spec review, or a multi-turn build that needs a wake, background tasks, a
+   `Workflow`, interactive-OAuth MCPs or many turns. The child owns that work and dispatches its own
+   headless and Codex lanes as tracked background Bash. A headless lane is a root `claude -p` that exits
+   at turn end, losing its wake and its backgrounded work, with no interactive-OAuth MCPs; a child
+   outlives its turns. One-shot document, mining, census and single-ship build lanes stay headless
+   (questions 3-5). From a turn started by a peer message or an automated event, `start_session` only
+   lands a card that waits for a click, so it is never the unattended runtime: start the child in a turn
+   the founder or a user message began; otherwise propose the card and meanwhile run the work as a
+   tracked headless lane. Before starting, handing off or archiving a chip, record its consolidation
+   state ([consolidation.md](consolidation.md) §Before a chip).
 2. **Does it need a desktop-only tool?** Interactive-OAuth MCP (Linear, Supabase, Vercel via the
    desktop), the PR/session/sidebar tools, or this conversation's accumulated context → **`Agent`
    subagent inside the manager**, with `Native-why: needs this harness MCP set or conversation context`.
@@ -591,7 +599,7 @@ into a report, row or ticket; the fix for a mismatch is the human running `claud
 
 | Runtime | Deliverable | Its context cost to you | Cannot |
 |---|---|---|---|
-| Child session (chip) | human judgment, steered work | one card + its note | run unattended |
+| Child session (chip) | human judgment, steered work, ongoing multi-turn work (spec review, builds) | one card + its note | start from a peer/automated turn (card only) |
 | `Agent` subagent | short answer needing desktop MCP or this conversation | its whole reply, every turn | outlive your turn cheaply |
 | Codex document lane | report, verdict, census | the slice of the outfile you read | use MCP, push, see this conversation |
 | Headless Codex lane | commits in one worktree | the graded diff | push, run vitest, use MCP |
