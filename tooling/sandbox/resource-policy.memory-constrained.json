@@ -1,7 +1,7 @@
 {
   "slots": 3,
   "max_slots": 3,
-  "max_rss_mb": 6144,
+  "max_rss_mb": 8192,
   "min_free_percent": 20,
   "run_min_free_percent": 10,
   "class_max_rss_mb": {
@@ -11,6 +11,7 @@
     "npx": 7680,
     "staging-sync": 9216,
     "wt-setup": 8192,
-    "git": 8192
+    "git": 8192,
+    "sync-main": 8192
   }
 }
