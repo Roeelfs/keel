@@ -561,8 +561,10 @@ into a report, row or ticket; the fix for a mismatch is the human running `claud
    login, password, consent screen or identity-browser capture, or a unit the founder wants to watch and
    steer over many turns → **child session** (`start_session`, a chip). Ongoing work goes there too
    (founder, 2026-11-12): a spec review, or a multi-turn build that needs a wake, background tasks, a
-   `Workflow`, interactive-OAuth MCPs or many turns. The child owns that work and dispatches its own
-   headless and Codex lanes as tracked background Bash. A headless lane is a root `claude -p` that exits
+   `Workflow`, interactive-OAuth MCPs or many turns. The child is the program's engineering owner,
+   not a one-off: it owns what changes and how technically (specs, builds) across many cached turns, and
+   dispatches its own headless and Codex lanes as tracked background Bash. The manager keeps the goal
+   and the map, hands the child its work, and owns bakes, testing, proof and grading across all missions. A headless lane is a root `claude -p` that exits
    at turn end, losing its wake and its backgrounded work, with no interactive-OAuth MCPs; a child
    outlives its turns. One-shot document, mining, census and single-ship build lanes stay headless
    (questions 3-5). From a turn started by a peer message or an automated event, `start_session` only
