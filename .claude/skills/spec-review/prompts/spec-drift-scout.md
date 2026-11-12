@@ -117,6 +117,12 @@ prompt: |
      strategy?
   6. Is a spec/test plan/review file missing after a code or architecture
      change that should have updated one?
+  7. **Sibling contract agreement.** When two or more specs under the same
+     map (or program) are drafted or reviewed in the same window, or cite each
+     other, list every contract they share (schema, API, event, config key,
+     vocabulary, ordering) and what each spec says about it. A disagreement is
+     MAJOR with action `amend-both` or `sequence-after`; a shared primitive's
+     spec is reviewed before its consumer specs merge.
 
   ## Output format
 
@@ -141,10 +147,15 @@ prompt: |
   |---|---|---|---|---|---|
   | S1 | ... | Draft/Approved/Unknown | ... | ... | same API / conflicting rollout / none |
 
+  ### Contract Agreement (question 7; omit when no sibling spec shares the map)
+  | Shared contract | Spec A says | Spec B says | Agree? | Action |
+  |---|---|---|---|---|
+  | <schema/API/event/key> | <spec A path §> | <spec B path §> | yes / NO | none / amend-both / sequence-after <spec> |
+
   ### Drift Candidates
   | Drift ID | Severity | Source | Evidence | Risk | Recommended Action | Needs Investigator |
   |---|---|---|---|---|---|---|
-  | DRIFT-1 | CRITICAL/MAJOR/MINOR | R1/S1/etc. | <file:line or commit/spec path> | <what could go stale/conflict> | update-current-spec / update-other-spec / combine-specs / move-section / split-new-spec / create-missing-spec / mark-intentional / no-action | yes/no |
+  | DRIFT-1 | CRITICAL/MAJOR/MINOR | R1/S1/etc. | <file:line or commit/spec path> | <what could go stale/conflict> | update-current-spec / update-other-spec / amend-both / sequence-after / combine-specs / move-section / split-new-spec / create-missing-spec / mark-intentional / no-action | yes/no |
 
   ### Investigator Dispatch Plan
   - For each `Needs Investigator: yes`, give:

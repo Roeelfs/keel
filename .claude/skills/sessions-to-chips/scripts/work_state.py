@@ -537,17 +537,24 @@ def derive(ctx):
         notes.append(f"ready_dropped:tracker_age_{int(ctx['tracker_age_s'])}s")
         ready_block = []
     blocking += ready_block
+    exits = ctx.get("exit_criteria") or []
+    green = sum(1 for e in exits if isinstance(e, dict) and e.get("green") is True)
+    exit_tag = f"exit {green}/{len(exits)}" if exits else "exit unset"
     if status == "DONE":
-        if tracker is not None and counts["open"] == 0:
+        if tracker is not None and counts["open"] == 0 and green == len(exits):
             blocking = []
             notes.append("exempt:status_done_zero_open")
+            if not exits:
+                notes.append("exit_criteria_unset")
+        elif green < len(exits):
+            notes.append(f"status_done_exit_not_green_{green}_of_{len(exits)}:no_exemption")
         else:
             notes.append("status_done_with_open_children:no_exemption")
     if status == "GRILLING":
         notes.append("grilling:only_founder_items_exempt")
     frontier = [i["ticket"] for i in items if i["state"] == "ready"]
     map_line = (f"Map {map_id}: done {counts['done']} / open {counts['open']} / blocked {counts['blocked']}; "
-                f"frontier now: {', '.join(frontier) or 'none'}")
+                f"frontier now: {', '.join(frontier) or 'none'}; {exit_tag}")
     snap = {"schema": SCHEMA, "program": slug, "map": map_id, "taken_at": st.now_iso(now),
             "remote_age_s": {"tracker": None if ctx.get("tracker_age_s") is None else int(ctx["tracker_age_s"]),
                              "gh": None if ctx.get("gh_age_s") is None else int(ctx["gh_age_s"])},

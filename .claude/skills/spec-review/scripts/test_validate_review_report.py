@@ -43,6 +43,20 @@ Obs-1 SURVIVES the falsifier wave — no correlation id exists yet.
 | F-1 | the spec-prose fix holds in the build | test: `rejects_max_plus_one` | - | - |
 """
 
+FOLLOW_ON = """\
+### Follow-on dispositions
+| # | Candidate | Class | Evidence | Disposition | Tracker | Trigger |
+|---|---|---|---|---|---|---|
+| 1 | the worker host runs the new path too | 1 | services/worker/main.py:40 | PARALLEL-TICKET | TKT-9 | - |
+| 2 | version bump for the client package | 4 | spec line 88 | OUT: published by the release job | - | - |
+
+"""
+
+
+def with_follow_on(report, block=FOLLOW_ON):
+    return report.replace("## Carried obligations", block + "## Carried obligations")
+
+
 CARRIED_OBS_ROW = "| Obs-1 | thread a correlation id end to end | test: `request_id_threads_through_worker` | - | - |\n"
 
 
@@ -107,7 +121,7 @@ class ValidateReviewReportTests(unittest.TestCase):
         self.assertTrue(any("Proof column" in f for f in vrr.validate(bulleted)[1]))
 
     def test_critical_tier_needs_a_drive_and_a_bake_row_with_owner_and_date(self):
-        report = PASSING_REPORT.replace("## Spec Review — Final Report", "## Spec Review — Final Report\n### Profile: full (tier critical)")
+        report = with_follow_on(PASSING_REPORT.replace("## Spec Review — Final Report", "## Spec Review — Final Report\n### Profile: full (tier critical)"))
         failures = vrr.validate(report)[1]
         self.assertTrue(any("PRE-MERGE DRIVE" in f for f in failures) and any("POST-DEPLOY BAKE" in f for f in failures))
         rows = ("| PRE-MERGE DRIVE | staging probe of the changed seam | drive: `probe-seam.sh` against the test org | the author | 2026-11-12 |\n"
@@ -118,12 +132,57 @@ class ValidateReviewReportTests(unittest.TestCase):
 
     def test_standard_tier_runtime_path_needs_a_drive_row(self):
         head = "## Spec Review — Final Report\n### Profile: standard (tier standard) — runtime path: services/api/handler"
-        report = PASSING_REPORT.replace("## Spec Review — Final Report", head)
+        report = with_follow_on(PASSING_REPORT.replace("## Spec Review — Final Report", head))
         self.assertTrue(any("PRE-MERGE DRIVE" in f for f in vrr.validate(report)[1]))
         row = "| PRE-MERGE DRIVE | staging probe of the changed seam | drive: `probe-seam.sh` against the test org | the author | 2026-11-12 |\n"
         self.assertTrue(vrr.validate(report + row)[0], vrr.validate(report + row)[1])
-        none = PASSING_REPORT.replace("## Spec Review — Final Report", head.replace("services/api/handler", "none"))
+        none = with_follow_on(PASSING_REPORT.replace("## Spec Review — Final Report", head.replace("services/api/handler", "none")))
         self.assertFalse(any("PRE-MERGE DRIVE" in f for f in vrr.validate(none)[1]))
+
+    def test_follow_on_section_required_where_the_census_runs(self):
+        std = PASSING_REPORT.replace("## Spec Review — Final Report", "## Spec Review — Final Report\n### Profile: standard (tier standard) — runtime path: none")
+        self.assertTrue(any("Follow-on dispositions" in f for f in vrr.validate(std)[1]))
+        self.assertTrue(vrr.validate(with_follow_on(std))[0], vrr.validate(with_follow_on(std))[1])
+        light = PASSING_REPORT.replace("## Spec Review — Final Report", "## Spec Review — Final Report\n### Profile: light (tier light) — runtime path: none")
+        self.assertFalse(any("Follow-on" in f for f in vrr.validate(light)[1]))
+        light_rt = light.replace("runtime path: none", "runtime path: services/api")
+        self.assertTrue(any("Follow-on dispositions" in f for f in vrr.validate(light_rt)[1]))
+        empty = "### Follow-on dispositions\n| # | Candidate | Class | Evidence | Disposition | Tracker | Trigger |\n|---|---|---|---|---|---|---|\n\n"
+        self.assertTrue(any("no rows" in f for f in vrr.validate(with_follow_on(std, empty))[1]))
+        receipt = empty + "no candidates: classes 1-6 checked, all N/A\n\n"
+        self.assertTrue(vrr.validate(with_follow_on(std, receipt))[0])
+
+    def test_follow_on_rows_need_disposition_evidence_tracker_and_trigger(self):
+        def fails(row):
+            return vrr.validate(with_follow_on(PASSING_REPORT, FOLLOW_ON.replace(
+                "| 2 | version bump for the client package | 4 | spec line 88 | OUT: published by the release job | - | - |", row)))[1]
+        self.assertTrue(any("one disposition" in f for f in fails("| 2 | x | 4 | spec line 9 | MAYBE | - | - |")))
+        self.assertTrue(any("cites no evidence" in f for f in fails("| 2 | x | 4 | - | OUT | - | - |")))
+        self.assertTrue(any("no tracker id" in f for f in fails("| 2 | x | 4 | spec line 9 | PARALLEL-TICKET | - | - |")))
+        self.assertTrue(any("no trigger" in f for f in fails("| 2 | x | 4 | spec line 9 | DEFER -> later map | TKT-3 | - |")))
+        self.assertEqual(fails("| 2 | x | 4 | spec line 9 | DEFER -> later map | TKT-3 | first paying tenant |"), [])
+        to_file = with_follow_on(PASSING_REPORT, FOLLOW_ON.replace("| TKT-9 |", "| to-file |"))
+        self.assertTrue(vrr.validate(to_file)[0], vrr.validate(to_file)[1])
+        self.assertTrue(any("no tracker id" in f for f in vrr.validate(to_file, final=True)[1]))
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "r.review.md"
+            path.write_text(to_file)
+            final = subprocess.run([sys.executable, str(SCRIPT), "--final", str(path)], capture_output=True, text=True)
+            self.assertEqual(final.returncode, 1, final.stdout)
+
+    def test_probe_rows_need_an_unknowns_table_with_probes(self):
+        probe = FOLLOW_ON.replace("| OUT: published by the release job | - | - |", "| PROBE | - | - |")
+        self.assertTrue(any("no '### Unknowns'" in f for f in vrr.validate(with_follow_on(PASSING_REPORT, probe))[1]))
+        unknowns = ("### Unknowns\n| U-ID | Claim | Why unproven | Probe | Time-box | Blocks ship |\n|---|---|---|---|---|---|\n"
+                    "| U-1 | the queue accepts 256 KB | never measured | `aws sqs get-queue-attributes` on staging, expect 262144 | 1h | ship 2 |\n\n")
+        self.assertTrue(vrr.validate(with_follow_on(PASSING_REPORT, probe + unknowns))[0])
+        self.assertTrue(any("empty time-box" in f for f in vrr.validate(with_follow_on(PASSING_REPORT, probe + unknowns.replace("| 1h |", "| - |")))[1]))
+
+    def test_founder_decisions_need_a_recommended_answer(self):
+        block = ("### Founder decisions owed\n| D-ID | Decision | Recommended answer | Blocks |\n|---|---|---|---|\n"
+                 "| D-1 | default retention | 30 days | ship 1 |\n\n")
+        self.assertTrue(vrr.validate(with_follow_on(PASSING_REPORT, block))[0])
+        self.assertTrue(any("no recommended answer" in f for f in vrr.validate(with_follow_on(PASSING_REPORT, block.replace("30 days", "-")))[1]))
 
     def test_prints_per_lane_verdict_counts(self):
         _, _, summary = vrr.validate(PASSING_REPORT)

@@ -7,7 +7,10 @@ the one canonical `### Falsifier wave:` line with the real counts; every CRITICA
 envelope present with a REFUTED/SURVIVES verdict on its line (SURVIVES with a "not falsified at tier" note when the tier's falsifier scope excludes it); every lane in the manifest as run or
 `SKIPPED (gate: <reason>)`; a Codex Frontier (Astra) or critic-frontier result; no unfilled placeholders;
 a `### Carried obligations` table with a non-empty Proof cell for every surviving CRITICAL/MAJOR id (any lane),
-and, at tier critical, a PRE-MERGE DRIVE and a POST-DEPLOY BAKE row with owner and close-by date.
+and, at tier critical, a PRE-MERGE DRIVE and a POST-DEPLOY BAKE row with owner and close-by date;
+at standard/critical (and light with a runtime path) a `### Follow-on dispositions` table where every row has
+evidence and one disposition, PARALLEL-TICKET/DEFER rows a tracker id, DEFER rows a trigger; a `### Unknowns`
+row with probe, time-box and blocked ship for every PROBE; a recommended answer on every founder decision owed.
 
 Severity vocabulary: CRITICAL (security, data loss, compliance, rollback safety; block ship) / MAJOR
 (correctness, availability, contract break; fix before release) / MINOR (performance, cosmetic, edge
@@ -126,7 +129,11 @@ same local project scope.
 
 | Drift ID | Severity | Evidence | Impact | Recommended Action | Decision |
 |---|---|---|---|---|---|
-| DRIFT-1 | CRITICAL / MAJOR / MINOR | <worktree/spec/file/commit> | <what goes stale/conflicts> | update-current-spec / update-other-spec / combine-specs / move-section / split-new-spec / create-missing-spec / mark-intentional / no-action | applied / user-decision-needed / follow-up |
+| DRIFT-1 | CRITICAL / MAJOR / MINOR | <worktree/spec/file/commit> | <what goes stale/conflicts> | update-current-spec / update-other-spec / amend-both / sequence-after / combine-specs / move-section / split-new-spec / create-missing-spec / mark-intentional / no-action | applied / user-decision-needed / follow-up |
+
+When sibling specs under one map share a contract, reproduce the scout's Contract Agreement table
+(| Shared contract | Spec A says | Spec B says | Agree? | Action |); each NO row is a MAJOR DRIFT row with
+`amend-both` or `sequence-after`, and the no-build-past-sequencing-drift gate applies to both specs.
 
 CRITICAL/MAJOR drift findings with `update-current-spec` are auto-applied when
 the change is unambiguous and inside the target spec's scope. Findings that
@@ -210,6 +217,36 @@ Kept in its own section on purpose — elevation suggestions are NOT severity-ra
 ### Changes Applied
 1. <what was changed and why>
 ...
+
+### Follow-on dispositions
+The completeness-reviewer's section H census ("this spec merged 30 days ago and more missions were needed: name
+them"), one row per evidence-backed candidate. Disposition: `IN` (spec amended now), `PARALLEL-TICKET` (filed and
+dispatched in the same turn, never riding this build), `PROBE` (a row in Unknowns), `DEFER -> <named map or
+ticket>` with a trigger event, or `OUT: <why>`. A candidate the spec's own goal needs is `IN` or `PARALLEL-TICKET`,
+never `DEFER`. No candidates: write `no candidates: <classes checked>` instead of an empty table.
+
+| # | Candidate | Class | Evidence | Disposition | Tracker | Trigger |
+|---|---|---|---|---|---|---|
+| 1 | <the missing mission> | <1-6 or other> | <spec line / file:line / PR / ledger row> | IN / PARALLEL-TICKET / PROBE / DEFER -> <target> / OUT: <why> | <ticket id, required for PARALLEL-TICKET and DEFER> | <event, required for DEFER> |
+
+### Unknowns
+Every claim the spec relies on that nothing has proven yet: an uncaptured external sample, a deployed limit
+(synth/diff, quota and import listings), a read-only dry run of EACH seam on real target bytes (per seam: the first
+failure masks the next), fixture readiness for every drive or bake leg, and for a performance goal a full-path trace
+with per-hop timing. Each row becomes a read-only, time-boxed probe ticket dispatched in parallel before build; build
+tickets on that seam are blocked by it, and probe results amend the spec once (fix-verify re-review).
+
+| U-ID | Claim | Why unproven | Probe | Time-box | Blocks ship |
+|---|---|---|---|---|---|
+| U-1 | <the assumption> | <never measured / sample missing> | <command, target, expected value> | <e.g. 2h> | <ship name or none> |
+
+### Founder decisions owed
+Every open default, ruling, signature or ADR status change a ship needs. Grilled in ONE round (recommended answer
+first) before the spec merges, so the spec merges once, after review fixes and rulings are applied.
+
+| D-ID | Decision | Recommended answer | Blocks |
+|---|---|---|---|
+| D-1 | <the question> | <answer that "yes" settles> | <ship name or spec merge> |
 
 ### Carried obligations
 The review-to-build closure table: one row per SURVIVING CRITICAL/MAJOR finding from ANY lane

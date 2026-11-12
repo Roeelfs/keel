@@ -46,7 +46,10 @@ MANIFEST = run_dir.load_manifest()
 # 2026-11-09: 14500 -> 15700. Escape-analysis rules: the externalShape gate, the keepFrom census and path-floor plan
 # refusals (frame fields + `plan --spec`) are Step 1 decisions, and review-to-build closure with proof per tier is a
 # Step 5c duty; the trigger list, the tier table and the rationale live in reference.md.
-MAX_SKILL_BYTES = 15700
+# 2026-11-12: 15700 -> 16650. Follow-on rules: the ship-plan check is a Step 1 gate, filing and dispatching follow-on,
+# probe and DEFER rows plus the one founder grill are Step 5c duties, the --final validation is a Step 9 gate, and
+# "a spec merges once" is a process gate; the census classes, table shapes and rationale live in reference.md.
+MAX_SKILL_BYTES = 16650
 
 # Lanes that are gated supplements / substitutes, not part of the "13 reviewers".
 SUPPLEMENTS = {"adr-auditor", "legal-auditor", "cutover-architect", "runtime-wiring", "performance-architect", "operator-plane-architect", "system1-elevation", "critic-hotfix", "critic-adversarial", "critic-frontier", "dependency-currency", "fable-frontier-judge"}
@@ -231,7 +234,7 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual((e["agentType"], e["model"], e["prompt"]), ("general-purpose", "opus", "why-gate.md"))
         self.assertNotIn("why-gate", [x["label"] for x in MANIFEST["lanes"]], "not a review lane: it runs before the plan's lanes")
         text = (SKILL_DIR / "prompts" / e["prompt"]).read_text(encoding="utf-8")
-        for needle in ("PROCEED", "SIMPLIFY", "WRONG-ROUTE", "ADR-0036", "q6"):
+        for needle in ("PROCEED", "SIMPLIFY", "WRONG-ROUTE", "ADR-0036", "q7"):
             self.assertIn(needle, text)
         self.assertIn("async function why()", WORKFLOW_JS.read_text())
         self.assertIn("reference.md#why-gate", SKILL)
