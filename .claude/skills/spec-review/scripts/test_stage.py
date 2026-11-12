@@ -639,12 +639,22 @@ class SynthesizeTests(unittest.TestCase):
                 "## Spec Review - Final Report\n\n### Falsifier wave: 1 dispatched over 1 CRITICAL/MAJOR — 0 REFUTED, 1 SURVIVES.\n\n"
                 f"### Lane manifest\n{labels}\n\n1. [F-1] [CRITICAL] CB-1 SURVIVES\n"
                 "\n### Carried obligations\n| ID | Obligation | Proof |\n|---|---|---|\n| F-1 | fix holds | test: `t` |\n\n" + "x" * 500)
-            rc, out = scall("report-check", "--run", str(run))
+            archive = Path(tmp) / "archive"
+            with mock.patch.dict("os.environ", {"SPEC_REVIEW_ARCHIVE": str(archive)}):
+                rc, out = scall("report-check", "--run", str(run))
             self.assertEqual(rc, 0, out)
             self.assertTrue(review_path.is_file())
             sp = json.loads((run / "lane-spend.json").read_text())
             self.assertEqual(sp["checkpoints"][-1]["at"], "final")
             self.assertTrue(manifest)
+            kept = archive.resolve() / "spec" / run.name
+            self.assertEqual(out["archivePath"], str(kept), "archived under <base>/<spec stem>/<run name>")
+            for name in ("report.md", "lane-spend.json", "merged.json", "inputs/spec.snapshot.md"):
+                self.assertTrue((kept / name).is_file(), f"the archive holds {name}, so a later --prior can seed from it")
+            self.assertEqual(json.loads((kept / "state.json").read_text())["archivePath"], str(kept))
+            self.assertEqual(scall("mark-applied", "--run", str(run), "--ids", "F-1")[0], 0)
+            units = json.loads((kept / "merged.json").read_text())["units"]
+            self.assertTrue(units[0]["applied"], "mark-applied after report-check reaches the archive too")
 
 
 
