@@ -15,6 +15,10 @@ replaces another says `replaces <date> <rule>`; never delete a line.
 
 ## Rulings
 
-This public file carries the format only. A machine keeps its rulings in its private overlay,
+This public file carries the format and de-identified, generic rulings only. A machine keeps its private rulings in its private overlay,
 `~/.claude/skills-overlay/sessions-to-chips/rulings-ledger.md`, in the same line format; `state_brief.py`
 reads both files, this one first. Rulings name private tickets, accounts and files, so they never land here.
+
+- 2026-11-13 | Every child session keeps ONE notes file under the program's relay folder (done, owed, next, decisions, paths), rewritten each turn; its manager reads that file and the PR at a wake, never the child's transcript | founder 2026-11-13, permanent
+- 2026-11-13 | A child compacts in place by default (warm cache, no re-paid preamble); a fresh child, started from the notes file, only at a phase boundary with a complete notes file and a different next seam | founder 2026-11-13, permanent
+- 2026-11-13 | One batched manager turn per wake: read every pending child report and event in ONE turn (children report with notify_when_idle); read state from disk, never child transcripts or lane output beyond a slice | founder 2026-11-13, permanent
