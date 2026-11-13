@@ -511,6 +511,12 @@ what its Problems panel reports. Schema and owners: `specs/2026-11-03-manager-st
 
 ## Per-turn state survey
 
+**One batched turn per wake (founder, 2026-11-13).** Cost is turns × context size, so a wake reads
+every pending child report and event in ONE turn, never one turn per message; children report with
+`notify_when_idle: true` so their reports queue for that turn. Read state from disk (the state file, the
+map, the wake brief, each child's notes file), never a child's transcript, and never lane output beyond a
+slice.
+
 Your own carriers are never mined: `work_state.py snapshot` derives them (sessions, lanes, PRs) from
 the bindings, the session index and the lane rows. The survey below is for what the engine cannot
 see. Never read raw session JSONL inline. Dispatch the state miner (`../prompts/state-miner.md`, cheap
@@ -572,6 +578,14 @@ into a report, row or ticket; the fix for a mismatch is the human running `claud
    the founder or a user message began; otherwise propose the card and meanwhile run the work as a
    tracked headless lane. Before starting, handing off or archiving a chip, record its consolidation
    state ([consolidation.md](consolidation.md) §Before a chip).
+   **The child keeps ONE notes file (founder, 2026-11-13):** `relay/<slug>/child-notes.md` under the
+   program's relay folder (`~/.claude/sessions-to-chips/relay/`), with done, owed, next, decisions and
+   paths, rewritten every turn, so a compaction, an archive or a hand-off loses nothing. Its manager reads
+   that file and the PR at a wake, never the child's transcript.
+   **Compact in place by default; a fresh child only at a phase boundary (founder, 2026-11-13).** A child
+   at the auto-compact window compacts in place: it keeps the warm cache and does not re-pay the fixed
+   preamble. It hands off to a fresh child, started from its notes file, only at a phase boundary (for
+   example spec merged, then build), with a complete notes file and a different next seam.
 2. **Does it need a desktop-only tool?** Interactive-OAuth MCP (Linear, Supabase, Vercel via the
    desktop), the PR/session/sidebar tools, or this conversation's accumulated context → **`Agent`
    subagent inside the manager**, with `Native-why: needs this harness MCP set or conversation context`.
