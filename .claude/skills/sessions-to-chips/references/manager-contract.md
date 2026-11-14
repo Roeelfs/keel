@@ -834,6 +834,8 @@ what you do the moment it lands. A step you can run yourself you run; only steps
 (their login, password, TOTP, device, a prod ship awaiting their go-ahead) go to them. Several
 asks go out as ONE numbered round, in the order that unblocks the most work first, each with its
 kit. Managers brief their children with this rule and relay nothing across programs.
+A founder ask that mentions an Org names it by name first; the id is only a labelled paste value;
+org-uuid-check.py blocks the turn otherwise.
 
 Nothing else is an end state. "Parked", "blocked on X", "waiting for the founder", "will resume
 later" and "no active work, N items owed" are all defects: the manager either starts the work,
