@@ -416,11 +416,33 @@ head stale, so the next session read the wrong date and the wrong owner. File mt
 The three managers that rewrote their files today wrote three different head formats. Without one
 format, no check can read the head.
 
-**Owner.** `state_view.py`, new `read_head(text, now, problems) -> {updated_at, writer, account,
-since} | None`. It already owns the authored part of the state file, reads it strictly, and turns
-every bad input into a Problems row. Every reader goes through it: `render_state`, `state_brief`,
-`role_brief`, and the Stop guard. Module imports stay stdlib-only, because the guard imports it
-under its time budget, as it does `role_brief`.
+A to D are examples, not the fleet. On 2026-11-16, 15 state files had changed in the last 7 days, and
+at least two more non-DONE ones carried a stale or dateless head over a log-shaped body (one 1321
+lines with 80 AT-WAKE blocks, one 3648 lines with 538). Every manifest read that day had no `status`
+key, so all of them count as non-DONE. The fleet this row must fix is defined by the census command:
+
+```
+find ~/.claude/orchestrator/programs -maxdepth 1 -name '*.state.md' -mtime -7
+```
+
+minus the programs whose manifest `status` is `done` or whose last `## AT-WAKE` says `Status: DONE`.
+`render_state.py --program <slug> --context` names each one's head and log-shape defects.
+
+**Owner.** `state_view.py`, new `read_head(text, now, problems) -> (head, reason)`. `head` is
+`{updated_at, writer, account, since}` or `None`; `reason` is `ok`, `missing` (line 1 is not
+head-shaped) or `unparsed` (a head is there but malformed). It already owns the authored part of the
+state file, reads it strictly, and turns every bad input into a Problems row. Every reader goes
+through it: `render_state`, `state_brief`, `role_brief`, and the Stop guard. Because `reason` comes
+back with the head, the guard never sniffs line 1 itself: there is one head parser. The same module
+owns the one head writer (below). Module top-level imports stay stdlib-only, because the guard
+imports it under its time budget, as it does `role_brief`.
+
+**Import paths.** The guard runs under `python3 -I` and loads `role_brief.py` by path
+(`spec_from_file_location`), which does not put `scripts/` on `sys.path`. So `role_brief` imports
+`state_view` lazily inside its health-line function, inserting `HERE` first, exactly as
+`context_brief` does today (`role_brief.py:222`). A top-level `import state_view` would raise
+`ModuleNotFoundError` in the guard, `role_facts` would catch it as `role_error`, and the enforced role
+check would fail open on the day of the version bump.
 
 **The head.** The first three lines of the file, before the `# ` title, exactly:
 
@@ -433,19 +455,40 @@ since-last-session: <one line: what changed since the previous head, naming its 
 - `updated_at` is RFC3339 UTC to the second with `Z`, not in the future (the existing
   `check_time` plus a seconds requirement, as the manifest rule already has).
 - `writer` is the full `local_<uuid>` of the session that wrote the head (row 4: full ids only). The
-  account id is the store's account directory, the value `mine_all.detect_here` resolves. It is a
-  label for readers; checks compare only the session id.
+  account id is the store's account directory. It is a label for readers; checks compare only the
+  session id. A bare CLI uuid is not a valid writer (A's ad hoc head today uses one).
 - `since-last-session` is non-empty. On a program's first head it says `first head`.
-- A missing, misordered or malformed key makes `read_head` return `None` with one Problems row
-  naming the line and the expected form.
+- A missing, misordered or malformed key makes `read_head` return `(None, "missing")` or
+  `(None, "unparsed")` with one Problems row naming the line and the expected form.
+
+**The head writer.** Managers never compose or paste the head. One CLI writes it:
+
+```
+python3 state_view.py --write-head <slug> --since "<one line>"
+```
+
+- It resolves the writer from `CLAUDE_SESSION_ID`, which is the CLI uuid, not the `local_` id
+  (`role_brief.py:302` has only that). Inside the CLI path, never at module top level, it calls
+  `program_family.load_store()` and selects the one store row whose `cliSessionId` equals it. That
+  row gives `sessionId` (the `local_` id) and `_acct` (the account directory), the same match
+  `mine_all.detect_here` makes (`mine_all.py:59-61`).
+- It stamps `updated_at` with the real current UTC time to the second, at the moment it runs, then
+  rewrites lines 1-3 of `<slug>.state.md` in place (inserting them above the `# ` title when absent)
+  and leaves the rest of the file byte-identical.
+- It refuses, writes nothing and exits non-zero when the lookup fails: no `CLAUDE_SESSION_ID`, no
+  store row, more than one row, or an empty `--since`. The message names which, for example
+  `write-head refused: CLAUDE_SESSION_ID <8 hex> matches no store row`. It never falls back to
+  writing the CLI uuid.
+- After writing, it re-reads the file through `read_head` and exits non-zero unless the reason is
+  `ok`, so the writer and the parser cannot drift.
 
 **Change.**
 
 - **(a) Rewrite the head on every turn that changes state.** That covers the founder's "every manager
-  turn that changes state". Role card line and wake step 5: "rewrite the head (`updated_at` now,
-  `writer` you, `since-last-session`), then update `## VIEW`". `role_brief` prints the filled-in head
-  template (this session's id, account and the current time) in the wake steps, so the manager pastes
-  it instead of composing it.
+  turn that changes state". Role card line and wake step 5: "run
+  `state_view.py --write-head <slug> --since "<what changed>"` as the turn's last state write, then
+  update `## VIEW`". `role_brief` prints that exact command with the slug filled in, never a pasted
+  template: a template's time would be stale from the next turn on.
 - **(b) Dated lines.** In `## VIEW`, `done` and `decisions` rows now need a `date`. A row without one
   is still shown, tagged `date_missing`, with a Problems row (never dropped). Done, decision and
   ruling lines outside `## VIEW` start with their absolute date. That is a role-card rule with no
@@ -464,21 +507,41 @@ since-last-session: <one line: what changed since the previous head, naming its 
 **Guard change** (private harness; mirrors the existing page check line for line):
 
 - New `head_facts(state_text, records, now, own_ids, read_head)` returns `{head_due, head_reason}`.
-- **Turn start** is the `timestamp` of the record that opens the current turn (`turn_spans(records)[-1]`).
+- **Turn start** is `records[turn_spans(records)[-1][0]]["timestamp"]` (`turn_spans` returns index
+  ranges, not records), rounded down to the whole second. The head carries whole seconds, so without
+  rounding a head written at `13:37:51Z` in a turn opening at `13:37:51.800Z` would read as stale.
 - **Due** when the manifest is not done, the last `## AT-WAKE` does not say `Status: DONE`, and this
   turn changed state: it changed the state file (`page_facts.state_changed_this_turn`), or any tool
   use in the turn `tool_acts` (a dispatch, message, merge, non-state-file edit or mutating Bash).
-  A turn that only reads, or a silent CI event that needs nothing, is never due. A grill round is
-  not exempt: the questions it asks are state.
-- **Reasons**, checked in this order: `head_missing` (`read_head` returned `None`, no head-shaped
-  line 1), `head_unparsed` (a head is there but malformed), `head_foreign` (`writer` is not this
-  session's `sessionId` or local id), `head_older_than_turn` (`updated_at` < turn start).
-- **Shadow by default**: each reason logs `would_block:head_<reason>` on the guard's JSONL row,
-  plus `head_reason: "ok"` when the head passed, so a clean turn is visible too.
+  A turn that only reads, or a silent CI event that needs nothing, is normally not due. This is
+  best-effort, not exact: `state_changed_this_turn` counts any Bash that names the state file and
+  runs `python3` (`manager_arm_guard.py:695-697`), so a read-only `python3` over the file can make a
+  turn due. The cost is one extra `--write-head` run, never a wrong pass. A grill round is not
+  exempt: the questions it asks are state.
+- **Reasons**, checked in this order, mapped one-to-one from `read_head`'s reason so the guard has no
+  parser of its own: `head_missing` (reason `missing`), `head_unparsed` (reason `unparsed`),
+  `head_foreign` (`writer` is not this session's `sessionId` or local id), `head_older_than_turn`
+  (`updated_at` < turn start).
+- **Shadow by default**: the guard's JSONL row gets `head_reason` set to one of `ok`, `head_missing`,
+  `head_unparsed`, `head_foreign`, `head_older_than_turn`, plus the `turn` id (so a block and its
+  passing stop can be paired), and, when not `ok`, the `would_block` tag
+  spelled exactly `would_block:head_missing`, `would_block:head_unparsed`, `would_block:head_foreign`
+  or `would_block:head_older_than_turn` (never `head_head_*`). A clean turn is visible too.
   `touch ~/.claude/run/manager-head-check.enforce` (env `MANAGER_HEAD_CHECK_ENFORCE_FILE`) makes it
   block once per turn on its own stamp (`<cli>.head.turn`), after the page check and before the arm
-  check. The block message prints the three head lines filled in for this session and names the
-  reason.
+  check. An enforced block logs `decision: "block"`, `reason: "<head_reason>"` (so `reason` starts with
+  `head_`), with `would_block` null, as the enforced page check does today. The block message names
+  the reason and prints the exact `state_view.py --write-head <slug> --since "…"` command to run.
+- **Chained blocks keep every check alive.** `once_guard` skips a check when `stop_hook_active` is
+  set and that check's stamp is under `LOOP_BACKSTOP_S` (900 s) old (`manager_arm_guard.py:418`).
+  Today only the role path strips the inherited flag, and only before the arm check (`:766-769`).
+  The page check is already enforced on this machine and has no strip, so a head block (or a role,
+  page or org-uuid-check block) would let the following stop in the same turn skip the later checks,
+  including the arm check: a manager could end WORKING with no wake armed. Generalise the strip into
+  one helper run before **each** check (role, page, head, arm): if any stamp among `.role`, `.page`,
+  `.head` and the arm stamp equals this turn and the check about to run has not blocked this turn,
+  drop `stop_hook_active` for that check. The check's own stamp still stops it blocking twice in one
+  turn, and the 900 s backstop still bounds a loop.
 - **Fail open**: an import or parse error in loading `read_head` logs `head_error:<type>` and never
   blocks, like `role_error`.
 
@@ -486,9 +549,9 @@ since-last-session: <one line: what changed since the previous head, naming its 
 
 | Piece | Lives in | Public-safe |
 | --- | --- | --- |
-| The head format and `read_head` (the one parser), its tests, the render and brief readers, role.md, contract | keel, this repo | Yes. The format, rule and check names carry no machine or program facts. |
+| The head format, `read_head` (the one parser) and `--write-head` (the one writer), its tests, the render and brief readers, role.md, contract | keel, this repo | Yes. The format, rule and check names carry no machine or program facts. |
 | The decision (due, shadow or enforce, message, stamp), its tests, the enforce file | `~/.claude/scripts/manager_arm_guard.py` and `test_manager_arm_guard.py`, the operator's private harness | It imports `read_head` by path from the skill's `scripts/` (the `load_role_module` pattern) and never copies the rule. |
-| Program slugs, which heads are stale, migration progress | the private state files and relay | Never written here; this spec says A to D. |
+| Program slugs, which heads are stale, migration progress | the private state files and relay | Never written here; this spec says A to D and names the census command, not its output. |
 
 `render_state` already imports the guard for its AT-WAKE facts. That runs in the other direction and
 does not change.
@@ -504,6 +567,14 @@ does not change.
 - Wake step 5's "set `updated_at`" and step 7's "Append a block" (role.md). Step 7 becomes "Rewrite
   the one `## AT-WAKE` block in place". Contract line 27's "`updated_at` fresh in your state file"
   points to the head.
+- Four more instructions that still tell managers to keep a state-file or VIEW `updated_at` fresh
+  (probe, 2026-11-16: `grep -rn updated_at .claude/skills/sessions-to-chips --include='*.md'`,
+  excluding `specs/`), each re-pointed to the head and the `--write-head` command:
+  `WRAPUP_MESSAGE.md:25` ("a current `updated_at`"), `SKILL.md:173` ("has a fresh `updated_at`"),
+  `references/manager-contract.md:467` (the VIEW schema lists `updated_at` first; the key is removed
+  from that list) and `references/manager-contract.md:818` (the DONE close-out's "fresh
+  `updated_at`"). The other hits in that grep (contract `:349`, `:382-384`, `:503`) are the
+  **manifest's** `updated_at` and stay.
 - No second head parser exists to delete. Probe, 2026-11-16: `grep -n "updated_at" scripts/*.py`
   (non-test) and the same grep over the guard. Every other hit reads the **manifest** JSON
   (`mine_all.py:98,102`, `program_family.py:209`, `work_state_migrate.py:133`, the guard's
@@ -520,46 +591,77 @@ does not change.
    that program (missing, unparsed, foreign or older than the newest event). The guard half lands
    in shadow, so nothing blocks on the head yet.
 2. **Who rewrites.** Each program's own manager, at its first wake after the role change. Nobody
-   rewrites another program's head: a dispatcher's rewrite would itself be a foreign head. A, B and
-   C convert today's ad hoc heads into the three lines; for A that is mostly renaming `session:` to
-   `writer:`. C also folds its 7 AT-WAKE blocks into one. D does a full current-state rewrite: its
+   rewrites another program's head: a dispatcher's rewrite would itself be a foreign head. Every
+   program in the census converts its head by running `state_view.py --write-head`, which replaces
+   whatever ad hoc lines are there (A's `session: <bare uuid>` head included: a renamed key would
+   still fail, because a bare CLI uuid is not a valid writer). C also folds its 7 AT-WAKE blocks
+   into one, and so does every other census program the `State file` problem names. D does a full current-state rewrite: its
    2049-line file moves to `D.notes/state-log-through-<date>.md`, and the new file keeps one AT-WAKE
    and one VIEW block. A program with no live manager keeps its stale head. The page and the role
    brief show it, and the next manager to take the program rewrites it at takeover (contract: the
    takeover writes a fresh state file).
 3. **Enforce.** The Harness manager runs
    `touch ~/.claude/run/manager-head-check.enforce` once both of these hold over the last 24 h of
-   the guard log: every live non-DONE manager has at least one `head_reason: "ok"` row, and there
-   are zero `would_block:head_*` rows. Proof command:
+   the guard log (the shadow window; it replaces any replay of the old log, whose rows hold verdicts
+   only, not the transcripts or head lines the check needs): every live non-DONE manager has at
+   least one `head_reason: "ok"` row, and there are zero `would_block:head_*` rows. Proof command:
    `jq -r 'select(.ts >= "<now-24h>") | select((.would_block // []) | any(startswith("would_block:head_"))) | .program' ~/.claude/analytics/manager-arm-guard.jsonl | sort | uniq -c`
-   prints nothing. `rm` of the file reverts the switch.
+   prints nothing.
+
+**Rollback.** `rm ~/.claude/run/manager-head-check.enforce` reverts the head check to shadow. A
+shadow-mode bug costs log rows only, never a block. A broken role-version bump (the Day 0 risk) is
+switched off with the existing kill switch, `touch ~/.claude/run/manager-role-check.off`
+(`MANAGER_ROLE_CHECK_OFF_FILE`, `manager_arm_guard.py:85`), not by another role.md edit: a second edit
+bumps the version again and blocks every manager once more.
 
 **Test.**
 
-- keel `test_render_state.py`: `read_head` accepts the canonical three lines. It returns `None` with
-  one Problems row for each of: a missing key, misordered keys, a date-only `updated_at`, a future
-  `updated_at`, a short `local_<8 hex>` writer, and an empty `since-last-session`. Each of the three
-  real formats from the table (A, B, C, de-identified) is rejected with a row naming the expected
-  form.
+- keel `test_render_state.py`: `read_head` accepts the canonical three lines with reason `ok`. It
+  returns `(None, "unparsed")` with one Problems row for each of: a missing key, misordered keys, a
+  date-only `updated_at`, a future `updated_at`, a short `local_<8 hex>` writer, a bare CLI uuid
+  writer, and an empty `since-last-session`. A file whose line 1 is the `# ` title returns
+  `(None, "missing")`. Each of the real formats from the table (A, B, C, de-identified) is rejected
+  with a row naming the expected form.
+- keel `test_render_state.py`, `--write-head` against a temp store (`S2C_STORE`) and programs dir:
+  with one store row whose `cliSessionId` matches, it writes `writer: local_<uuid> (account <dir>)`
+  and an `updated_at` within a second of now, replaces an existing ad hoc head, inserts above a bare
+  title, leaves every later byte unchanged, and its output passes `read_head` as `ok`. With no
+  matching row, two matching rows, no `CLAUDE_SESSION_ID`, or an empty `--since`, it exits non-zero,
+  names the failure, and the file is byte-identical.
 - keel `test_render_state.py`: a VIEW with `updated_at` shows it under "not migrated" with the
   head as its home; `staleness` reads the head; a `decisions` row with no `date` is still shown,
   tagged `date_missing`; two `## AT-WAKE` blocks give the `State file` problem, and one does not.
 - keel `test_role_brief.py`: the health line fires for a missing head, for a foreign writer, and for
-  a head older than the newest event; the wake steps print a filled head template with the given
-  session id.
+  a head older than the newest event; the wake steps print the `--write-head` command with the slug
+  filled in, and no head template.
+- private `test_manager_arm_guard.py`: load `role_brief.py` by path in a `python3 -I` subprocess, as
+  the hook does, and confirm `role_facts` returns no `role_error` (pins the lazy `state_view` import).
 - private `test_manager_arm_guard.py`, beside `test_page_not_rendered_is_shadow_until_the_touch_file`:
-  each of the four reasons in shadow logs its `would_block:head_*` and returns no block; with the
-  enforce file, an acting turn with a head older than the turn's start blocks once, and the second
-  stop in that turn does not; a read-only turn is not due; a DONE program is exempt; a fresh head
+  each of the four reasons in shadow logs its exact `would_block:head_<reason>` tag (for example
+  `would_block:head_missing`) and returns no block; with the enforce file, an acting turn with a head
+  older than the turn's start blocks once with `reason: "head_older_than_turn"`, and the second stop
+  in that turn does not; a head whose `updated_at` equals the turn start's whole second passes; a
+  read-only turn with no `python3` naming the file is not due; a DONE program is exempt; a fresh head
   written by this session logs `head_reason: "ok"`; a `read_head` that raises logs `head_error` and
   does not block.
+- private `test_manager_arm_guard.py`, chained blocks, each with a fresh (< 900 s) stamp for the
+  later check from an earlier turn: an enforced head block, then a second stop in the same turn with
+  `stop_hook_active: true`, still runs the page check and the arm check (head→page, head→arm); a role
+  block followed by a second stop still runs the head check; a page block followed by a second stop
+  still runs the head check.
 
-**Acceptance.** All tests pass. After the role change, each of A to D has a head that `read_head`
-parses, written by its own manager after the ship: `head -3 <slug>.state.md` plus
-`render_state.py --program <slug> --context` show no head or log-shape problem. The guard log meets
-the enforce criterion above before the switch is flipped. D's file holds one AT-WAKE block. Proof
-that the head stays current, a week after enforce: the same `jq` shows zero `head_*` blocks, or each
-one is followed in the same turn by a passing stop.
+**Acceptance.** All tests pass. After the role change, every program the census command lists
+(non-DONE, state file changed in the last 7 days; A to D are among them) has a head that `read_head`
+parses as `ok`, written by its own manager after the ship: `head -3 <slug>.state.md` plus
+`render_state.py --program <slug> --context` show no head or log-shape problem. A program with no
+live manager is listed by name as still stale, never counted as passing. The guard log meets the
+enforce criterion above before the switch is flipped. D's file holds one AT-WAKE block. Proof that
+the head stays current, a week after enforce: every enforced head block is followed by a passing stop
+in the same turn. Query:
+`jq -c 'select(.ts >= "<enforce-time>") | select(((.reason // "") | startswith("head_")) or .head_reason == "ok") | {ts, session, turn, reason, head_reason}' ~/.claude/analytics/manager-arm-guard.jsonl`;
+each row with `reason` starting `head_` has a later row with the same `session` and `turn` whose
+`head_reason` is `"ok"`. The query matches on `reason`, not `would_block`, because an enforced block
+leaves `would_block` null.
 
 ## Ships
 
@@ -593,8 +695,9 @@ rows directly, the tier rises to critical.
 Lanes worth adding at standard: edge-case (candidate thresholds, merge-tree conflicts, fetch
 failure) and live-evidence (the registry and `prs[]` shapes, read again on the day of the build).
 Row 10 adds a Stop-hook check that can block every manager turn, so it also adds the operator-plane
-lane: guard blast radius, replay of the head check over the existing guard log in shadow before
-enforce, and the once-per-turn stamp interplay with the role and page checks. Shadow-first keeps the
+lane: guard blast radius, the 24 h shadow window before enforce (the existing guard log holds
+verdicts only, so it cannot be replayed through the head check), and the once-per-turn stamp
+interplay with the role and page checks. Shadow-first keeps the
 tier at standard; enforcing without the shadow window would raise it.
 
 ## Review log
@@ -628,5 +731,24 @@ Three lanes reviewed the first draft on 2026-11-16: edge-case (A), live-evidence
 
 Row 10 was added after that review, on 2026-11-16, at the founder's request. Its four measurements
 were re-checked against the live files and the archived copies the managers wrote today; all four
-match. The three review lanes have not seen row 10. It owes its own pass at standard tier, adding the
-operator-plane lane, before the build.
+match.
+
+Two lanes then reviewed row 10 on 2026-11-16: edge-case (R10a) and operator-plane (R10b). Each code
+anchor was re-read in the guard, `role_brief.py`, `mine_all.py` and the skill's markdown before
+fixing; the census was re-run (15 state files changed in the last 7 days).
+
+| Finding | Outcome |
+| --- | --- |
+| R10a-3, R10b-1 — a block leaves `stop_hook_active` set, so later checks (arm included) skip on a fresh stamp | Fixed: the `:766-769` strip is generalised to one helper run before every check; chained head→page, head→arm, role→head and page→head tests added. |
+| R10a-4, R10b-2 — `role_brief` knows only the CLI uuid, so its template's writer fails or reads as foreign; the template's time is stale next turn | Fixed: `state_view.py --write-head <slug> --since` resolves `local_` id and account via `program_family.load_store()` by `cliSessionId`, stamps the real current time, refuses and names the failure on lookup failure; role card and block message run it; no template. |
+| R10b-3 — a top-level `import state_view` in `role_brief` fails under `python3 -I` and fails the role check open | Fixed: lazy import inside the health-line function, like `context_brief`; `-I` load test added. |
+| R10a-1 — A to D undercount the fleet | Fixed: census command defines the fleet; A to D are examples; acceptance covers every census program. |
+| R10a-2 — post-enforce proof can never fail; `head_head_*` tag ambiguity | Fixed: exact tags spelled out; enforced block logs `reason` starting `head_` with `would_block` null; proof pairs it with a later same-turn `head_reason: "ok"` row; rows carry `turn`. |
+| R10a-5 — four live `updated_at` instructions missing from Deleted | Fixed: `WRAPUP_MESSAGE.md:25`, `SKILL.md:173`, `references/manager-contract.md:467` and `:818` added, with the probe; manifest hits named as staying. |
+| R10a-6 — `read_head` returns `None` for both missing and unparsed, forcing a second parser | Fixed: `read_head` returns `(head, reason)`; the guard maps the reason. |
+| R10a-7 — "read-only turn never due" overstated; turn start written as a span; no time source for later turns | Fixed: claim softened to best-effort with the `python3` detector named; turn start is `records[turn_spans(records)[-1][0]]["timestamp"]`; `--write-head` is the time source. |
+| R10b-4 — a head written in the turn's first second reads as stale | Fixed: turn start rounded down to the whole second; test added. |
+| R10b-5 — the guard log cannot be replayed through the head check | Fixed: replay dropped; the 24 h shadow window is the pre-enforce evidence (Migration step 3, Spec-review tier). |
+| R10b-6 — rollback names only the enforce file | Fixed: Rollback paragraph names `manager-role-check.off` for a broken bump and states a shadow bug costs log rows only. |
+
+No finding was rejected.
