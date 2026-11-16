@@ -208,7 +208,8 @@ def brief(p, wake=None):
     now, st = p.get("now") or {}, p.get("story", {}).get("now") or {}
     stale = p.get("stale") or {}
     head = f"{p.get('name') or p.get('program')} (map {(p.get('map') or {}).get('issue') or 'none'}), state at {p.get('generated_at')}"
-    narrative = f"Narrative updated {p.get('updated_at') or 'never'}" + \
+    writer = ((p.get("head") or {}).get("writer") or "")[6:14]
+    narrative = f"State head updated {p.get('updated_at') or 'never'}" + (f" by {writer}" if writer else "") + \
         (f"; stale: {', '.join(f'{n} {k}' for k, n in (stale.get('counts') or {}).items()) or 'changes'} since then" if stale.get("stale") else "")
     out = [head, narrative, "", "Destination: " + (p.get("destination") or p.get("goal") or "not written"), ""]
     done = [f"{_day(d.get('date'))} {d['what']}" + (f" ({_refs(d['refs'])})" if d.get("refs") else "") +

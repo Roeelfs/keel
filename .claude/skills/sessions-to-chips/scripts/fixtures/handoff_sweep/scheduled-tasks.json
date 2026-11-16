@@ -1,0 +1,15 @@
+{
+  "scheduledTasks": [
+    {"id": "cron-other-target", "cronExpression": "0 6 * * *", "enabled": true, "filePath": "{TASKS}/cron-other-target/SKILL.md", "createdAt": 1790000000000, "lastRunAt": "2026-11-15T06:00:04.000Z", "lastScheduledFor": "2026-11-15T06:00:00.000Z", "cwd": "/repo", "notifySessionId": "local_{OTHER_MGR}", "displayName": "Nightly check", "permissionMode": "auto", "permissionModeCarried": true},
+    {"id": "body-only-target", "fireAt": 1799000000000, "enabled": true, "filePath": "{TASKS}/body-only-target/SKILL.md", "createdAt": 1790000000000, "cwd": "/repo", "displayName": "Body-named wake"},
+    {"id": "missed-one-shot", "fireAt": 1794000000000, "enabled": true, "filePath": "{TASKS}/missed-one-shot/SKILL.md", "createdAt": 1790000000000, "lastRunAt": null, "cwd": "/repo"},
+    {"id": "disabled-cron", "cronExpression": "0 7 * * *", "enabled": false, "filePath": "{TASKS}/disabled-cron/SKILL.md", "createdAt": 1790000000000, "cwd": "/repo", "notifySessionId": "local_{OTHER_MGR}"},
+    {"id": "ran-one-shot", "fireAt": 1794000000000, "enabled": true, "filePath": "{TASKS}/ran-one-shot/SKILL.md", "createdAt": 1790000000000, "lastRunAt": "2026-11-17T08:00:03.000Z", "lastScheduledFor": "2026-11-17T08:00:00.000Z", "cwd": "/repo", "notifySessionId": "local_{OTHER_MGR}"},
+    {"id": "here-live-target", "cronExpression": "*/30 * * * *", "enabled": true, "filePath": "{TASKS}/here-live-target/SKILL.md", "createdAt": 1790000000000, "cwd": "/repo", "notifySessionId": "local_{HERE_MGR}"},
+    {"id": "no-target", "cronExpression": "0 9 * * 1", "enabled": true, "filePath": "{TASKS}/no-target/SKILL.md", "createdAt": 1790000000000, "cwd": "/repo"},
+    {"id": "other-registry", "cronExpression": "0 5 * * *", "enabled": true, "filePath": "{TASKS}/other-registry/SKILL.md", "createdAt": 1790000000000, "cwd": "/repo", "notifySessionId": "local_{OTHER_MGR}"}
+  ],
+  "recordedSkips": {},
+  "sundayAliasBoundaryStamped": true,
+  "dayFieldsOrBoundaryStamped": true
+}

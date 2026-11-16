@@ -55,15 +55,16 @@ def ticket_keys(row):
     return keys
 
 
-def descendants(rows, root_id, prefix):
-    """The root's family, stopping at a nested manager: it owns its own family."""
+def descendants(rows, root_id, prefix, roots=()):
+    """The root's family, stopping at a nested manager or a nested program candidate (roots): each
+    owns its own family."""
     kids = {}
     for r in rows:
         kids.setdefault(r["parentSessionId"], []).append(r)
     out, stack = [], list(kids.get(root_id, []))
     while stack:
         r = stack.pop()
-        if r["title"].startswith(prefix):
+        if r["title"].startswith(prefix) or r["sessionId"] in roots:
             continue
         out.append(r)
         stack.extend(kids.get(r["sessionId"], []))
@@ -88,9 +89,9 @@ def brief(row, now):
     }
 
 
-def classify(rows, manager_id, now, idle_h=1.0, stale_h=24.0, prefix="[Manager]"):
+def classify(rows, manager_id, now, idle_h=1.0, stale_h=24.0, prefix="[Manager]", roots=()):
     live = [r for r in rows if not r["archived"]]
-    family, kids = descendants(live, manager_id, prefix)
+    family, kids = descendants(live, manager_id, prefix, roots)
     has_live_kids = {r["sessionId"] for r in family if kids.get(r["sessionId"])}
     manager_wt = next((r.get("worktree") for r in live if r["sessionId"] == manager_id), "")
 
@@ -174,6 +175,18 @@ def resolve_manager(rows, ref):
     return hits[0] if hits else None
 
 
+CANDIDATE_WINDOW_DAYS = 14  # the mine's default window: the same program roots it routes
+
+
+def candidate_roots(now):
+    """Program candidates (program_family, the one owner) over this script's own window."""
+    import program_family as pf
+    since_ms = (now.replace(tzinfo=datetime.timezone.utc).timestamp() - CANDIDATE_WINDOW_DAYS * 86400) * 1000
+    store, _, _ = pf.load_store()
+    return set(pf.program_candidates(store, since_ms, pf.load_routes(), os.environ.get("CLAUDE_SESSION_ID"),
+                                     pf.load_manifests()))
+
+
 def main():
     from list_sessions import load_all
     ap = argparse.ArgumentParser()
@@ -192,20 +205,21 @@ def main():
     # Sessions of another signed-in account are not reachable from this app session.
     account = a.account or max(rows, key=lambda r: r["lastActivityAt"])["account"] if rows else ""
     rows = [r for r in rows if r["account"].startswith(account)]
+    roots = candidate_roots(now)
     if not a.all_managers:
         ref = a.manager or os.environ.get("CLAUDE_SESSION_ID", "")
         m = resolve_manager(rows, ref) if ref else None
         if not m:
             print(json.dumps({"error": f"no live session matches {ref!r}"}))
             return 2
-        out = classify(rows, m["sessionId"], now, a.idle_hours, a.stale_hours, a.prefix)
+        out = classify(rows, m["sessionId"], now, a.idle_hours, a.stale_hours, a.prefix, roots)
         out["managerTitle"] = m["title"]
         print(json.dumps(out, indent=2))
         return 0
     managers = [r for r in rows if not r["archived"] and r["title"].startswith(a.prefix)]
     report = []
     for m in sorted(managers, key=lambda r: r["title"]):
-        out = classify(rows, m["sessionId"], now, a.idle_hours, a.stale_hours, a.prefix)
+        out = classify(rows, m["sessionId"], now, a.idle_hours, a.stale_hours, a.prefix, roots)
         out["managerTitle"] = m["title"]
         report.append(out)
     print(json.dumps(report, indent=2))

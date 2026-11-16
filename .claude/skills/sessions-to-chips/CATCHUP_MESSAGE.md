@@ -1,8 +1,11 @@
 # Catch-up message (Resume / mine: a manager takes its program back after an account switch)
 
-ONE message per manager, sent by **session id** after every sweep has landed (SKILL.md Mode 2
-steps 3 and 5): the app pauses sends after about 10 session messages since the human last typed, so
-a second message for the same manager is a budget breach. Fill `{{DATE}}`, `{{SLUG}}`,
+ONE message per manager, sent by its full `local_<uuid>` session id after every sweep has landed
+(SKILL.md Mode 2 steps 3 and 5): the app pauses sends after about 10 session messages since the human
+last typed, so a second message for the same manager is a budget breach. The one exception is ONE
+absorption addendum, only to hand the manager a program found later in the same round (a candidate
+routed `absorb`). Rename the manager to `{{TITLE}}` BEFORE sending, so the first line is true when
+it reads it. Fill `{{TITLE}}` (the manager's title after the rename), `{{DATE}}`, `{{SLUG}}`,
 `{{FROM}}`/`{{TO}}` (the dates the program ran on the other account), `{{SWEEPS}}` (that manager's
 rows from the child ledger, decisions sweep and worktree sweep, numbered, with the one-line fix
 each) and `{{EXTRA}}` (cross-program conflicts, scope splits, one owner for a shared deliverable).
@@ -10,9 +13,10 @@ A cross-cutting founder ruling is never put in the message: append it to the rul
 machine's overlay `rulings-ledger.md`) before sending, and every manager's role load prints it. The
 message carries program facts only; the rules come from `/manager-role <slug>` (`references/role.md`).
 Leave no `{{` in the sent text. If a send is refused, write the filled text to
-`relay/<date>-pending-sends.md` at once.
+`relay/<date>-pending-sends.md` at once, with the full session id and its cwd.
 
 ```text
+Your title is now `{{TITLE}}`; no other manager holds it.
 CATCH-UP ({{DATE}}): your program ran on another Claude account from {{FROM}} to {{TO}}; that account is now capped, so you take it back here. Your own context stops at {{FROM}} and is STALE.
 0. Run `/manager-role {{SLUG}}` first and do its wake steps; it prints your role, the rulings in force and the changes since you last loaded them. This message adds program facts only.
 1. Read FIRST: ~/.claude/sessions-to-chips/handoff/{{DATE}}-{{SLUG}}.md and ~/.claude/sessions-to-chips/handoff/{{DATE}}-{{SLUG}}-children.md (and the story map they name). They override your checkpoint wherever they differ; do not redo items marked done or superseded. Items marked "claimed" are unverified.

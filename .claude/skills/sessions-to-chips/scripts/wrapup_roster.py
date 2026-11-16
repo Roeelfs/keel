@@ -23,6 +23,7 @@ import argparse, datetime, json, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from list_sessions import load_all
+import program_family as pf
 
 
 def slugify(s):
@@ -54,7 +55,6 @@ def main():
     manager_tpl = open(os.path.join(HERE, "..", "WRAPUP_MESSAGE.md")).read()
     unmanaged_tpl = open(os.path.join(HERE, "..", "WRAPUP_UNMANAGED_MESSAGE.md")).read()
     rows = [r for r in load_all() if not r["archived"]]
-    by_id = {r["sessionId"]: r for r in rows}
     kids = {}
     for r in rows:
         kids.setdefault(r["parentSessionId"], []).append(r)
@@ -90,22 +90,23 @@ def main():
                     entry["message"] = message
                 superseded.append(entry)
 
-    # Unmanaged: recent, non-manager sessions whose ancestor chain contains no manager.
+    # Unmanaged: recent, non-manager sessions with no program root above them: no [Manager]
+    # ancestor and no program candidate (program_family owns both rules). A candidate itself has
+    # no root above it, so it is listed here and gets the unmanaged checkpoint.
     cutoff = datetime.datetime.now() - datetime.timedelta(hours=a.recent_hours)
+    store, _, _ = pf.load_store()
+    since_ms = (datetime.datetime.now(datetime.timezone.utc).timestamp() - a.recent_hours * 3600) * 1000
+    cands = pf.program_candidates(store, since_ms, pf.load_routes(), os.environ.get("CLAUDE_SESSION_ID"),
+                                  pf.load_manifests())
+    roots = {sid: sid for sid in cands}
 
-    def has_manager_ancestor(r):
-        seen, cur = set(), r
-        while cur and cur["parentSessionId"] and cur["parentSessionId"] not in seen:
-            seen.add(cur["parentSessionId"])
-            cur = by_id.get(cur["parentSessionId"])
-            if cur and is_manager(cur):
-                return True
-        return False
+    def managed(r):
+        return pf.root_manager(r["parentSessionId"], store, roots) is not None
 
     unmanaged = []
     if not a.only:
         for r in rows:
-            if is_manager(r) or has_manager_ancestor(r) or parse_ts(r["lastActivityAt"]) < cutoff:
+            if is_manager(r) or managed(r) or parse_ts(r["lastActivityAt"]) < cutoff:
                 continue
             unmanaged.append({
                 "title": r["title"], "sessionId": r["sessionId"], "cli": r["cli"],
