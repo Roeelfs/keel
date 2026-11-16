@@ -4,6 +4,8 @@ An account switch on 2026-11-16 hit nine gaps in Mode 2. Four of them hide work:
 "complete" while a program, unpushed-looking work, a scheduled wake and a CI binding were all
 misjudged or missed. The other five only cost retries. This spec fixes the four at their owners in
 the scripts (tier 1), then fixes the five in SKILL.md, CATCHUP_MESSAGE.md and one plan field (tier 2).
+Row 10, added by the founder the same day, makes every manager keep the head of its global state
+file current, so the next session (any worktree, any account) starts from the right date and owner.
 
 Every rule below has ONE owner. Where a rule has two copies today, the spec names the copy it
 deletes.
@@ -20,7 +22,12 @@ deletes.
 | `scripts/coverage_audit.py`, `scripts/wrapup_roster.py`, `scripts/hygiene_candidates.py` | Their `[Manager]`-title family walks go through `pf.root_manager(..., roots)` (details in row 1). |
 | `prompts/worktree-sweep.md` | Calls `handoff_sweep.py --repo` instead of hand-running `git log` / `git cherry`. |
 | `SKILL.md`, `CATCHUP_MESSAGE.md` | Tier 2 wording. |
-| `scripts/test_mine_all.py`, new `scripts/test_handoff_sweep.py`, new `scripts/fixtures/handoff_sweep/` | Tests below. |
+| `scripts/state_view.py` | Row 10: owns the state-file head (`read_head`). Loses the `## VIEW` `updated_at` key. `done` and `decisions` rows need a `date`. |
+| `scripts/render_state.py`, `scripts/state_brief.py` | Row 10: read the head through `sv.read_head`; staleness and "Narrative updated" use the head's `updated_at`; the log-shape problem rows. |
+| `scripts/role_brief.py` | Row 10: a health line when the head is missing, unparseable, older than the newest event, or names another session. |
+| `references/role.md`, `references/manager-contract.md` | Row 10: the head rule, rewrite-in-place for `## AT-WAKE`, dated lines, the absolute child-notes path. |
+| `scripts/test_mine_all.py`, new `scripts/test_handoff_sweep.py`, new `scripts/fixtures/handoff_sweep/`, `scripts/test_render_state.py`, `scripts/test_role_brief.py` | Tests below. |
+| Outside this repo: the Stop guard `~/.claude/scripts/manager_arm_guard.py` and its test | Row 10: the head check. It lives in the operator's private harness, not here; see row 10 §Ownership. |
 
 `work_state_sources.py` also calls `pf.root_manager`. It keeps the default `roots=()`, so its
 behaviour does not change.
@@ -388,17 +395,190 @@ all archived, no absorber, and one present child on this account includes that c
 program adds its absorber (`test_mine_all.py`). The trust kit string contains `cwd`. The wording
 rows are proven by reading the diff, since they carry no behaviour a test can pin.
 
+## Row 10 — every manager keeps its global state file's head current (founder, 2026-11-16)
+
+The founder added this row on 2026-11-16 ("fix as proposed everything"). It is recorded as a dated
+ruling in the operator's private rulings ledger.
+
+**What happened.** A manager is global. Its state lives in
+`~/.claude/orchestrator/programs/<slug>.state.md`, never in a worktree, because the next session
+(another worktree, another account) starts with nothing else. Managers appended below and left the
+head stale, so the next session read the wrong date and the wrong owner. File mtimes were all
+2026-11-16, so mtime hid it. Measured on four live programs, re-checked for this spec on 2026-11-16:
+
+| Program | Head before | Lines | Re-check |
+| --- | --- | --- | --- |
+| A | line 1 `updated_at: 2026-10-27T14:35:00Z`, names a session from that date | 3427 | Confirmed in the archived copy the manager moved to `A.notes/` when it rewrote the file today (now 1047 lines). |
+| B | `# … state (updated_at 2026-10-26T19:22:11Z)` | 1948 | Confirmed in `B.notes/` (now 445 lines). |
+| C | title line ends `manager local_<8 hex> …, updated 2026-11-03` | 2519 | Confirmed in `C.notes/` (now 644 lines, still 7 `## AT-WAKE` blocks). The archived `## VIEW` said `"updated_at": "2026-11-16T11:00:00Z"` while the head said 11-03: two "updated" facts in one file that disagree. |
+| D | `# [Manager] … state (updated 2026-10-26T22:11:26Z)` | 2049 | Still stale today: 2049 lines, 263 `## AT-WAKE` blocks. |
+
+The three managers that rewrote their files today wrote three different head formats. Without one
+format, no check can read the head.
+
+**Owner.** `state_view.py`, new `read_head(text, now, problems) -> {updated_at, writer, account,
+since} | None`. It already owns the authored part of the state file, reads it strictly, and turns
+every bad input into a Problems row. Every reader goes through it: `render_state`, `state_brief`,
+`role_brief`, and the Stop guard. Module imports stay stdlib-only, because the guard imports it
+under its time budget, as it does `role_brief`.
+
+**The head.** The first three lines of the file, before the `# ` title, exactly:
+
+```
+updated_at: 2026-11-16T13:37:51Z
+writer: local_<uuid> (account <account id>)
+since-last-session: <one line: what changed since the previous head, naming its writer and updated_at>
+```
+
+- `updated_at` is RFC3339 UTC to the second with `Z`, not in the future (the existing
+  `check_time` plus a seconds requirement, as the manifest rule already has).
+- `writer` is the full `local_<uuid>` of the session that wrote the head (row 4: full ids only). The
+  account id is the store's account directory, the value `mine_all.detect_here` resolves. It is a
+  label for readers; checks compare only the session id.
+- `since-last-session` is non-empty. On a program's first head it says `first head`.
+- A missing, misordered or malformed key makes `read_head` return `None` with one Problems row
+  naming the line and the expected form.
+
+**Change.**
+
+- **(a) Rewrite the head on every turn that changes state.** That covers the founder's "every manager
+  turn that changes state". Role card line and wake step 5: "rewrite the head (`updated_at` now,
+  `writer` you, `since-last-session`), then update `## VIEW`". `role_brief` prints the filled-in head
+  template (this session's id, account and the current time) in the wake steps, so the manager pastes
+  it instead of composing it.
+- **(b) Dated lines.** In `## VIEW`, `done` and `decisions` rows now need a `date`. A row without one
+  is still shown, tagged `date_missing`, with a Problems row (never dropped). Done, decision and
+  ruling lines outside `## VIEW` start with their absolute date. That is a role-card rule with no
+  machine check, because free prose cannot be parsed reliably.
+- **(c) Current state, not a log.** The file holds exactly one `## AT-WAKE` block and one `## VIEW`
+  block, rewritten in place. Superseded material moves to `<slug>.notes/` (prose) or
+  `<slug>.events.jsonl` (events). `render_state` adds a `State file` Problems row when it counts more
+  than one of either heading: "N AT-WAKE blocks: the file is current state; move the superseded
+  blocks to `<slug>.notes/`". The guard's last-block rule (`at_wake_tail`) is unchanged and still
+  reads the right block either way.
+- **(d) The Stop guard checks the head** (§Guard change below).
+- **(e) Nothing program-critical lives only in a worktree.** The role card's child-notes line names
+  the absolute path `~/.claude/sessions-to-chips/relay/<slug>/child-notes.md` instead of the relative
+  `relay/<slug>/…`, and adds "never in a worktree". The contract already names that folder.
+
+**Guard change** (private harness; mirrors the existing page check line for line):
+
+- New `head_facts(state_text, records, now, own_ids, read_head)` returns `{head_due, head_reason}`.
+- **Turn start** is the `timestamp` of the record that opens the current turn (`turn_spans(records)[-1]`).
+- **Due** when the manifest is not done, the last `## AT-WAKE` does not say `Status: DONE`, and this
+  turn changed state: it changed the state file (`page_facts.state_changed_this_turn`), or any tool
+  use in the turn `tool_acts` (a dispatch, message, merge, non-state-file edit or mutating Bash).
+  A turn that only reads, or a silent CI event that needs nothing, is never due. A grill round is
+  not exempt: the questions it asks are state.
+- **Reasons**, checked in this order: `head_missing` (`read_head` returned `None`, no head-shaped
+  line 1), `head_unparsed` (a head is there but malformed), `head_foreign` (`writer` is not this
+  session's `sessionId` or local id), `head_older_than_turn` (`updated_at` < turn start).
+- **Shadow by default**: each reason logs `would_block:head_<reason>` on the guard's JSONL row,
+  plus `head_reason: "ok"` when the head passed, so a clean turn is visible too.
+  `touch ~/.claude/run/manager-head-check.enforce` (env `MANAGER_HEAD_CHECK_ENFORCE_FILE`) makes it
+  block once per turn on its own stamp (`<cli>.head.turn`), after the page check and before the arm
+  check. The block message prints the three head lines filled in for this session and names the
+  reason.
+- **Fail open**: an import or parse error in loading `read_head` logs `head_error:<type>` and never
+  blocks, like `role_error`.
+
+**Ownership: keel vs the private harness.**
+
+| Piece | Lives in | Public-safe |
+| --- | --- | --- |
+| The head format and `read_head` (the one parser), its tests, the render and brief readers, role.md, contract | keel, this repo | Yes. The format, rule and check names carry no machine or program facts. |
+| The decision (due, shadow or enforce, message, stamp), its tests, the enforce file | `~/.claude/scripts/manager_arm_guard.py` and `test_manager_arm_guard.py`, the operator's private harness | It imports `read_head` by path from the skill's `scripts/` (the `load_role_module` pattern) and never copies the rule. |
+| Program slugs, which heads are stale, migration progress | the private state files and relay | Never written here; this spec says A to D. |
+
+`render_state` already imports the guard for its AT-WAKE facts. That runs in the other direction and
+does not change.
+
+**Deleted.**
+
+- The `## VIEW` `updated_at` key: `state_view.TEXT` drops it, and so does its check
+  (`state_view.py:132-133`). `render_state.staleness` (`:473-482`), the payload's `updated_at`
+  (`:565`), `author_line`'s "updated_at: set it after the edits" (`:513`) and `state_brief`'s
+  "Narrative updated" (`:211`) read the head instead. A VIEW block that still has `updated_at` gets a
+  `V1_HOME` entry ("moved to the file head"), so it shows under "not migrated" and is never dropped
+  silently. One "updated" fact per file.
+- Wake step 5's "set `updated_at`" and step 7's "Append a block" (role.md). Step 7 becomes "Rewrite
+  the one `## AT-WAKE` block in place". Contract line 27's "`updated_at` fresh in your state file"
+  points to the head.
+- No second head parser exists to delete. Probe, 2026-11-16: `grep -n "updated_at" scripts/*.py`
+  (non-test) and the same grep over the guard. Every other hit reads the **manifest** JSON
+  (`mine_all.py:98,102`, `program_family.py:209`, `work_state_migrate.py:133`, the guard's
+  `find_program`) or `<slug>.arch.json` (`state_arch.py`). Those are different files and different
+  facts, and they stay. The AT-WAKE stamp that `render_state.read_at_wake` reads is the wake record's
+  own time and also stays. `mine_all.checkpoint_for` keeps using the state file's mtime. mtime is
+  never earlier than the head's `updated_at`, so the window stays conservative.
+
+**Migration** (the guard must not brick managers on day one):
+
+1. **Day 0, the ship.** The keel commit edits role.md, which changes the computed role version. The
+   enforced ROLE CHECK then makes every non-DONE manager run `/manager-role <slug>` at its next turn.
+   The delta shows the head rule, and the new `role_brief` health line names the exact defect for
+   that program (missing, unparsed, foreign or older than the newest event). The guard half lands
+   in shadow, so nothing blocks on the head yet.
+2. **Who rewrites.** Each program's own manager, at its first wake after the role change. Nobody
+   rewrites another program's head: a dispatcher's rewrite would itself be a foreign head. A, B and
+   C convert today's ad hoc heads into the three lines; for A that is mostly renaming `session:` to
+   `writer:`. C also folds its 7 AT-WAKE blocks into one. D does a full current-state rewrite: its
+   2049-line file moves to `D.notes/state-log-through-<date>.md`, and the new file keeps one AT-WAKE
+   and one VIEW block. A program with no live manager keeps its stale head. The page and the role
+   brief show it, and the next manager to take the program rewrites it at takeover (contract: the
+   takeover writes a fresh state file).
+3. **Enforce.** The Harness manager runs
+   `touch ~/.claude/run/manager-head-check.enforce` once both of these hold over the last 24 h of
+   the guard log: every live non-DONE manager has at least one `head_reason: "ok"` row, and there
+   are zero `would_block:head_*` rows. Proof command:
+   `jq -r 'select(.ts >= "<now-24h>") | select((.would_block // []) | any(startswith("would_block:head_"))) | .program' ~/.claude/analytics/manager-arm-guard.jsonl | sort | uniq -c`
+   prints nothing. `rm` of the file reverts the switch.
+
+**Test.**
+
+- keel `test_render_state.py`: `read_head` accepts the canonical three lines. It returns `None` with
+  one Problems row for each of: a missing key, misordered keys, a date-only `updated_at`, a future
+  `updated_at`, a short `local_<8 hex>` writer, and an empty `since-last-session`. Each of the three
+  real formats from the table (A, B, C, de-identified) is rejected with a row naming the expected
+  form.
+- keel `test_render_state.py`: a VIEW with `updated_at` shows it under "not migrated" with the
+  head as its home; `staleness` reads the head; a `decisions` row with no `date` is still shown,
+  tagged `date_missing`; two `## AT-WAKE` blocks give the `State file` problem, and one does not.
+- keel `test_role_brief.py`: the health line fires for a missing head, for a foreign writer, and for
+  a head older than the newest event; the wake steps print a filled head template with the given
+  session id.
+- private `test_manager_arm_guard.py`, beside `test_page_not_rendered_is_shadow_until_the_touch_file`:
+  each of the four reasons in shadow logs its `would_block:head_*` and returns no block; with the
+  enforce file, an acting turn with a head older than the turn's start blocks once, and the second
+  stop in that turn does not; a read-only turn is not due; a DONE program is exempt; a fresh head
+  written by this session logs `head_reason: "ok"`; a `read_head` that raises logs `head_error` and
+  does not block.
+
+**Acceptance.** All tests pass. After the role change, each of A to D has a head that `read_head`
+parses, written by its own manager after the ship: `head -3 <slug>.state.md` plus
+`render_state.py --program <slug> --context` show no head or log-shape problem. The guard log meets
+the enforce criterion above before the switch is flipped. D's file holds one AT-WAKE block. Proof
+that the head stays current, a week after enforce: the same `jq` shows zero `head_*` blocks, or each
+one is followed in the same turn by a passing stop.
+
 ## Ships
 
 | Ship | Contents | Why one |
 | --- | --- | --- |
-| 1 | Tier 1 rows 1, 2, 6, 7 and tier 2 rows 3, 4, 5, 8, 9, with tests | Rows 2, 6 and 7 route by `ownerSessionId` over `roots`, which row 1 introduces. The SKILL.md wording describes plan fields the same change adds. No hard ordering dependency splits it. |
+| 1 | Tier 1 rows 1, 2, 6, 7, tier 2 rows 3, 4, 5, 8, 9, and row 10, with tests | Rows 2, 6 and 7 route by `ownerSessionId` over `roots`, which row 1 introduces. The SKILL.md wording describes plan fields the same change adds. Row 10 edits role.md and the contract in the same skill, and one role-version change is cheaper than two: each change blocks every manager once. No hard ordering dependency splits it. |
+
+The ship is two commits in a fixed order. First the keel commit, so `read_head` exists. Then the
+private-harness commit with the guard's head check, in shadow. If the guard commit lands first, its
+import fails and it logs `head_error` without blocking, so the order is safe either way.
 
 The repo has no CI. The local verify gate is
 `python3 -m unittest discover -s .claude/skills/sessions-to-chips/scripts -p 'test_*.py'`
-plus `tooling/leak-check.py --staged`. The live proof is one `mine_all.py --dry-run` on the
-machine, read against the acceptance lines above. It is owed after the merge, because only real
-stores hold the incident's shape.
+plus `tooling/leak-check.py --staged`. The private half runs
+`python3 ~/.claude/scripts/test_manager_arm_guard.py`. A role.md edit needs its `## Changes` line,
+or `role_brief.py --check-staged` refuses the commit. The live proof is one `mine_all.py --dry-run`
+on the machine, read against the acceptance lines above. It is owed after the merge, because only
+real stores hold the incident's shape. Row 10's live proof is the migration and enforce criterion,
+also owed after the merge.
 
 ## Spec-review tier
 
@@ -412,6 +592,10 @@ rows directly, the tier rises to critical.
 
 Lanes worth adding at standard: edge-case (candidate thresholds, merge-tree conflicts, fetch
 failure) and live-evidence (the registry and `prs[]` shapes, read again on the day of the build).
+Row 10 adds a Stop-hook check that can block every manager turn, so it also adds the operator-plane
+lane: guard blast radius, replay of the head check over the existing guard log in shadow before
+enforce, and the once-per-turn stamp interplay with the role and page checks. Shadow-first keeps the
+tier at standard; enforcing without the shadow window would raise it.
 
 ## Review log
 
@@ -441,3 +625,8 @@ Three lanes reviewed the first draft on 2026-11-16: edge-case (A), live-evidence
 | C9 — `root_manager` starts at self, candidate ledgered as its own child | Fixed: `child_ledger` walks from the parent and skips candidate rows. |
 | C10 — more `[Manager]`-title copies | Fixed: `coverage_audit` Test B, `wrapup_roster.has_manager_ancestor`, `hygiene_candidates.descendants` listed and rerouted. |
 | C12 — invalid merged-PR acceptance; "Read-only" docstring | Fixed: cross-check restricted to `HEAD` = merged head SHA; docstring updated. |
+
+Row 10 was added after that review, on 2026-11-16, at the founder's request. Its four measurements
+were re-checked against the live files and the archived copies the managers wrote today; all four
+match. The three review lanes have not seen row 10. It owes its own pass at standard tier, adding the
+operator-plane lane, before the build.
