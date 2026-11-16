@@ -104,20 +104,64 @@ def state_fold(slug, programs_dir, lineage_last, manifest):
             "newest": newest, "verdict": verdict}
 
 
+def candidate_owner(sid, c, cands, fams, rows, here):
+    """roots value for one candidate: itself (unrouted or promote), or for `absorb <slug>` the
+    absorber's current manager here, else its newest instance. An absorb slug naming another
+    candidate maps to that candidate."""
+    if c["route"] != "absorb":
+        return sid
+    target = c.get("program")
+    if target in fams and fams[target]["managers"]:
+        mgrs = [rows[s] for s in fams[target]["managers"]]
+        live_here = [m for m in mgrs if m["_acct"] == here and not m.get("isArchived")]
+        return max(live_here or mgrs, key=pf.parse_last)["sessionId"]
+    other = next((s for s, o in cands.items() if o["slug"] == target and o["route"] != "absorb"), None)
+    return other or sid
+
+
+def program_entry(kind, slug, key, mgrs, lineage, man, conflict, rows, here, now, floor, programs_dir):
+    """One program row, the same shape for a manager family and a candidate (kind). None when its
+    whole lineage is older than the window."""
+    lineage_last = max([ts_of(rows[m["sid"]]) for m in mgrs] + [ts_of(rows[s]) for s in lineage] or [0])
+    if lineage_last < floor:
+        return None
+    cp, cp_src, cp_sid = checkpoint_for(mgrs, here, floor)
+    # Live = some session of the program is present over the window (program_family: live by the
+    # one liveness predicate, or ended a turn inside the window and awaits its manager). A program
+    # whose whole family is archived is closed: listed, never mined.
+    family = [rows[s] for s in dict.fromkeys([m["sid"] for m in mgrs] + list(lineage))]
+    live = any(pf.session_present(r, now, now - floor) for r in family)
+    present_here = [r["sessionId"] for r in family if r["_acct"] == here and not r.get("isArchived")
+                    and pf.session_present(r, now, now - floor)]
+    if kind == "candidate":
+        moved, relay_to = mgrs[0]["acct"] != here, None
+    else:
+        # Moved = anything the checkpoint manager has not seen: another instance's turn or any
+        # lineage session's activity after the checkpoint.
+        other = [m["last_turn"] for m in mgrs if m["last_turn"] != cp] + [ts_of(rows[s]) for s in lineage]
+        moved = live and max(other or [0]) > cp + 60
+        live_here = sorted((m for m in mgrs if m["acct"] == here and not m["archived"]), key=lambda m: -m["store_last"])
+        relay_to = live_here[0]["sid"] if live_here else None
+    return {"kind": kind, "slug": slug, "key": key, "managers": mgrs, "lineage": lineage, "live": live,
+            "present_here": present_here, "checkpoint": cp, "checkpoint_sid": cp_sid, "checkpoint_src": cp_src,
+            "moved": moved, "absorbed_by": man.get("absorbed_by"), "conflict": conflict,
+            "relay_to": relay_to, "fold": state_fold(slug, programs_dir, lineage_last, man)}
+
+
 def run_script(name, argv, env):
     r = subprocess.run([sys.executable, "-I", os.path.join(HERE_DIR, name), *argv],
                        capture_output=True, text=True, env=env)
     return r.returncode, r.stdout, r.stderr[-400:]
 
 
-def widen(rows, ls_rows, since_iso, ledger_dir, text, chains, graph, owned, projects, max_rounds):
+def widen(rows, ls_rows, since_iso, ledger_dir, text, chains, graph, owned, projects, max_rounds, roots=None):
     """Hole-widening loop. Each round re-runs the coverage audit; each hole class has one widening
     action that ledgers the missing rows, so the next round sees them. Stops when a round widens
     nothing. Returns (history, residual)."""
     history, orphan_done = [], False
     member_set = {m for c in chains.values() for m in c["members"]}
     for n in range(1, max_rounds + 1):
-        res = ca.audit(ls_rows, "all", since_iso, ledger_dir, text)
+        res = ca.audit(ls_rows, "all", since_iso, ledger_dir, text, roots)
         orphans = [] if orphan_done else [f for f, h in graph["heads"].items() if h.get("entrypoint") == "claude-desktop"
                                          and tc.stem(f) not in owned and f not in member_set
                                          and os.path.getmtime(f) >= tc.parse_ts(since_iso)]
@@ -139,7 +183,7 @@ def widen(rows, ls_rows, since_iso, ledger_dir, text, chains, graph, owned, proj
             write_ledger(ledger_dir, f"children-orphan-transcripts-r{n}.json", "(orphan transcripts)",
                          [orphan_row(f, graph) for f in orphans], kind="orphan-transcripts")
             orphan_done = True
-    return history, ca.audit(ls_rows, "all", since_iso, ledger_dir, text)
+    return history, ca.audit(ls_rows, "all", since_iso, ledger_dir, text, roots)
 
 
 def attach_orphans(orphans, rows, chains, since_iso):
@@ -213,32 +257,42 @@ def mine(a):
                                floor, projects, pool, owned)
     for c in chains.values():
         c["projects"] = projects
-    fams = pf.families(rows, pf.load_manifests(programs_dir),
-                       {s: [tc.stem(m) for m in c["members"]] for s, c in chains.items()})
+    manifests = pf.load_manifests(programs_dir)
+    stems = {s: [tc.stem(m) for m in c["members"]] for s, c in chains.items()}
+    fams = pf.families(rows, manifests, stems)
+    # Program candidates (row 1): computed ONCE, at the window floor, never at since_iso (since is
+    # derived from program checkpoints, and candidates are programs).
+    routes_file = pf.routes_path(home)
+    cands = pf.program_candidates(rows, floor * 1000, pf.load_routes(routes_file),
+                                  os.environ.get("CLAUDE_SESSION_ID"), manifests)
+    for sid, c in cands.items():
+        c["owner"] = candidate_owner(sid, c, cands, fams, rows, here)
+    roots_file = os.path.join(work, "candidates.json")
+    with open(roots_file, "w") as fh:
+        json.dump({sid: {k: c[k] for k in ("owner", "route", "program", "slug", "children", "prs")}
+                   for sid, c in cands.items()}, fh, indent=1)
+    roots = pf.load_roots(roots_file)
+    fams = pf.families(rows, manifests, stems, roots)
+
+    def chain_of(sid):
+        return chains.get(sid) or {"members": tc.files_named(rows[sid].get("cliSessionId"), projects),
+                                   "pre_window": [], "projects": projects}
 
     programs = []
     for slug, f in sorted(fams.items()):
-        lineage_last = max([ts_of(rows[s]) for s in f["managers"] + f["lineage"]] or [0])
-        if lineage_last < floor:
-            continue
-        mgrs = [manager_facts(rows[s], chains.get(s) or {"members": tc.files_named(rows[s].get("cliSessionId"), projects),
-                                                         "pre_window": [], "projects": projects}) for s in f["managers"]]
-        cp, cp_src, cp_sid = checkpoint_for(mgrs, here, floor)
-        # Live = some session of the program is present over the window (program_family: live by the
-        # one liveness predicate, or ended a turn inside the window and awaits its manager). A program
-        # whose whole family is archived is closed: listed, never mined.
-        family = [rows[s] for s in f["managers"] + f["lineage"]]
-        live = any(pf.session_present(r, now, now - floor) for r in family)
-        # Moved = anything the checkpoint manager has not seen: another instance's turn or any
-        # lineage session's activity after the checkpoint.
-        other = [m["last_turn"] for m in mgrs if m["last_turn"] != cp] + [ts_of(rows[s]) for s in f["lineage"]]
-        moved = live and max(other or [0]) > cp + 60
-        live_here = sorted((m for m in mgrs if m["acct"] == here and not m["archived"]), key=lambda m: -m["store_last"])
-        man = f["manifest"] or {}
-        programs.append({"slug": slug, "key": f["key"], "managers": mgrs, "lineage": f["lineage"], "live": live,
-                         "checkpoint": cp, "checkpoint_sid": cp_sid, "checkpoint_src": cp_src, "moved": moved, "absorbed_by": man.get("absorbed_by"),
-                         "conflict": f["conflict"], "relay_to": live_here[0]["sid"] if live_here else None,
-                         "fold": state_fold(slug, programs_dir, lineage_last, man)})
+        mgrs = [manager_facts(rows[s], chain_of(s)) for s in f["managers"]]
+        p = program_entry("manager", slug, f["key"], mgrs, f["lineage"], f["manifest"] or {}, f["conflict"],
+                          rows, here, now, floor, programs_dir)
+        if p:
+            programs.append(p)
+    for sid, c in sorted(cands.items()):
+        if c["owner"] != sid:
+            continue  # absorbed: its lineage rides the absorber's program through roots
+        lineage = [sid] + sorted(s for s in rows if s != sid and pf.root_manager(s, rows, roots) == sid)
+        p = program_entry("candidate", c["slug"], pf.program_key(c["title"]), [manager_facts(rows[sid], chain_of(sid))],
+                          lineage, {}, False, rows, here, now, floor, programs_dir)
+        if p:
+            programs.append(dict(p, route=c["route"], session=sid, children=len(c["children"]), prs=c["prs"]))
 
     # One sweep window for every program: from the earliest checkpoint among live programs (a
     # moved one first). Per-program reconcile steps then drop rows their manager already saw.
@@ -247,9 +301,11 @@ def mine(a):
     since = max(floor, min(cps))
     since_iso = naive_iso(since)
     sweeps = {}
-    for name, argv in (("child_ledger.py", ["--account", "all", "--since", since_iso, "--out", ledger_dir]),
-                       ("handoff_sweep.py", ["--account", "all", "--since", since_iso,
-                                             "--handoff-dir", os.path.join(s2c, "handoff")])):
+    here_arg = ["--here", here] if here else []
+    for name, argv in (("child_ledger.py", ["--account", "all", "--since", since_iso, "--out", ledger_dir,
+                                            "--roots", roots_file]),
+                       ("handoff_sweep.py", ["--account", "all", "--since", since_iso, "--roots", roots_file,
+                                             "--handoff-dir", os.path.join(s2c, "handoff")] + here_arg)):
         rc, out, err = run_script(name, argv, env)
         sweeps[name] = {"rc": rc, "err": err}
         if name == "handoff_sweep.py" and rc == 0:
@@ -261,7 +317,7 @@ def mine(a):
         m["verdict"] == "MISSING-TURNS" for m in all_mgrs) else pool)
     ls_rows = list_sessions.load_all(store)
     history, residual = widen(rows, ls_rows, since_iso, ledger_dir, ca.named_text(home), chains, graph,
-                              owned, projects, a.max_rounds)
+                              owned, projects, a.max_rounds, roots)
 
     digests = make_digests(programs, since, digest_dir, a.dry_run)
     ctx = {"date": date, "now": now, "here": here, "here_why": here_why, "store": store, "home": home,
@@ -270,7 +326,8 @@ def mine(a):
            "chains": chains, "pool": pool, "owned": owned, "graph": graph, "sweeps": sweeps,
            "unproven": unproven, "history": history, "residual": residual, "digests": digests,
            "work": work, "ledger_dir": ledger_dir, "s2c": s2c, "dry_run": a.dry_run,
-           "named_text": ca.named_text(home)}
+           "named_text": ca.named_text(home), "candidates": cands, "routes_file": routes_file,
+           "roots_file": roots_file}
     plan = mine_report.build_plan(ctx)
     gates = mine_report.gates(ctx, plan)
     receipt = mine_report.render_receipt(ctx, plan, gates)

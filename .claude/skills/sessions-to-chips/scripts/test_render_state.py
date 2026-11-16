@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import types
@@ -40,7 +41,9 @@ import state_view as sv  # noqa: E402
 NOW = dt.datetime(2026, 11, 3, 12, 0, tzinfo=dt.timezone.utc)
 REPO = "acme/shop"
 SHA_M, SHA_D = "a" * 40, "d" * 40
-VIEW = {"updated_at": "2026-11-03T11:00:00Z", "destination": "The shop takes orders in production.",
+WRITER = "local_5e551011-0000-4000-8000-000000000001"
+HEAD = f"updated_at: 2026-11-03T11:00:00Z\nwriter: {WRITER} (account acct-1)\nsince-last-session: first head\n"
+VIEW = {"destination": "The shop takes orders in production.",
         "outcomes": [{"outcome": "Orders are accepted", "tickets": ["TKT-2"]},
                      {"outcome": "Orders are paid", "tickets": ["TKT-4"]}],
         "needs_you": [{"ask": "Merge it?", "recommended": "Yes"}],
@@ -103,7 +106,7 @@ def write_program(slug, manifest=None, state=None, events=None, bake_state="canc
     with open(base + ".json", "w") as fh:
         json.dump(default if manifest is None else manifest, fh)
     with open(base + ".state.md", "w") as fh:
-        fh.write(AT_WAKE + "\n" + view_block(VIEW) if state is None else state)
+        fh.write(HEAD + AT_WAKE + "\n" + view_block(VIEW) if state is None else state)
     with open(base + ".events.jsonl", "w") as fh:
         fh.write(events if events is not None else '{"ts":"2026-11-03T10:00:00Z","event":"dispatched","note":"go"}\n')
     return base
@@ -243,7 +246,7 @@ class ViewBlock(unittest.TestCase):
                              ('{"exposure": [{"ref": "#1", "state": "on"}]}', "exposure[0].state must be one of"),
                              ('{"decisions": [{"decision": "d", "date": "2026-11-03"}]}', "RFC3339"),
                              ('{"decisions": [{"decision": "d", "date": "2027-01-01T00:00:00Z"}]}', "in the future"),
-                             ('{"updated_at": "2026-11-03"}', "RFC3339"),
+                             ('{"updated_at": "2026-11-03"}', "retired key; move it to the file head"),
                              ('{"outcomes": [{"outcome": "o", "extra": 1}]}', "unknown keys ['extra']"),
                              ('{"adopted": {"refs": ["#1"]}}', "`adopted` must be a list"),
                              ('{"adopted": [{"refs": ["#1"]}]}', "adopted[0] needs a text `note`"),
@@ -256,9 +259,9 @@ class ViewBlock(unittest.TestCase):
     def test_a_bare_string_row_is_its_required_field(self):
         lines = [f"Decision {i}" for i in range(5)]
         view, _, problems = self.read(view_block({"decisions": lines, "outcomes": ["Ship it"]}))
-        self.assertEqual(view["decisions"], [{"decision": d} for d in lines])
+        self.assertEqual(view["decisions"], [{"decision": d, "date_missing": True} for d in lines])
         self.assertEqual(view["outcomes"], [{"outcome": "Ship it"}])
-        self.assertEqual(problems, [])
+        self.assertEqual(problems, [f"decisions[{i}] needs a `date`; it is shown tagged date_missing" for i in range(5)])
         _, _, problems = self.read(view_block({"decisions": ["  "]}))
         self.assertTrue(any("decisions[0] needs a text `decision`" in p for p in problems), problems)
 
@@ -268,6 +271,167 @@ class ViewBlock(unittest.TestCase):
                          {("explanation", "destination"), ("proven", "the derived Production truth")})
         self.assertEqual(legacy[0]["text"] if legacy[0]["key"] == "explanation" else legacy[1]["text"], ["Builds it."])
         self.assertTrue(any("retired key; move it to destination" in p for p in problems))
+
+
+GOOD_HEAD = HEAD.rstrip("\n")
+BARE = "5e551011-0000-4000-8000-0000000000aa"
+
+
+class FileHead(unittest.TestCase):
+    """Row 10: the one head parser. Every non-ok head gives exactly one Problems row naming the expected form."""
+
+    def read(self, text, now=NOW):
+        problems = []
+        head, reason = sv.read_head(text, now, problems)
+        return head, reason, [p["detail"] for p in problems]
+
+    def test_canonical_head_is_ok(self):
+        head, reason, problems = self.read(GOOD_HEAD + "\n# Shop state\n")
+        self.assertEqual((reason, problems), ("ok", []))
+        self.assertEqual(head, {"updated_at": "2026-11-03T11:00:00Z", "writer": WRITER, "account": "acct-1",
+                                "since": "first head"})
+
+    def test_each_malformed_head_is_unparsed_with_one_row(self):
+        w = f"writer: {WRITER} (account acct-1)"
+        cases = {
+            "missing key": f"updated_at: 2026-11-03T11:00:00Z\nsince-last-session: x\n# T",
+            "misordered": f"{w}\nupdated_at: 2026-11-03T11:00:00Z\nsince-last-session: x\n# T",
+            "date only": f"updated_at: 2026-11-03\n{w}\nsince-last-session: x\n# T",
+            "future": f"updated_at: 2026-11-04T11:00:00Z\n{w}\nsince-last-session: x\n# T",
+            "short writer": "updated_at: 2026-11-03T11:00:00Z\nwriter: local_5e551011 (account acct-1)\nsince-last-session: x",
+            "bare cli uuid": f"updated_at: 2026-11-03T11:00:00Z\nwriter: {BARE} (account acct-1)\nsince-last-session: x",
+            "empty since": f"updated_at: 2026-11-03T11:00:00Z\n{w}\nsince-last-session: \n# T",
+        }
+        for name, text in cases.items():
+            head, reason, problems = self.read(text)
+            self.assertEqual((head, reason, len(problems)), (None, "unparsed", 1), (name, problems))
+            self.assertIn("expected `", problems[0], name)
+
+    def test_title_first_is_missing(self):
+        head, reason, problems = self.read("# Shop state\n\nbody\n")
+        self.assertEqual((head, reason, len(problems)), (None, "missing", 1))
+
+    def test_real_ad_hoc_formats_are_rejected_naming_the_form(self):
+        real = {  # de-identified shapes measured on 2026-11-16
+            "A": f"updated_at: 2026-10-27T14:35:00Z\nsession: {BARE}\n# Program A state\n",
+            "B": "# Program B state (updated_at 2026-10-26T19:22:11Z)\n\n## AT-WAKE\n",
+            "C": "# Program C — manager local_5e551011 on the other account, updated 2026-11-03\n",
+            "D": "# [Manager] Program D state (updated 2026-10-26T22:11:26Z)\n",
+        }
+        for name, text in real.items():
+            head, reason, problems = self.read(text)
+            self.assertIsNone(head, name)
+            self.assertIn(reason, ("missing", "unparsed"), name)
+            self.assertEqual(len(problems), 1, name)
+            self.assertIn("writer: local_<uuid> (account <account id>)" if name != "A" else "expected `writer:",
+                          problems[0], name)
+
+
+class WriteHead(unittest.TestCase):
+    """Row 10: the one head writer, run as the CLI against a temp store and programs dir."""
+    CLI = "5e551011-0000-4000-8000-0000000000c1"
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="write-head-", dir=TMP)
+        self.store, self.programs = os.path.join(self.root, "store"), os.path.join(self.root, "programs")
+        os.makedirs(self.programs)
+        self.path = os.path.join(self.programs, "shop.state.md")
+        self.body = "# Shop state\n\n## AT-WAKE\nStatus: WORKING\n"
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def session(self, sid, cli, acct="acct-1"):
+        d = os.path.join(self.store, acct, "org-1")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, f"{sid}.json"), "w") as fh:
+            json.dump({"sessionId": sid, "cliSessionId": cli, "title": "[Manager] Shop", "lastActivityAt": 1}, fh)
+
+    def run_cli(self, since="merged #7", cli=CLI):
+        env = dict(os.environ, S2C_STORE=self.store, WORK_STATE_PROGRAMS=self.programs)
+        env.pop("CLAUDE_SESSION_ID", None)
+        if cli:
+            env["CLAUDE_SESSION_ID"] = cli
+        return subprocess.run([sys.executable, "-I", os.path.join(HERE, "state_view.py"), "--write-head", "shop",
+                               "--since", since], capture_output=True, text=True, env=env)
+
+    def write(self, text):
+        with open(self.path, "w") as fh:
+            fh.write(text)
+
+    def text(self):
+        with open(self.path) as fh:
+            return fh.read()
+
+    def test_writes_a_fresh_head_above_a_bare_title(self):
+        self.session(WRITER, self.CLI)
+        self.write(self.body)
+        before = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+        res = self.run_cli()
+        self.assertEqual(res.returncode, 0, res.stderr)
+        text = self.text()
+        self.assertTrue(text.endswith("\n" + self.body), text)
+        self.assertEqual(text.split("\n")[1], f"writer: {WRITER} (account acct-1)")
+        head, reason = sv.read_head(text, dt.datetime.now(dt.timezone.utc), [])
+        self.assertEqual(reason, "ok")
+        self.assertLessEqual(abs((sv.head_time(head) - before).total_seconds()), 2)
+        self.assertEqual(head["since"], "merged #7")
+
+    def test_replaces_an_ad_hoc_head_and_keeps_every_later_byte(self):
+        self.session(WRITER, self.CLI)
+        self.write(f"updated_at: 2026-10-27T14:35:00Z\nsession: {BARE}\n" + self.body)
+        self.assertEqual(self.run_cli().returncode, 0)
+        lines = self.text().split("\n")
+        self.assertEqual([x.split(":")[0] for x in lines[:3]], ["updated_at", "writer", "since-last-session"])
+        self.assertEqual("\n".join(lines[3:]), self.body)
+        self.assertEqual(self.run_cli("second").returncode, 0)  # rewrites its own head in place
+        self.assertEqual("\n".join(self.text().split("\n")[3:]), self.body)
+
+    def test_refusals_write_nothing(self):
+        self.write(self.body)
+        cases = [("no row", {}, "matches no store row"), ("no env", {"cli": None}, "no CLAUDE_SESSION_ID"),
+                 ("empty since", {"since": " "}, "--since is empty")]
+        for name, kw, needle in cases:
+            res = self.run_cli(**kw)
+            self.assertNotEqual(res.returncode, 0, name)
+            self.assertIn("write-head refused", res.stderr, name)
+            self.assertIn(needle, res.stderr, name)
+            self.assertEqual(self.text(), self.body, name)
+        self.session(WRITER, self.CLI)
+        self.session("local_5e551011-0000-4000-8000-000000000002", self.CLI, acct="acct-2")
+        res = self.run_cli()
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("matches 2 store rows", res.stderr)
+        self.assertEqual(self.text(), self.body)
+
+
+class HeadReaders(unittest.TestCase):
+    def test_view_updated_at_is_not_migrated_with_the_head_as_its_home(self):
+        problems = []
+        out = sv.read_view(view_block({"updated_at": "2026-11-03T11:00:00Z", "destination": "d"}), NOW, problems)
+        self.assertEqual([(x["key"], x["home"].startswith("the file head")) for x in out["legacy"]], [("updated_at", True)])
+        self.assertNotIn("updated_at", out["view"])
+
+    def test_staleness_reads_the_head(self):
+        head = {"updated_at": "2026-11-03T11:00:00Z", "writer": WRITER, "account": "a", "since": "x"}
+        events = [{"id": "e1", "kind": "merged", "at": "2026-11-03T11:30:00Z"},
+                  {"id": "e0", "kind": "merged", "at": "2026-11-03T10:30:00Z"}]
+        st = rs.staleness(head, events)
+        self.assertEqual((st["stale"], st["since"], st["ids"]), (True, "2026-11-03T11:00:00Z", ["e1"]))
+        self.assertEqual(rs.staleness(None, events)["reason"], "no valid file head")
+
+    def test_a_decision_without_a_date_is_shown_and_tagged(self):
+        problems = []
+        out = sv.read_view(view_block({"decisions": [{"decision": "Use one template"}]}), NOW, problems)
+        self.assertEqual(out["view"]["decisions"], [{"decision": "Use one template", "date_missing": True}])
+        self.assertEqual(len(problems), 1)
+
+    def test_two_at_wake_blocks_are_a_state_file_problem_and_one_is_not(self):
+        two, one = [], []
+        rs.log_shape(AT_WAKE + view_block(VIEW), two)
+        rs.log_shape("## AT-WAKE\nStatus: WORKING\n" + view_block(VIEW), one)
+        self.assertEqual([p["detail"][:15] for p in two], ["2 AT-WAKE block"])
+        self.assertEqual(one, [])
 
 
 class Grills(unittest.TestCase):
@@ -372,13 +536,15 @@ class EndToEnd(unittest.TestCase):
         lines = [f"Decision {i}" for i in range(5)]
         for slug, decisions, want in (("dec-strings", lines, lines),
                                       ("dec-objects", VIEW["decisions"], [d["decision"] for d in VIEW["decisions"]])):
-            base = write_program(slug, state=AT_WAKE + "\n" + view_block(dict(VIEW, decisions=decisions)))
+            base = write_program(slug, state=HEAD + AT_WAKE + "\n" + view_block(dict(VIEW, decisions=decisions)))
             rc, line = render(slug)
             self.assertEqual(rc, 0)
             _, data = payload_of(base + ".state.html")
             self.assertEqual([d["decision"] for d in data["history"]["decisions"]], want)
             self.assertNotIn("decisions: none written", line["author"] + data["author"])
-            self.assertFalse(any("decisions[" in p["detail"] for p in data["problems"]), data["problems"])
+            bad = [p["detail"] for p in data["problems"] if "decisions[" in p["detail"]]
+            self.assertEqual(bad, [f"decisions[{i}] needs a `date`; it is shown tagged date_missing"
+                                   for i in range(5)] if slug == "dec-strings" else [], data["problems"])
 
     def test_a_canceled_bake_keeps_its_outcome_on_now(self):
         write_program("bake")

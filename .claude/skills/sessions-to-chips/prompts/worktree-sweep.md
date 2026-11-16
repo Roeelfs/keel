@@ -13,14 +13,13 @@ Fill `{{CHECKPOINT}}`, `{{OUT}}` (`~/.claude/sessions-to-chips/relay/<date>-swee
 ```text
 Read-only except the one report file. Find worktrees, branches and local files left over from
 sessions on the OTHER Claude account that no live manager owns, or that hold unpushed/dirty work.
-Repos: {{REPOS}}. Use `git worktree list --porcelain` (never guess paths). For every worktree whose
-branch/session was active since {{CHECKPOINT}}: `git -C <wt> status --porcelain`, `git -C <wt> log
-@{u}..` (vs origin/main when no upstream), `gh pr list --head <branch> --state all --json
-number,state,mergedAt`. Map worktree/branch to a session with the session stores (both accounts)
-and `list_sessions.py`; say whether each owner is a running child, an archived session, or none.
-Also list branches whose commits are on no remote and unmerged (upstream gone or empty), newer than
-{{CHECKPOINT}}; for each run `git cherry origin/main <branch>` (a squash-merged one under another
-head is debris). Skip: {{KNOWN}}. ~85 no-upstream branches with a MERGED PR are noise: exclude.
+Repos: {{REPOS}}. For each repo run `python3 -I <skill>/scripts/handoff_sweep.py --repo <repo>
+--since {{CHECKPOINT}}` (JSON out): it walks `git worktree list --porcelain` and every local branch
+with no worktree, and gives each row a content-based `landed` verdict (merged PR head, merge-tree,
+cherry) plus its owner session. Never re-derive that verdict by hand with `git log` or
+`git cherry`: ancestry calls a squash-merged branch unpushed. Report a row only when `atRisk` is
+true. For each, say whether the owner is a running child, an archived session, or none (session
+stores of both accounts, `list_sessions.py`). Skip: {{KNOWN}}.
 Note debris separately (untracked scratch under a merged PR, `.codex/worktrees` registrations
 pointing at missing dirs needing `git worktree prune`).
 Write {{OUT}} (≤4 KB): a table of ONLY at-risk items (path, branch, facts with command output,

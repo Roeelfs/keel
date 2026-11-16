@@ -3,14 +3,15 @@
 
 Two tests:
   A. Every session on --account active since --since must sit in some child-ledger file
-     (children-*.json in --ledger-dir) or be a [Manager] row. Anything else is a HOLE.
-  B. Every older, unmerged descendant of a [Manager] that no handoff, wrap-up or state file names
+     (children-*.json in --ledger-dir) or be a program root (a [Manager] row, or a --roots
+     candidate that owns itself). Anything else is a HOLE.
+  B. Every older, unmerged descendant of a program root that no handoff, wrap-up or state file names
      (by session id or title prefix), and that no ledger holds, is UNNAMED. Merged-PR sessions are
      skipped: the PR is the durable record. mine_all.py widens by ledgering these rows for the
      old-descendant classifier, so a ledgered row is no longer UNNAMED.
 
 Usage:
-  coverage_audit.py --account all --since 2026-10-24T00:46 --ledger-dir <dir> [--json]
+  coverage_audit.py --account all --since 2026-10-24T00:46 --ledger-dir <dir> [--roots <candidates.json>] [--json]
 Exit 0 always; mine_all.py turns the counts into gates.
 """
 import argparse
@@ -21,6 +22,9 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import program_family as pf  # noqa: E402
+
 ROOT = (os.environ.get("S2C_CLAUDE_HOME") or os.path.expanduser("~/.claude"))
 
 
@@ -63,18 +67,21 @@ def in_account(row, account):
     return account in ("all", "*") or any(row["account"].startswith(x) for x in account.split(","))
 
 
-def audit(rows, account, since, ledger_dir, text):
-    """-> {"holes": [rows], "unnamed": [(manager title, row)], "ledgered": n}. `since` is the ISO
-    string list_sessions.py emits (YYYY-MM-DDTHH:MM:SS), compared as text."""
+def audit(rows, account, since, ledger_dir, text, roots=None):
+    """-> {"holes": [rows], "unnamed": [(root title, row)], "ledgered": n}. `since` is the ISO
+    string list_sessions.py emits (YYYY-MM-DDTHH:MM:SS), compared as text. roots: {sid: owner}
+    (program_family.load_roots); a self-owned candidate is a root like a [Manager] row."""
+    roots = roots or {}
     ledgered = ledgered_ids(ledger_dir)
     holes = [r for r in rows if in_account(r, account) and r["lastActivityAt"] >= since
-             and r["sessionId"] not in ledgered and not r["title"].startswith("[Manager]")]
+             and r["sessionId"] not in ledgered and not r["title"].startswith("[Manager]")
+             and roots.get(r["sessionId"]) != r["sessionId"]]
     kids = {}
     for r in rows:
         kids.setdefault(r.get("parentSessionId") or "", []).append(r)
     unnamed, seen = [], set()
     for m in rows:
-        if not m["title"].startswith("[Manager]"):
+        if not (m["title"].startswith("[Manager]") or m["sessionId"] in roots):
             continue
         for k in descendants(kids, m["sessionId"]):
             if k["sessionId"] in seen or k["lastActivityAt"] >= since or k.get("prState") == "MERGED":
@@ -92,9 +99,10 @@ def main():
     ap.add_argument("--account", required=True)
     ap.add_argument("--since", required=True)
     ap.add_argument("--ledger-dir", required=True)
+    ap.add_argument("--roots", help="<work>/candidates.json from mine_all.py")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
-    res = audit(load_sessions(), a.account, a.since, a.ledger_dir, named_text())
+    res = audit(load_sessions(), a.account, a.since, a.ledger_dir, named_text(), pf.load_roots(a.roots))
     if a.json:
         print(json.dumps({"holes": res["holes"], "ledgered": res["ledgered"],
                           "unnamed": [{"manager": t, **k} for t, k in res["unnamed"]]}, indent=1))

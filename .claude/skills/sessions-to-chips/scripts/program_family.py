@@ -235,10 +235,100 @@ def program_titles(programs_dir=None, rows=None):
     return {slug: title for slug, (_, title) in best.items()}
 
 
-def root_manager(sid, rows):
+def program_slug(title):
+    """THE program slug (one owner): ledger file names and plan slugs. "Release features: phase 2"
+    -> "release-features"."""
+    return program_key(title).replace(" ", "-")
+
+
+def candidate_slug(row):
+    """A candidate program's slug: the title slug plus the session's 8-hex suffix, so it never
+    collides with a real program."""
+    return f"{program_slug(row.get('title')) or 'session'}-{row['sessionId'].replace('local_', '')[:8]}"
+
+
+ROUTES = ("absorb", "promote", "leave")
+
+
+def routes_path(home=None):
+    return os.path.join(home or HOME, "sessions-to-chips", "candidate-routes.jsonl")
+
+
+def load_routes(path=None):
+    """-> {sessionId: {"route", "program", "at", "by"}} from the append-only routes file. The first
+    line for a session wins (a route is permanent); malformed lines are skipped."""
+    out = {}
+    try:
+        with open(path or routes_path()) as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return out
+    for ln in lines:
+        try:
+            d = json.loads(ln)
+        except ValueError:
+            continue
+        if isinstance(d, dict) and d.get("session") and d.get("route") in ROUTES:
+            out.setdefault(d["session"], d)
+    return out
+
+
+def program_candidates(rows, since_ms, routes, self_cli=None, manifests=()):
+    """-> {sid: facts} for every session that ran as a program without a [Manager] title.
+
+    rows is the FULL store (never windowed: the root test needs every parent). A candidate is not a
+    [Manager] row nor a manifest's manager instance, is itself active since since_ms, is a root (its
+    spawnedFrom parent is absent or not in the store), is not the session running the caller
+    (self_cli), is not routed `leave`, and has at least one child active since since_ms or at least
+    two PRs in its own prs[]."""
+    kids = {}
+    for sid, r in rows.items():
+        parent = (r.get("spawnedFrom") or {}).get("sessionId")
+        if parent and parse_last(r) * 1000 >= since_ms:
+            kids.setdefault(parent, []).append(sid)
+    out = {}
+    for sid, r in rows.items():
+        if is_manager(r) or parse_last(r) * 1000 < since_ms:
+            continue
+        if (r.get("spawnedFrom") or {}).get("sessionId") in rows:
+            continue
+        if self_cli and r.get("cliSessionId") == self_cli:
+            continue
+        route = (routes.get(sid) or {}).get("route")
+        if route == "leave":
+            continue
+        if manifests and manifest_for(instance_ids(r), manifests):
+            continue
+        children = sorted(kids.get(sid, []))
+        prs = [p for p in r.get("prs") or [] if isinstance(p, dict)]
+        if not children and len(prs) < 2:
+            continue
+        out[sid] = {"title": r.get("title") or "", "acct": r.get("_acct"), "route": route,
+                    "program": (routes.get(sid) or {}).get("program"), "slug": candidate_slug(r),
+                    "children": children, "prs": len(prs)}
+    return out
+
+
+def load_roots(path):
+    """--roots <work>/candidates.json -> {sid: owner_sid}. A missing path means no candidates
+    (today's behaviour). A candidate with no owner (routed leave) is not a root."""
+    if not path:
+        return {}
+    with open(path) as fh:
+        data = json.load(fh)
+    return {sid: c["owner"] for sid, c in data.items() if c.get("owner")}
+
+
+def root_manager(sid, rows, roots=None):
+    """The program root owning sid: the first session up the spawnedFrom chain, starting at sid
+    itself, that has a [Manager] title (returned as is) or is in roots (returns roots[sid], its
+    owner: itself, or an absorber's manager)."""
+    roots = roots or {}
     cur, seen = sid, set()
     while cur in rows and cur not in seen:
         seen.add(cur)
+        if cur in roots:
+            return roots[cur]
         if is_manager(rows[cur]):
             return cur
         cur = (rows[cur].get("spawnedFrom") or {}).get("sessionId")
@@ -254,9 +344,10 @@ def manifest_for(ids, manifests):
     return max(hits, key=lambda m: m["mtime"]) if hits else None
 
 
-def families(rows, manifests, chains=None):
+def families(rows, manifests, chains=None, roots=None):
     """-> {slug: {"key", "managers": [sid], "lineage": [sid], "manifest": m|None, "conflict": [...]}}.
-    chains: {sessionId: [transcript stems]} widens manifest matching to every chain segment."""
+    chains: {sessionId: [transcript stems]} widens manifest matching to every chain segment.
+    roots: {candidate sid: owner}; an absorbed candidate's lineage rides its absorber's family."""
     chains = chains or {}
     groups = {}
     for sid, d in rows.items():
@@ -266,13 +357,13 @@ def families(rows, manifests, chains=None):
     for key, sids in groups.items():
         found = [m for m in (manifest_for(instance_ids(rows[s], chains.get(s, ())), manifests) for s in sids) if m]
         man = max(found, key=lambda m: m["mtime"]) if found else None
-        slug = man["slug"] if man else key.replace(" ", "-")
+        slug = man["slug"] if man else program_slug(rows[sids[0]]["title"])
         fam = out.setdefault(slug, {"key": key, "managers": [], "lineage": [], "manifest": man, "conflict": []})
         fam["managers"] += sids
         fam["conflict"] = sorted(set(fam["conflict"]) | ({m["slug"] for m in found} - {slug}))
     by_mgr = {s: slug for slug, f in out.items() for s in f["managers"]}
     for sid in rows:
-        m = root_manager(sid, rows)
+        m = root_manager(sid, rows, roots)
         if m and m != sid and m in by_mgr:
             out[by_mgr[m]]["lineage"].append(sid)
     return out

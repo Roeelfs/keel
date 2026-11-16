@@ -67,9 +67,9 @@ offers). Measured failures (2026-10-14) behind each argument:
   the cards, or to type one message in the manager's chat, after which its starts are the human's.
 - **"Workspace requires trust approval before starting a session."** Waking an existing session
   (a message, not only a start) reopens it in its worktree, and on an account that has not trusted
-  that workspace the send is refused. Do not retry. Ask the human to open one of those sessions and
-  accept the trust prompt, with a pre-written `Done` answer, then resend. A fresh `start_session`
-  in a new worktree was not blocked by it.
+  that workspace the send is refused. Do not retry. Trust is per folder: ask the human once, listing
+  every refused session as `title — exact cwd` (approving another worktree of the repo does not
+  help), to open each and accept the prompt, with a pre-written `Done` answer, then resend.
 
 ## Mode 1 — New manager
 
@@ -95,7 +95,7 @@ offers). Measured failures (2026-10-14) behind each argument:
 ## Mode 2 — Resume / mine (one pass; also after an account switch)
 
 Mining is the default and runs ONCE. Every resume, account-switch or "mine" request starts with
-this, and with nothing else:
+this alone:
 
 ```bash
 python3 -I $SCR/mine_all.py              # --dry-run: same receipt, writes nothing under ~/.claude
@@ -110,15 +110,13 @@ on this account and proven by the store's `lastAssistantUuid`, never a typed tim
 `child_ledger.py`, `handoff_sweep.py` and the coverage audit over all accounts, with **holes
 widening** until holes = 0 or each is named unreadable with its reason; the state-file fold; one
 digest per chain segment. It writes the plan `relay/<date>-mine-plan.json` and the **completeness
-receipt** `relay/<date>-completeness-receipt.md` (accounts, sessions per account,
-managers/programs, chains and bytes, children ledgered, holes = N, gates).
+receipt** `relay/<date>-completeness-receipt.md`.
 
 **What the data shows** (measured 2026-11-01, so do not re-derive it by hand): the store's
 `cliSessionId` names only a session's NEWEST transcript; a resume, move or fork mints a new file
-whose head `parentUuid` points into the old one (22 multi-file chains in 14 days, Apps spans three
-files in two worktrees). `lastActivityAt` also moves on focus and artifact rows (Release:
-last turn 10-28T12:38Z, store 10-31T11:27Z, every turn present), and `accountUuid` sits only on
-artifact rows, so it never proves which account ran a turn: the store dir does.
+whose head `parentUuid` points into the old one (22 multi-file chains in 14 days).
+`lastActivityAt` also moves on focus and artifact rows, and `accountUuid` sits only on artifact
+rows, so it never proves which account ran a turn: the store dir does.
 
 **Print the receipt to the human first.** Then by exit code:
 
@@ -142,11 +140,12 @@ outputs. It stays read-only and creates no sessions.
 **Relay: ONE message per manager** (`messages[]` in the plan, [CATCHUP_MESSAGE.md](CATCHUP_MESSAGE.md)),
 by session id, carrying its handoff, its `-children` files, its decisions and worktree rows, every
 cross-cutting ruling (they go into EVERY manager's message), the backlog-first order, and the
-plan's ready-to-run founder kits. Say explicitly that the other account's stopped children ARE the
-program's work. By `kind`:
+plan's ready-to-run founder kits. A cross-cutting ruling is sent to `plan.ruling_recipients`;
+orphan children never load the role, so the ledger alone does not reach them. Say that the other
+account's stopped children ARE the program's work. By `kind`:
 
 - `catchup`: the manager here keeps its sidebar group, worktree and family; the handoff replaces
-  its stale context. Archive older duplicate managers here.
+  its stale context. Archive older duplicate managers here. Rename BEFORE the catch-up.
 - `fold-notice`: the program was absorbed (manifest `absorbed_by`). The live manager is a duplicate
   owner: it hands its live child over at its next checkpoint and runs hygiene; the absorber gets a
   takeover note in its own message.
@@ -158,27 +157,28 @@ program's work. By `kind`:
   `STALE-*` rows by message ([references/config-freshness.md](references/config-freshness.md)).
 
 Send constraints (measured 2026-10-24/26): the app pauses sends after about 10 session messages
-since the human last typed, so one message per manager is a budget: follow-ups wait for its reply.
-A send refused with "Workspace requires trust approval" is not retried: ask the human once for all
-refused sessions. Write every undelivered message to `relay/<date>-pending-sends.md` the moment it
-is refused. Queued is not read: do not re-send. A catch-up starts the manager's turn as "another
-session's message", so the app refuses its `start_session`: close the round with ONE line to the
-human naming the managers that need a child, "type `go` in each". Only the signed-in account's
-sessions are reachable (`list_sessions`, `SendMessage`, `archive_session`); the other account's
+since the human last typed, so one message per manager is a budget: follow-ups wait for its reply,
+except ONE absorption addendum handing it a program found later in the round (a candidate routed
+`absorb`). Ids in the plan, relay, `pending-sends.md` and `replies.md` are the full `local_<uuid>`
+(a short id fails in `send_message`; short ids only in receipt tables). Write each refused send to
+`relay/<date>-pending-sends.md` at once, with its cwd. Queued is not read: do not re-send. A
+catch-up starts the manager's turn as "another session's message", so the app refuses its
+`start_session`: close the round with ONE line naming the managers that need a child, "type `go`
+in each". Only the signed-in account's sessions are reachable (`list_sessions`, `SendMessage`, `archive_session`); the other account's
 show as `Remote Control · offline` and a message to one is queued to nowhere. Never relay to them.
 
 **Converge.** Do not poll. Append each one-line reply to `relay/<date>-replies.md`. A program is
 converged when its manager replied to the catch-up (archived N, live children X, decisions held)
 and to backlog-first (before → after), confirmed its sweep fixes (fixed N of M) and worktree rows,
-repointed anything contradicting the rulings ledger, has a fresh `updated_at`, and its Linear map has a
+repointed anything contradicting the rulings ledger, has a fresh state-file head, and its Linear map has a
 `State as of` comment newer than the catch-up. `pending-sends.md` must be empty or listed to the
 human. Close with which managers hold open founder decisions and a link to each.
 
 **Archiving on the other account is the human's:** write `relay/<date>-archive-on-<account>.md`
-(what to archive, what to keep; move a kept subtree under an archived parent to top level first).
+(what to archive and keep; first move a kept subtree under an archived parent to top level).
 **Hygiene asked of the dispatcher is relayed** as one line in each catch-up; the dispatcher has no
-family. Exception: duplicate managers of one program on this account. Inside each manager the order
-is fixed: BACKLOG FIRST, then salvage, then the program.
+family, except duplicate managers of one program here. Each manager's order is fixed: BACKLOG
+FIRST, then salvage, then the program.
 
 **Resuming parked sessions as a NEW manager** (a category with no manager: the `unmanaged` or
 `orphans` rows, or sessions the human names): group them with `group_sessions.py --root
@@ -187,10 +187,9 @@ is fixed: BACKLOG FIRST, then salvage, then the program.
 a manager. [REFERENCE.md](REFERENCE.md) has the story structure, Workflow arguments and unit
 rules; a started unit with uncommitted work opens with the WORKTREE NOTE.
 
-Mechanics that cost retries: zsh ties `path` to `PATH` (`read -r cli size path` breaks the next
-command; use `tpath`); the other account's sessions are `not found` to `get_session` here, which
+Mechanics that cost retries: zsh ties `path` to `PATH` (use `tpath`); the other account's sessions are `not found` to `get_session` here, which
 is never evidence they are dead; never trust a subagent's owner or "live" claim without the
-`gh pr view` / `git worktree list` line it ran; a founder ask found by a sweep goes into that
+command line it ran; a founder ask found by a sweep goes into that
 manager's message, never the dispatcher's closing list; prefer a session's `list_events` (a read)
 over a nudge (a send).
 

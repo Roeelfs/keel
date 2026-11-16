@@ -34,6 +34,8 @@ LEDGER = """# Rulings ledger (private overlay)
 ## Rulings
 - 2026-11-04 | a ruling | founder
 """
+ME = "local_5e551011-0000-4000-8000-000000000001"
+HEAD = f"updated_at: 2026-11-05T10:00:00Z\nwriter: {ME} (account acct-1)\nsince-last-session: first head\n"
 GIT_ENV = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
                GIT_COMMITTER_EMAIL="t@t", GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1")
 
@@ -192,6 +194,32 @@ class Load(Base):
         os.utime(base + ".state.html", (1, 1))
         with mock.patch.object(rb, "keel_behind", return_value=(0, "/k")):
             self.assertTrue(any("State page stale" in x for x in rb.health_lines("demo", self.programs)))
+
+    def head_case(self, head, events=""):
+        base = os.path.join(self.programs, "demo")
+        _write(base + ".state.md", head + "# Demo state\n")
+        _write(base + ".state.html", "x")
+        _write(base + ".events.jsonl", events)
+        now = dt.datetime(2026, 11, 5, 12, tzinfo=dt.timezone.utc)
+        with mock.patch.object(rb, "keel_behind", return_value=(0, "/k")):
+            return [x for x in rb.health_lines("demo", self.programs, session=ME, now=now) if "head" in x]
+
+    def test_head_health_line_fires_for_missing_foreign_and_older_than_an_event(self):
+        self.assertIn("State file head missing", self.head_case("")[0])
+        foreign = HEAD.replace(ME, "local_5e551011-0000-4000-8000-0000000000ff")
+        self.assertIn("names another session", self.head_case(foreign)[0])
+        late = '{"ts":"2026-11-05T11:00:00Z","event":"merged"}\n'
+        self.assertIn("older than the newest event", self.head_case(HEAD, late)[0])
+        self.assertEqual(self.head_case(HEAD, '{"ts":"2026-11-05T09:00:00Z","event":"merged"}\n'), [])
+        self.assertTrue(all("--write-head demo --since" in x for x in self.head_case("")))
+
+    def test_wake_steps_print_the_write_head_command_and_no_template(self):
+        now = dt.datetime(2026, 11, 5, 12, tzinfo=dt.timezone.utc)
+        with mock.patch.object(rb, "keel_behind", return_value=(0, "/k")):
+            text = rb.brief("demo", ME, now, self.programs)[0]
+        steps = text.split("Wake steps:", 1)[1].split("----- context brief -----")[0]
+        self.assertIn('state_view.py --write-head demo --since "<what changed>"', steps)
+        self.assertNotIn("updated_at:", steps)
 
     def test_cli_status_writes_nothing(self):
         out = subprocess.run([sys.executable, "-I", os.path.join(HERE, "role_brief.py"), "--status", "--program",

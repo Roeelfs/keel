@@ -8,33 +8,20 @@ with its stored last report, status, PRs, branches and transcript path, for a ha
 reconcile against the handoff (prompts/child-ledger-reconciler.md).
 
 Usage:
-  python3 -I child_ledger.py --account <other-account-id> --since 2026-10-18T20:00 --out <dir>
+  python3 -I child_ledger.py --account <other-account-id> --since 2026-10-18T20:00 --out <dir> [--roots <candidates.json>]
 """
 import argparse
 import datetime
 import glob
 import json
 import os
-import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import program_family as pf  # noqa: E402
 
 STORE = os.environ.get("S2C_STORE") or os.path.expanduser("~/Library/Application Support/Claude/claude-code-sessions")
 PROJECTS = os.path.join((os.environ.get("S2C_CLAUDE_HOME") or os.path.expanduser("~/.claude")), "projects")
-
-
-
-def session_files(account):
-    """Session JSONs for ONE account dir prefix, a comma list, or 'all'. A program hops between
-    accounts and its manager ids are split across them (measured 2026-11-01), so a single-account
-    sweep orphans every child whose spawnedFrom parent sits on the other account: use 'all'."""
-    out = []
-    for a in ("*" if account in ("all", "*") else account).split(","):
-        pat = "*" if a == "*" else a.strip() + "*"
-        out += glob.glob(f"{STORE}/{pat}/*/local_*.json")
-    return out
-
-
-def slug(title):
-    return re.sub(r"[^a-z0-9]+", "-", title.lower().replace("[manager]", "")).strip("-")[:60]
 
 
 def transcript_for(cli, projects=None):
@@ -61,46 +48,45 @@ def ledger_row(sid, d, projects=None):
     }
 
 
+def ledger_owner(sid, d, rows, roots):
+    """-> owner session id, None (unmanaged), or False (the row is itself a program root: never its
+    own child). Walks from the parent, so a self-owned candidate is never ledgered as its child."""
+    if pf.is_manager(d) or roots.get(sid) == sid:
+        return False
+    if sid in roots:
+        return roots[sid]  # an absorbed candidate rides its absorber's ledger
+    return pf.root_manager((d.get("spawnedFrom") or {}).get("sessionId"), rows, roots)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--account", required=True)
+    ap.add_argument("--account", required=True, help="account dir prefix, comma list, or 'all'")
     ap.add_argument("--since", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--roots", help="<work>/candidates.json from mine_all.py (program roots without a [Manager] title)")
     args = ap.parse_args()
     since = datetime.datetime.fromisoformat(args.since).replace(tzinfo=datetime.timezone.utc)
     since_ms = int(since.timestamp() * 1000)
-
-    rows = {}
-    for f in session_files(args.account):
-        try:
-            with open(f) as fh:
-                d = json.load(fh)
-        except (OSError, ValueError):
-            continue  # mine_all.py names unreadable store rows in its receipt
-        rows[d.get("sessionId") or os.path.basename(f)[:-5]] = d
-
-    def manager_of(sid):
-        cur = (rows[sid].get("spawnedFrom") or {}).get("sessionId")
-        for _ in range(10):
-            if not cur or cur not in rows:
-                return None
-            if rows[cur].get("title", "").startswith("[Manager]"):
-                return cur
-            cur = (rows[cur].get("spawnedFrom") or {}).get("sessionId")
-        return None
+    # Ancestry walks the FULL store: a child of a quiet manager on the other account still has an owner.
+    rows, _, _ = pf.load_store(STORE)
+    roots = pf.load_roots(args.roots)
+    accts = None if args.account in ("all", "*") else [a.strip() for a in args.account.split(",")]
 
     ledgers = {}
     for sid, d in rows.items():
-        if d.get("lastActivityAt", 0) < since_ms or d.get("title", "").startswith("[Manager]"):
+        if d.get("lastActivityAt", 0) < since_ms or (accts and not any(d["_acct"].startswith(a) for a in accts)):
             continue
-        mgr = manager_of(sid) or "(unmanaged)"
-        ledgers.setdefault(mgr, []).append(ledger_row(sid, d))
+        owner = ledger_owner(sid, d, rows, roots)
+        if owner is False:
+            continue
+        ledgers.setdefault(owner or "(unmanaged)", []).append(ledger_row(sid, d))
 
     os.makedirs(args.out, exist_ok=True)
     index = []
     for mgr, children in ledgers.items():
         title = rows[mgr]["title"] if mgr in rows else mgr
-        path = os.path.join(args.out, f"children-{slug(title) or 'unmanaged'}-{mgr.replace('local_', '')[:8] if mgr.startswith('local_') else 'none'}.json")
+        name = "unmanaged-none" if mgr not in rows else f"{pf.program_slug(title) or 'session'}-{mgr.replace('local_', '')[:8]}"
+        path = os.path.join(args.out, f"children-{name}.json")
         with open(path, "w") as fh:
             json.dump({"manager": title, "managerSessionId": mgr, "children": sorted(children, key=lambda c: c["lastActivity"])}, fh, indent=1)
         index.append({"manager": title, "children": len(children), "file": path})

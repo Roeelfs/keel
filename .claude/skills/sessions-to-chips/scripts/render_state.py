@@ -470,16 +470,25 @@ def derived_events(slug, prod_rows, shipped, snap, grills, outcome_rows, cache, 
     return events, baseline
 
 
-def staleness(view, events):
-    """The narrative is stale when any derived event is newer than VIEW updated_at."""
-    updated = ts(view.get("updated_at"))
+def staleness(head, events):
+    """The narrative is stale when any derived event is newer than the file head's updated_at."""
+    updated = ts(head["updated_at"]) if head else None
     if updated is None:
-        return {"stale": bool(events), "since": None, "counts": {}, "reason": "no valid updated_at"}
+        return {"stale": bool(events), "since": None, "counts": {}, "reason": "no valid file head"}
     newer = [e for e in events if e.get("at") and ts(e["at"]) and ts(e["at"]) > updated]
     counts = {}
     for e in newer:
         counts[e["kind"]] = counts.get(e["kind"], 0) + 1
-    return {"stale": bool(newer), "since": view["updated_at"], "counts": counts, "ids": [e["id"] for e in newer]}
+    return {"stale": bool(newer), "since": head["updated_at"], "counts": counts, "ids": [e["id"] for e in newer]}
+
+
+def log_shape(text, problems):
+    """The state file is current state, not a log: one ## AT-WAKE block and one ## VIEW block."""
+    for name in ("AT-WAKE", "VIEW"):
+        n = len(re.findall(rf"^##\s+{name}\b", text, re.M))
+        if n > 1:
+            problems.append(problem("State file", f"{n} {name} blocks: the file is current state; move the "
+                                    "superseded blocks to `<slug>.notes/`", f"rewrite the one ## {name} block in place"))
 
 
 def author_line(view, legacy, prod_rows, outcome_rows, stale, problems_rows, told=None):
@@ -510,7 +519,7 @@ def author_line(view, legacy, prod_rows, outcome_rows, stale, problems_rows, tol
     if any(p["source"] == "VIEW" and "proof_owed for" in p["detail"] for p in problems_rows):
         out.append("proof_owed: a verdict disagrees with its ticket")
     if stale.get("stale"):
-        out.append("updated_at: set it after the edits")
+        out.append(f"file head: after the edits run `{sv.WRITE_HEAD}`")
     return out[:AUTHOR_MAX]
 
 
@@ -533,6 +542,9 @@ def build_payload(slug, now, run=subprocess.run, deadline=None):
         problems.append(problem("State file", f"{base}.state.md does not exist"))
     at_wake = read_at_wake(text, now, problems) if text else {}
     parsed = sv.read_view(text, now, problems) if text else {"view": {}, "legacy": []}
+    head = sv.read_head(text, now, problems)[0] if text else None
+    if text:
+        log_shape(text, problems)
     view = parsed["view"]
     events = read_events(base + ".events.jsonl", problems)
     grills = read_grills(slug, problems)
@@ -552,7 +564,7 @@ def build_payload(slug, now, run=subprocess.run, deadline=None):
     told = state_story.story(view, prod_rows + shipped, publications(events), decisions, now)
     evts, baseline = derived_events(slug, prod_rows, shipped, snap, grills, out_now + out_done, derived["cache"], now)
     wsrc.write_cache(viewer_cache_key(slug), derived["cache"])
-    stale = staleness(view, evts)
+    stale = staleness(head, evts)
     done = {(d["skill"], d.get("ref")) for d in view.get("skills_done") or []}
     files_of = {(p["repo"], p.get("number")): p for p in derived["prs"]}
     skill_rows = ss.skills([dict(p, files=(files_of.get((p["repo"], p.get("number"))) or {}).get("files")) for p in derived["prs"]],
@@ -562,7 +574,8 @@ def build_payload(slug, now, run=subprocess.run, deadline=None):
                    "age_s": ((snap or {}).get("remote_age_s") or {}).get("tracker")})
     payload = {
         "schema": SCHEMA, "kind": "program", "program": slug, "name": name, "generated_at": utc(now), "goal": manifest.get("goal"),
-        "map": manifest.get("map"), "destination": view.get("destination"), "updated_at": view.get("updated_at"),
+        "map": manifest.get("map"), "destination": view.get("destination"),
+        "updated_at": (head or {}).get("updated_at"), "head": head,
         "status": at_wake.get("status"), "at_wake_at": at_wake.get("at"),
         "now": {"outcomes": out_now, "needs_you": needs_you(view, grills, snap),
                 "held_by": held_by(snap, derived, overlap_rows, view), "overlap": overlap_rows,

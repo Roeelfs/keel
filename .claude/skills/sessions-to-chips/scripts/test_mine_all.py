@@ -10,6 +10,10 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import contextlib  # noqa: E402
+import io  # noqa: E402
+from unittest import mock  # noqa: E402
+
 import coverage_audit as ca  # noqa: E402
 import mine_all  # noqa: E402
 import mine_report  # noqa: E402
@@ -65,9 +69,11 @@ class Fixture:
             json.dump(row, fh)
         return row
 
-    def run(self, *extra):
+    def run(self, *extra, cli_env=None):
         env = dict(os.environ, S2C_STORE=self.store, S2C_CLAUDE_HOME=self.home)
         env.pop("CLAUDE_SESSION_ID", None)
+        if cli_env:
+            env["CLAUDE_SESSION_ID"] = cli_env
         work = os.path.join(self.tmp.name, "work")
         r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "mine_all.py"), "--store", self.store,
                             "--claude-home", self.home, "--work-dir", work, "--now", iso_z(NOW), *extra],
@@ -243,6 +249,191 @@ class EndToEndTests(unittest.TestCase):
                     fh.write("SAFE 1 / AT-RISK 0 / NOISE 0\n")
         self.assertEqual(mine_report.check_gate(plan_path, echo=False), 0)
         self.assertIn("ALL GATES PASS", open(plan["receipt"]).read())
+
+
+CAND = "local_c0ffee01-0000-4000-8000-000000000000"
+
+
+def pr(n):
+    return {"prNumber": n, "repo": "acme/shop", "branch": f"b{n}", "state": "MERGED"}
+
+
+class CandidateTests(unittest.TestCase):
+    """Row 1: a program without a [Manager] title is a candidate, routed by the founder."""
+
+    def setUp(self):
+        EndToEndTests.setUp(self)
+        fx = self.fx
+        fx.session(ACCT_HERE, CAND, "Release features: phase 2", "cli-cand", last=NOW - 2 * H,
+                   prs=[pr(1), pr(2), pr(3)])
+        fx.session(ACCT_HERE, "local_c0ffee02", "Cand child one", None, last=NOW - 3 * H, parent=CAND)
+        fx.session(ACCT_HERE, "local_c0ffee03", "Cand child two", None, last=NOW - 3 * H, parent=CAND)
+
+    def tearDown(self):
+        self.fx.tmp.cleanup()
+
+    def plan(self, work):
+        path = [os.path.join(work, f) for f in os.listdir(work) if f.endswith("mine-plan.json")][0]
+        return path, json.load(open(path))
+
+    def ledger(self, work, name):
+        f = os.path.join(work, "ledger", name)
+        return [c["sessionId"] for c in json.load(open(f))["children"]] if os.path.exists(f) else []
+
+    def step_ids(self, plan, phase):
+        return [s["id"] for s in plan["phases"][phase]["steps"]]
+
+    def test_unmanaged_root_with_children_is_a_candidate(self):
+        r, work = self.fx.run("--dry-run", "--here", "aaaa")
+        self.assertEqual(r.returncode, 3, r.stdout[-2000:] + r.stderr[-2000:])
+        _, plan = self.plan(work)
+        self.assertIn("handoff:release-features-c0ffee01", self.step_ids(plan, 0))
+        self.assertIn("route:c0ffee01", self.step_ids(plan, 1))
+        kids = self.ledger(work, "children-release-features-c0ffee01.json")
+        self.assertEqual(sorted(kids), ["local_c0ffee02", "local_c0ffee03"])
+        self.assertNotIn(CAND, kids)
+        unmanaged = self.ledger(work, "children-unmanaged-none.json")
+        self.assertFalse({"local_c0ffee02", "local_c0ffee03", CAND} & set(unmanaged))
+        receipt = open(plan["receipt"]).read()
+        self.assertIn("(candidate, UNROUTED)", receipt)
+        self.assertIn("1 unrouted candidates", receipt)
+        self.assertTrue(any(CAND in k and "absorb <slug>" in k for k in plan["phases"][2]["founder_kits"]))
+        msg = [m for m in plan["phases"][2]["messages"] if m["kind"] == "candidate"]
+        self.assertEqual((msg[0]["target"], msg[0]["session"]), (None, CAND))
+
+    def test_single_pr_root_is_not_a_candidate(self):
+        self.fx.session(ACCT_HERE, "local_501e0001", "Solo fix", None, last=NOW - 2 * H, prs=[pr(9)])
+        r, work = self.fx.run("--dry-run", "--here", "aaaa")
+        _, plan = self.plan(work)
+        self.assertNotIn("route:501e0001", self.step_ids(plan, 1))
+        self.assertIn("local_501e0001", self.ledger(work, "children-unmanaged-none.json"))
+
+    def test_old_root_with_prs_is_not_a_candidate(self):
+        self.fx.session(ACCT_HERE, "local_01d00001", "Old work", None, last=NOW - 20 * 24 * H, prs=[pr(7), pr(8)])
+        r, work = self.fx.run("--dry-run", "--here", "aaaa")
+        self.assertNotIn("local_01d00001", json.load(open(os.path.join(work, "candidates.json"))))
+
+    def test_nested_session_is_not_a_candidate(self):
+        self.fx.session(ACCT_HERE, "local_c0ffee04", "Nested lead", None, last=NOW - 2 * H, parent=CAND,
+                        prs=[pr(4), pr(5)])
+        self.fx.session(ACCT_HERE, "local_c0ffee05", "Nested child", None, last=NOW - 2 * H, parent="local_c0ffee04")
+        r, work = self.fx.run("--dry-run", "--here", "aaaa")
+        self.assertEqual(list(json.load(open(os.path.join(work, "candidates.json")))), [CAND])
+        kids = self.ledger(work, "children-release-features-c0ffee01.json")
+        self.assertIn("local_c0ffee04", kids)
+        self.assertIn("local_c0ffee05", kids)
+
+    def test_self_is_not_a_candidate(self):
+        r, work = self.fx.run("--dry-run", "--here", "aaaa", cli_env="cli-cand")
+        _, plan = self.plan(work)
+        self.assertNotIn("route:c0ffee01", self.step_ids(plan, 1))
+        self.assertEqual(json.load(open(os.path.join(work, "candidates.json"))), {})
+
+    def test_routed_candidate_is_not_replanned(self):
+        r, work = self.fx.run("--dry-run", "--here", "aaaa")
+        path, plan = self.plan(work)
+        ok, msg = mine_report.write_route(CAND, "promote", None, path)
+        self.assertTrue(ok, msg)
+        mine_report.check_gate(path, echo=False)
+        gate = [g for g in json.load(open(path))["gates"] if g["id"] == "route:c0ffee01"]
+        self.assertEqual(gate[0]["status"], "PASS")
+        r, work = self.fx.run("--dry-run", "--here", "aaaa")
+        _, plan = self.plan(work)
+        self.assertFalse([i for i in self.step_ids(plan, 1) if i.startswith("route:")])
+        self.assertEqual(sorted(self.ledger(work, "children-release-features-c0ffee01.json")),
+                         ["local_c0ffee02", "local_c0ffee03"])
+
+    def test_absorbed_candidate_child_reaches_absorber(self):
+        r, work = self.fx.run("--dry-run", "--here", "aaaa")
+        path, _ = self.plan(work)
+        ok, msg = mine_report.write_route(CAND, "absorb", "release", path)
+        self.assertTrue(ok, msg)
+        self.fx.session(ACCT_HERE, "local_c0ffee06", "Late child", None, last=NOW - 1 * H, parent=CAND)
+        r, work = self.fx.run("--dry-run", "--here", "aaaa")
+        self.assertIn("local_c0ffee06", self.ledger(work, "children-release-h0000001.json"))
+        self.assertNotIn("local_c0ffee06", self.ledger(work, "children-unmanaged-none.json"))
+        _, plan = self.plan(work)
+        self.assertNotIn("release-features-c0ffee01", plan["program_slugs"])
+
+    def test_route_writer_rejects_unknown(self):
+        r, work = self.fx.run("--dry-run", "--here", "aaaa")
+        path, _ = self.plan(work)
+        self.assertFalse(mine_report.write_route("local_k0000001", "promote", None, path)[0])
+        self.assertFalse(mine_report.write_route(CAND, "absorb", "no-such-program", path)[0])
+        self.assertTrue(mine_report.write_route(CAND, "leave", None, path)[0])
+        self.assertFalse(mine_report.write_route(CAND, "promote", None, path)[0])  # a route is permanent
+        cli = subprocess.run([sys.executable, "-I", os.path.join(HERE, "mine_report.py"), "--route", "local_nope",
+                              "promote", "--plan", path], capture_output=True, text=True)
+        self.assertEqual(cli.returncode, 2)
+        self.assertIn("not a candidate", cli.stderr)
+
+    def test_candidate_program_fields(self):
+        captured = {}
+        real = mine_report.build_plan
+
+        def spy(ctx):
+            captured["programs"] = ctx["programs"]
+            return real(ctx)
+
+        args = mine_all.argparse.Namespace(dry_run=True, here="aaaa", window_days=14, max_rounds=4, date=None,
+                                           now=iso_z(NOW), store=self.fx.store, claude_home=self.fx.home,
+                                           work_dir=os.path.join(self.fx.tmp.name, "inproc"), gate=None)
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_SESSION_ID"}
+        env.update(S2C_STORE=self.fx.store, S2C_CLAUDE_HOME=self.fx.home)
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(mine_report, "build_plan", spy), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(mine_all.mine(args), 3)
+        cand = [p for p in captured["programs"] if p["kind"] == "candidate"][0]
+        for key in ("kind", "slug", "key", "managers", "lineage", "live", "checkpoint", "checkpoint_src",
+                    "checkpoint_sid", "moved", "absorbed_by", "relay_to", "conflict", "fold"):
+            self.assertIn(key, cand)
+        self.assertEqual((cand["slug"], cand["key"]), ("release-features-c0ffee01", "release features"))
+        self.assertEqual([m["sid"] for m in cand["managers"]], [CAND])
+        self.assertEqual(cand["lineage"][0], CAND)
+        self.assertEqual((cand["moved"], cand["absorbed_by"], cand["relay_to"], cand["conflict"]), (False, None, None, False))
+        self.assertTrue(cand["live"])
+        self.assertEqual([p["kind"] for p in captured["programs"] if p["slug"] == "release"], ["manager"])
+
+
+class RootManagerTests(unittest.TestCase):
+    def test_root_manager_roots_argument(self):
+        rows = {"local_a": {"title": "Lead"}, "local_b": {"title": "Kid", "spawnedFrom": {"sessionId": "local_a"}},
+                "local_m": {"title": "[Manager] X"}}
+        self.assertIsNone(pf.root_manager("local_b", rows))
+        self.assertEqual(pf.root_manager("local_b", rows, {"local_a": "local_a"}), "local_a")
+        self.assertEqual(pf.root_manager("local_b", rows, {"local_a": "local_m"}), "local_m")
+
+    def test_program_slug_is_the_one_slug(self):
+        self.assertEqual(pf.program_slug("Release features: phase 2"), "release-features")
+        self.assertEqual(pf.program_slug("[Manager] Release"), "release")
+
+
+class RulingRecipientsTests(unittest.TestCase):
+    def setUp(self):
+        EndToEndTests.setUp(self)
+        fx = self.fx
+        fx.session(ACCT_HERE, "local_b1110001", "[Manager] Billing", "cli-bill", last=NOW - 5 * H, archived=True)
+        fx.session(ACCT_HERE, "local_b1110002", "Billing child", None, last=NOW - 1 * H, parent="local_b1110001")
+
+    def tearDown(self):
+        self.fx.tmp.cleanup()
+
+    def test_orphan_child_of_archived_managers_receives_rulings(self):
+        r, work = self.fx.run("--dry-run", "--here", "aaaa")
+        plan = json.load(open([os.path.join(work, f) for f in os.listdir(work) if f.endswith("mine-plan.json")][0]))
+        self.assertIn("local_b1110002", plan["ruling_recipients"])
+        self.assertIn("local_h0000001", plan["ruling_recipients"])
+        self.assertNotIn("local_b1110001", plan["ruling_recipients"])
+
+    def test_absorbed_program_adds_its_absorber(self):
+        progs = [{"slug": "a", "live": False, "relay_to": None, "present_here": [], "absorbed_by": "b"},
+                 {"slug": "b", "live": False, "relay_to": "local_bbbb", "present_here": [], "absorbed_by": None}]
+        self.assertEqual(mine_report.ruling_recipients({"programs": progs}), ["local_bbbb"])
+
+    def test_trust_kit_names_the_cwd(self):
+        r, work = self.fx.run("--dry-run", "--here", "aaaa")
+        plan = json.load(open([os.path.join(work, f) for f in os.listdir(work) if f.endswith("mine-plan.json")][0]))
+        self.assertTrue(any("trust" in k and "cwd" in k for k in plan["phases"][2]["founder_kits"]))
 
 
 if __name__ == "__main__":

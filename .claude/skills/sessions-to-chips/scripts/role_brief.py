@@ -9,7 +9,7 @@ Usage:
 
 The brief (about 90 lines plus the context brief): a header with the role version and the version this
 manager last loaded, health lines (keel checkout behind origin, overlay ledger missing, state page older than
-its state file), the changes since that load as rule text, the role card, the rulings in force, the wake steps
+its state file, a state-file head that is missing, unparseable, foreign or older than the newest event), the changes since that load as rule text, the role card, the rulings in force, the wake steps
 with a ready-to-paste wake prompt, then the `render_state.py --context` brief built from the same payload.
 
 The ROLE VERSION is the first 8 hex of sha256 over the declared role sources (role.md, the public rulings ledger,
@@ -190,7 +190,64 @@ def keel_behind(run=subprocess.run, path=SKILL):
         return None, str(exc)[:80]
 
 
-def health_lines(slug, programs=None, run=subprocess.run):
+def own_ids(session):
+    """This session's ids: the given one, plus the store's `local_` id when it is a CLI uuid. Lazy store read."""
+    ids = {session} if session else set()
+    if session and not session.startswith("local_"):
+        try:
+            sys.path.insert(0, HERE)
+            import program_family as pf
+            import state_view as sv
+            ids.add(sv.resolve_writer(session, pf.load_store(pf.STORE)[0])[0])
+        except Exception:  # an unresolvable id only weakens the foreign check; it never breaks the load
+            pass
+    return ids
+
+
+def newest_event(path):
+    newest = None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    t = parse_when(json.loads(line).get("ts"))
+                except (ValueError, AttributeError):
+                    continue
+                newest = t if t and (newest is None or t > newest) else newest
+    except OSError:
+        pass
+    return newest
+
+
+def head_health(slug, base, session, now):
+    """The state-file head's health. state_view is imported lazily: the guard loads this file by path under -I."""
+    try:
+        with open(base + ".state.md", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return []
+    cmd = f'python3 {HERE}/state_view.py --write-head {slug} --since "<what changed>"'
+    try:
+        sys.path.insert(0, HERE)
+        import state_view as sv
+        problems = []
+        head, reason = sv.read_head(text, now, problems)
+    except Exception as exc:
+        return [f"State file head unreadable ({type(exc).__name__}); run `{cmd}` this turn."]
+    if reason != "ok":
+        return [f"!!! State file head {reason}: {problems[0]['detail'] if problems else ''}. Run `{cmd}` this turn."]
+    out = []
+    ids = own_ids(session)
+    if ids and head["writer"] not in ids:
+        out.append(f"State file head names another session ({head['writer']}): run `{cmd}` this turn.")
+    newest = newest_event(base + ".events.jsonl")
+    if newest and newest > sv.head_time(head):
+        out.append(f"State file head ({head['updated_at']}) is older than the newest event "
+                   f"({newest:%Y-%m-%dT%H:%M:%SZ}): run `{cmd}` this turn.")
+    return out
+
+
+def health_lines(slug, programs=None, run=subprocess.run, session=None, now=None):
     out = []
     n, detail = keel_behind(run)
     if n:
@@ -210,7 +267,7 @@ def health_lines(slug, programs=None, run=subprocess.run):
     except OSError:
         if os.path.isfile(base + ".state.md"):
             out.append(f"State page never rendered: run render_state.py --program {slug} this turn.")
-    return out
+    return out + head_health(slug, base, session, now or dt.datetime.now(dt.timezone.utc))
 
 
 # ---------- the brief ----------
@@ -255,7 +312,7 @@ def brief(slug, session, now, programs=None, run=subprocess.run):
             else "first load in this session")
     out = [f"Manager role v{version} for {slug}, loaded {now:%Y-%m-%dT%H:%M:%SZ} ({last}).",
            "Read top to bottom and do the wake steps in order."]
-    out += health_lines(slug, programs, run)
+    out += health_lines(slug, programs, run, session, now)
     changes = delta_lines(since, kinds=("role",))  # rulings print in their own block below
     out += ["", f"Changes since your last load ({'all recent' if since is None else len(changes)}):"] + (changes or ["- none"])
     card = _section(role_text, "Role card") if role_text else f"ROLE CARD UNREADABLE: {ROLE}"
@@ -265,6 +322,8 @@ def brief(slug, session, now, programs=None, run=subprocess.run):
     out += [""] + rulings
     steps = _section(role_text, "Wake steps") if role_text else ""
     out += ["", "Wake steps:", steps or f"WAKE STEPS UNREADABLE: {ROLE}",
+            "", "Head (the turn's last state write, then update ## VIEW): "
+            f'python3 {HERE}/state_view.py --write-head {slug} --since "<what changed>"',
             "", f"Wake prompt (paste as is): /manager-role {slug} -- on fire: <the one action>",
             f"AT-WAKE line: Role: v{version}"]
     ctx, bad_ctx = context_brief(slug, since, now, run)

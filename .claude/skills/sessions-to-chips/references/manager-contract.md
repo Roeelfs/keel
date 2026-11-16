@@ -24,7 +24,8 @@ into your state file) and repoint anything that contradicts them, (4) fix each n
 `Taking over from ...` message by session id, bind each child to its map ticket (`work_state.py bind`,
 then `carrier --type session`; never a Units table), and confirm its handover sections are in your state file. If you ARE the absorbed manager and are still live, start no further
 child, hand your live children over at their next checkpoint, then fold. Close your turn with
-`updated_at` fresh in your state file: a state file older than your events is a stale handoff.
+the state file's head current (`state_view.py --write-head <slug> --since "<what changed>"`, role wake
+step 5): a head older than your events is a stale handoff.
 
 A manager owns **ONE PROGRAM**: it tracks its own lanes, catches conflicts before they reach
 main, starts lanes and child sessions, holds every terminal gate, and surfaces decisions. It
@@ -457,18 +458,27 @@ that reads it, updates `## VIEW` and re-renders is owned by [`role.md`](role.md)
 facts the Stop guard reads (`Status:`, `Wake:`, `Hold:`, `Mode:`) are unchanged and still required.
 
 You author only judgment. PRs, merges, deploys per surface, main health, bakes, blockers and file overlap are
-derived on every render, so never copy them into VIEW. Three owners are yours:
+derived on every render, so never copy them into VIEW. Four owners are yours:
+- **The file head** (founder, 2026-11-16): the first three lines of `<slug>.state.md`, before the `# ` title:
+  `updated_at: <RFC3339 UTC to the second>`, `writer: local_<uuid> (account <account id>)`,
+  `since-last-session: <one line>` (`first head` on the first). Only
+  `scripts/state_view.py --write-head <slug> --since "<what changed>"` writes it, from the store row of
+  `CLAUDE_SESSION_ID`; `state_view.read_head` is its one parser, read by the page, the brief, the role load and
+  the Stop guard. It is the file's one "updated" fact: staleness compares the newest event with it. The file
+  is current state, so it holds one `## AT-WAKE` and one `## VIEW` block; more of either is a `State file`
+  problem, and superseded blocks move to `<slug>.notes/`.
 - **Manifest `repos`** (validated by `work_state_store.validate_repos`): each repo the program ships to, its
   `ticket_pattern`, its `surfaces` (a `deployment` environment or a `job`, each with a `proof_step` when a green
   record can skip the real deploy, and the `paths` it serves), `red_main_cmd` (or `null` plus `red_main_unproven`),
   and `security_paths`. No `repos` key means no production truth, shown as one Problems row. A manifest `title`
   is the name only when no manager session title can be read.
 - **`## VIEW` in `<slug>.state.md`**, one fenced JSON block, schema `state-view/2`, last block wins:
-  `updated_at` (RFC3339), `destination`, `outcomes` (in dependency order, each with its map `tickets`),
+  `destination`, `outcomes` (in dependency order, each with its map `tickets`),
   `done` (`{date, what, why, refs}`: one line per delivered outcome, saying what changed for the product or the
   codebase, PR refs after it; group a series of PRs into one line), `architecture` (`{date, what, refs}`: one
   sentence per structural change), `design` (`{what, meaning, kind, ref, tier, review, stop, date}`: the spec,
-  ADR or module shape and its one-line meaning), `decisions` (`{date, decision, why, by, supersedes}`),
+  ADR or module shape and its one-line meaning), `decisions` (`{date, decision, why, by, supersedes}`; `done` and `decisions` rows without a `date` show
+  tagged `date_missing`),
   `findings` (`{date, outcome, found, refs}`: what was learned), `needs_you` (every founder gate the track
   waits on, including one held in another chat, such as a child's merge go or an open grill round: name the
   chat and the one-click approval), `exposure` (`dark|live|n/a` per
@@ -815,7 +825,7 @@ no review artifact is not buildable: send it back to `define`, do not start the 
 close-out a manager session (and every child it briefs) is in exactly one of:
 
 1. **DONE.** No work left: its family is archived or recorded, nothing is owed (no bake, merge
-   go-ahead, watch, or question), its state file says so with a fresh `updated_at`.
+   go-ahead, watch, or question), its state file says so under a fresh head (`state_view.py --write-head`).
 2. **GRILLING.** It has asked the founder ALL its open decisions, the whole frontier in one round,
    each with a recommended answer first (`AskUserQuestion`, or `/grilling`). The session is waiting
    on that round and nothing else.
