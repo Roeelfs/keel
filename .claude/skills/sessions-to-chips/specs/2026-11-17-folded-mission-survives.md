@@ -522,3 +522,12 @@ fixed by setter semantics instead).
 | G-astra2-6 fold-record repair replaces the handover notice | fixed | `CATCHUP_MESSAGE.md:35-40`, `mine_report.py:192-193` confirmed. The fold-notice branch keeps its condition; repair is a separate line to the terminal owner; test with a live old manager (rule 4). |
 | G-astra2-7 driver rule makes A2 unable to detect the incident | fixed | Live manifest: `session=6, bg=13, agent=2, card=1, wake=1`; `work_state.py:207-210` confirmed. Drivers now need positive evidence: `session_present` within the lease, a live lane, or a background id in the owner's `live_bg`. Unknown is neither driver nor STALLED. Incident-shape test (rule 3). |
 | G-astra2-8 A3 and A5 commands invalid | fixed | `role_brief.py:358-374` and `render_state.py:794-799` confirmed: both need `--program`; normal render prints a JSON receipt (`:831-834`). A3 and A5 capture output, assert the producer's exit first, and A5 reads `--context`; A2's post-driver check is scoped to `$S`. |
+
+### Final gate (pass 3, bounded finish line): SHIP at `1d8d42e`
+
+Both pass-2 CRITICALs are resolved and no new CRITICAL was found. Two non-blocking findings are owed to the build:
+
+| Finding | Status |
+| --- | --- |
+| G-astra3-1 (MAJOR) migration cannot repair an existing pointer chain (C to B to A, C missing `fold`): census proposes the terminal target, apply refuses a differing immediate owner, and keeping C to B fails admission | owed to the build: keep the existing edge, write the `fold` record on it, and make the terminal owner's `absorbs` mirror cover the descendants; test with a chained fixture |
+| G-astra3-2 (MINOR) `--finish` removes legacy values before appending `fold-migrated`; a crash between them loses the audit row | owed to the build: append the event first, then remove; a retry that finds the event and the values gone is complete |
