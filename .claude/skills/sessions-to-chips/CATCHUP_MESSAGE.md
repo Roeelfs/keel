@@ -34,7 +34,14 @@ handoff path under START HERE and the same points 2 and 4 under STATE.
 
 **Fold notice (an absorbed manager).** When program A absorbed B and `[Manager] B` is still live,
 B gets this instead of the catch-up, and A gets a takeover note naming B's live children by session
-id: "[Manager] B was absorbed into A on <date> (handover: <path>). Start no further child. Let each
+id and its first step, `work_state.py absorb --program A --from B` when the plan carries a repair line
+(`repairs`) for B, then `work_state.py bind --program B` for each child. B's note: "[Manager] B was absorbed into A on <date> (handover: <path>). Start no further child. Let each
 live child reach its next checkpoint (push once, record the PR), send A `Taking over from B: ...`
 (≤900 chars), then run hygiene and report before → after; archive yourself only after A
 acknowledges, because archiving a parent cascades to a working child."
+
+**Repairs and owed missions.** A message's `repairs` lists programs folded into its target with no
+fold record; relay each line verbatim (`work_state.py absorb --program <owner> --from <slug>`). A
+`no-manager-here` message with `missions` names a program that owes open folded missions and has
+no live manager: its kit names each mission and both exits, driving it (`bind --program <mission>`
+plus a carrier) or `work_state.py mission-close --mission <mission> --reason "<evidence>"`.
