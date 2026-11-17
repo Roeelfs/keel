@@ -206,9 +206,77 @@ def load_manifests(programs_dir=None):
         for k in ("manager_session", "orchestrator_session"):
             ids |= {m.group(1) for m in ID_RX.finditer(str(d.get(k) or "")) if any(c.isdigit() for c in m.group(1))}
         out.append({"slug": d["program"], "ids": ids, "absorbed_by": d.get("absorbed_by"),
-                    "absorbs": d.get("absorbs"), "map": d.get("map"), "updated_at": d.get("updated_at"),
+                    "fold": d.get("fold"), "map": d.get("map"), "updated_at": d.get("updated_at"),
                     "manifest": f, "mtime": os.path.getmtime(f)})
     return out
+
+
+# ---------- the fold resolver: the one owner of "who owns a folded program" ----------
+# `absorbed_by` on the absorbed manifest is the only record of a fold; an owner's absorbed set, its open
+# missions and its folded bindings are derived here by inverting it. `absorbs` is a write-only mirror for
+# code from before the fold record, and nothing here reads it.
+
+def _graph(manifests):
+    """{slug: manifest} from load_manifests rows (`slug`) or full manifests (`program`)."""
+    if isinstance(manifests, dict):
+        return manifests
+    return {m.get("slug") or m.get("program"): m for m in manifests or [] if m.get("slug") or m.get("program")}
+
+
+def fold_chain(slug, manifests):
+    """-> ([slug, its absorber, ..., terminal owner], note | None). The note is `fold_cycle:<slugs>` or
+    `fold_target_missing:<slug>`; with a note there is no owner."""
+    g, chain = _graph(manifests), [slug]
+    while True:
+        m = g.get(chain[-1])
+        if m is None:
+            return chain, f"fold_target_missing:{chain[-1]}"
+        nxt = m.get("absorbed_by")
+        if not nxt:
+            return chain, None
+        if nxt in chain:
+            return chain, "fold_cycle:" + ",".join(chain[chain.index(nxt):])
+        chain.append(nxt)
+
+
+def terminal_owner(slug, manifests):
+    """Follow `absorbed_by` to a manifest with none. An unfolded program owns itself; a cycle or a missing
+    target has no owner (None)."""
+    chain, note = fold_chain(slug, manifests)
+    return None if note else chain[-1]
+
+
+def fold_family(slug, manifests):
+    """Every other manifest whose terminal owner is `slug`, sorted."""
+    g = _graph(manifests)
+    return sorted(s for s, m in g.items() if s != slug and m.get("absorbed_by") and terminal_owner(s, g) == slug)
+
+
+def fold_note(m):
+    """None for a valid fold record; else `fold_record_missing:<slug>` (an `absorbed_by` with no `fold`, the
+    pre-spec hand edit) or `fold_malformed:<slug>`. Read path: never raises."""
+    slug = m.get("slug") or m.get("program")
+    if not m.get("absorbed_by"):
+        return None
+    if "fold" not in m or m.get("fold") is None:
+        return f"fold_record_missing:{slug}"
+    import work_state_store as st  # the one FOLD_KEYS owner; imported here so this module stays light
+    try:
+        st.validate_fold(m["fold"])
+    except st.SchemaError:
+        return f"fold_malformed:{slug}"
+    return None
+
+
+def mission_open(m):
+    """A folded program's mission is open unless its valid fold record holds `closed`."""
+    return fold_note(m) is not None or m["fold"].get("closed") is None
+
+
+def open_missions(slug, manifests):
+    """Members of fold_family(slug) whose mission is open (closed null, missing or malformed)."""
+    g = _graph(manifests)
+    return [s for s in fold_family(slug, g) if mission_open(g[s])]
 
 
 def display_title(title):

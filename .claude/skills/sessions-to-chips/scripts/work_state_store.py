@@ -2,7 +2,8 @@
 """The binding record: its strict schema, and the ONLY write path for manifest `bindings`.
 
 Owner of: the binding schema (`validate_binding`), atomic manifest writes under flock
-(`<slug>.json.lock`), bind / carrier / retire, the `<slug>.events.jsonl` append, the told-waiter
+(`<slug>.json.lock`), bind / carrier / retire, the fold record and its only writers (absorb,
+close_mission, reopen_mission under the graph lock `folds.lock`), the `<slug>.events.jsonl` append, the told-waiter
 record (`<slug>.notices.json`, `claim_notices`), the lane row
 (`~/.claude/state/lane-parents.jsonl`) writer and its incremental reader.
 
@@ -15,6 +16,8 @@ import json
 import os
 import re
 import time
+
+import program_family as pf
 
 HOME = os.environ.get("S2C_CLAUDE_HOME") or os.path.expanduser("~/.claude")
 PROGRAMS = os.environ.get("WORK_STATE_PROGRAMS") or os.path.join(HOME, "orchestrator/programs")
@@ -40,6 +43,10 @@ CARRIER_KEYS = {
     "model": (str, False), "wave": (str, False), "pid": (int, False), "pid_start": (str, False),
     "outfile": (str, False),
 }
+
+
+FOLD_KEYS = {"id": (str, True), "since": (str, True), "by": (str, True), "closed": (object, True)}
+FOLD_CLOSED_KEYS = {"at": (str, True), "reason": (str, True)}
 
 
 class SchemaError(ValueError):
@@ -128,6 +135,21 @@ def validate_binding(b, where="binding"):
             raise SchemaError(f"{where}.paths: root glob {p!r} refused (it collides with everything)")
     if "lease_s" in b and b["lease_s"] <= 0:
         raise SchemaError(f"{where}.lease_s: must be positive")
+
+
+def validate_fold(f, where="fold"):
+    """The strict fold-record validator. Writers only (absorb and the mission setters): the read path turns a bad
+    record into the note `fold_malformed:<slug>` (program_family.fold_note) and never raises."""
+    _check_keys(f, FOLD_KEYS, where)
+    if not f["id"] or not f["by"]:
+        raise SchemaError(f"{where}: id and by must be non-empty")
+    if not RFC3339.match(f["since"]):
+        raise SchemaError(f"{where}.since: RFC3339 UTC (…Z)")
+    c = f["closed"]
+    if c is not None:
+        _check_keys(c, FOLD_CLOSED_KEYS, f"{where}.closed")
+        if not RFC3339.match(c["at"]) or not c["reason"].strip():
+            raise SchemaError(f"{where}.closed: {{at: RFC3339 UTC, reason: non-empty}} or null")
 
 
 def validate_bindings(bindings):
@@ -330,6 +352,9 @@ def bind(slug, ticket, *, children, map_id, bake="required", branch=None, worktr
     if ticket != map_id and (children is None or ticket not in children):
         raise SchemaError(f"bind: {ticket} is not a child of map {map_id}" +
                           (" (tracker snapshot unavailable)" if children is None else ""))
+    other = family_duplicate(slug, ticket, programs)
+    if other:
+        raise SchemaError(f"bind: {ticket} is already bound open in {other}, in the same fold family")
     with _Locked(slug, programs) as lk:
         bs = _with_bindings(lk.manifest)
         cur = next((b for b in bs if b["ticket"] == ticket), None)
@@ -396,6 +421,228 @@ def retire(slug, ticket, *, carrier_ids=None, merge_sha=None, verdict=None, reas
     append_event(slug, {"event": "binding-retired", "lane": ticket, "binding": b, "merge_sha": merge_sha,
                         "verdict": verdict, "note": reason}, programs)
     return b
+
+
+# ---------- the fold record (row 11): `absorbed_by` + `fold` on the absorbed manifest ----------
+
+class _GraphLock:
+    """Exclusive flock on <programs>/folds.lock, taken FIRST by every fold writer (absorb, the mission setters,
+    each `migrate --folds` write pass), so the fold graph is read and changed by one writer at a time. Re-entrant
+    within a process: a migration pass holds it across many absorb calls. Binding writers never take it."""
+    _held = {}
+
+    def __init__(self, programs=None):
+        self.path = os.path.join(programs or PROGRAMS, "folds.lock")
+
+    def __enter__(self):
+        depth = self._held.get(self.path)
+        if depth:
+            self._held[self.path] = (depth[0], depth[1] + 1)
+            return self
+        fh = open(self.path, "a")
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        self._held[self.path] = (fh, 1)
+        return self
+
+    def __exit__(self, *exc):
+        fh, n = self._held[self.path]
+        if n > 1:
+            self._held[self.path] = (fh, n - 1)
+            return
+        del self._held[self.path]
+        fcntl.flock(fh, fcntl.LOCK_UN)
+        fh.close()
+
+
+def read_all(programs=None):
+    """{slug: manifest} for every program manifest, read fresh (variant snapshots `<slug>.<x>.json` skipped)."""
+    import glob
+    out = {}
+    for f in sorted(glob.glob(os.path.join(programs or PROGRAMS, "*.json"))):
+        slug = os.path.basename(f)[:-5]
+        if "." in slug:
+            continue
+        try:
+            with open(f) as fh:
+                m = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if isinstance(m, dict) and m.get("program"):
+            out[slug] = dict(m, program=slug)
+    return out
+
+
+def destination_ok(owner, manifests):
+    """-> (ok, why). An owner may hold an open mission only when its manifest exists, is not absorbed, is not
+    DONE or CLOSED, and names a manager_session. Runs on every mutation that leaves an open mission under it."""
+    m = manifests.get(owner) if owner else None
+    if m is None:
+        return False, f"{owner or '(no owner)'} has no manifest"
+    if m.get("absorbed_by"):
+        return False, f"{owner} is itself absorbed by {m['absorbed_by']}"
+    if str(m.get("status") or "").strip().upper() in ("DONE", "CLOSED"):
+        return False, f"{owner} is {str(m.get('status')).upper()}"
+    if not (m.get("manager_session") or "").strip():
+        return False, f"{owner} names no manager_session"
+    return True, ""
+
+
+def _log_rows(slug, programs=None):
+    try:
+        with open(events_path(slug, programs)) as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return []
+    out = []
+    for ln in lines:
+        try:
+            r = json.loads(ln)
+        except ValueError:
+            continue
+        if isinstance(r, dict):
+            out.append(r)
+    return out
+
+
+def _absorb_events(absorbed, absorber, fold, programs=None):
+    """Append the `absorb` row carrying fold.id to whichever of the two logs lacks it. -> slugs appended to."""
+    row = {"event": "absorb", "fold_id": fold["id"], "from": absorbed, "into": absorber, "by": fold["by"],
+           "closed": fold["closed"]}
+    done = []
+    for slug in (absorbed, absorber):
+        if not any(r.get("event") == "absorb" and r.get("fold_id") == fold["id"] for r in _log_rows(slug, programs)):
+            append_event(slug, row, programs)
+            done.append(slug)
+    return done
+
+
+def _valid_fold(m):
+    try:
+        validate_fold(m.get("fold"))
+        return True
+    except SchemaError:
+        return False
+
+
+def absorb(absorber, absorbed, *, by, closed_reason=None, now=None, programs=None):
+    """Fold `absorbed` into `absorber`: the ONE writer of `absorbed_by`, `fold` and the `absorbs` mirror.
+    Under the graph lock: a committed fold (absorbed_by == absorber with a valid fold) only completes its events;
+    otherwise admission, then (1) the string mirror on the terminal owner, (2) absorbed_by + fold on the absorbed
+    manifest (the commit point), (3) one `absorb` row per log. -> {fold_id, wrote, events, notes}."""
+    now = time.time() if now is None else now
+    if not (by or "").strip():
+        raise SchemaError("absorb: --by <session id> is required")
+    with _GraphLock(programs):
+        ms = read_all(programs)
+        if absorbed not in ms:
+            raise SchemaError(f"absorb: no manifest for {absorbed}")
+        if absorber not in ms:
+            raise SchemaError(f"absorb: no manifest for {absorber}")
+        src = ms[absorbed]
+        if src.get("absorbed_by") == absorber and _valid_fold(src):
+            return {"fold_id": src["fold"]["id"], "wrote": False, "notes": ["retry: fold already committed"],
+                    "events": _absorb_events(absorbed, absorber, src["fold"], programs)}
+        repair = src.get("absorbed_by") == absorber  # the pre-spec hand edit: pointer present, no valid fold
+        if absorbed == absorber:
+            raise SchemaError("absorb refused: a program cannot absorb itself")
+        chain, note = pf.fold_chain(absorber, ms)
+        if absorbed in chain:
+            raise SchemaError(f"absorb refused: cycle ({' -> '.join(chain)} -> {absorbed} already)")
+        if note:
+            raise SchemaError(f"absorb refused: {absorber}'s fold chain is broken ({note})")
+        owner = chain[-1]
+        if owner != absorber and not repair:
+            raise SchemaError(f"absorb refused: {absorber} is itself absorbed; fold into {owner} instead")
+        if src.get("absorbed_by") and not repair:
+            raise SchemaError(f"absorb refused: {absorbed} is already absorbed by {src['absorbed_by']}")
+        if not (src.get("goal") or "").strip():
+            raise SchemaError(f"absorb refused: {absorbed} has no goal, so there is no mission to carry")
+        family = pf.fold_family(absorbed, ms)
+        inherited = [s for s in family if pf.mission_open(ms[s])]
+        if closed_reason is None or inherited:
+            ok, why = destination_ok(owner, ms)
+            if not ok:
+                missions = ([absorbed] if closed_reason is None else []) + inherited
+                raise SchemaError(f"absorb refused: open mission(s) {', '.join(missions)} cannot move under {owner} "
+                                  f"({why}). Close each first (work_state.py mission-close), or pick another absorber.")
+        notes = [] if (src.get("map") or {}).get("snapshot_cmd") else [f"fold_no_tracker:{absorbed}"]
+        since = now_iso(now)
+        fold = {"id": f"{absorbed}@{since}", "since": since, "by": by,
+                "closed": None if closed_reason is None else {"at": since, "reason": closed_reason}}
+        validate_fold(fold)
+        with _Locked(owner, programs) as lk:
+            cur = list(lk.manifest.get("absorbs") or [])
+            add = [s for s in [absorbed] + family if s not in cur]
+            if add:
+                lk.write(dict(lk.manifest, absorbs=cur + add))
+        with _Locked(absorbed, programs) as lk:
+            lk.write(dict(lk.manifest, absorbed_by=absorber, fold=fold))
+        return {"fold_id": fold["id"], "wrote": True, "notes": notes + (["repair: fold record written"] if repair else []),
+                "events": _absorb_events(absorbed, absorber, fold, programs)}
+
+
+MISSION_EVENTS = ("mission-close", "mission-reopen")
+
+
+def _set_mission(mission, reason, closing, now=None, programs=None):
+    now = time.time() if now is None else now
+    if not (reason or "").strip():
+        raise SchemaError("mission: --reason is required (evidence for a close, why for a reopen)")
+    with _GraphLock(programs):
+        ms = read_all(programs)
+        m = ms.get(mission)
+        if m is None:
+            raise SchemaError(f"mission: no manifest for {mission}")
+        if not m.get("absorbed_by") or not _valid_fold(m):
+            raise SchemaError(f"mission: {mission} has no fold record; run work_state.py absorb --program "
+                              f"<owner> --from {mission} first")
+        is_closed = m["fold"]["closed"] is not None
+        wrote = False
+        if is_closed != closing:
+            if not closing:
+                owner = pf.terminal_owner(mission, ms)
+                ok, why = destination_ok(owner, ms)
+                if not ok:
+                    raise SchemaError(f"mission-reopen refused: {why}. Fold {mission} into a live owner first.")
+            closed = {"at": now_iso(now), "reason": reason} if closing else None
+            fold = dict(m["fold"], closed=closed)
+            validate_fold(fold)
+            with _Locked(mission, programs) as lk:
+                lk.write(dict(lk.manifest, fold=fold))
+            wrote = True
+        name = MISSION_EVENTS[0] if closing else MISSION_EVENTS[1]
+        logged = []
+        for slug in (mission, m["absorbed_by"]):
+            last = [r for r in _log_rows(slug, programs) if r.get("event") in MISSION_EVENTS
+                    and r.get("mission") == mission]
+            if not last or last[-1]["event"] != name:
+                append_event(slug, {"event": name, "mission": mission, "fold_id": m["fold"]["id"],
+                                    "reason": reason}, programs)
+                logged.append(slug)
+        return {"mission": mission, "closed": closing, "wrote": wrote, "events": logged}
+
+
+def close_mission(mission, reason, *, now=None, programs=None):
+    """Idempotent setter of fold.closed. A founder decision to park the goal is a close naming the founder."""
+    return _set_mission(mission, reason, True, now, programs)
+
+
+def reopen_mission(mission, reason, *, now=None, programs=None):
+    """Idempotent setter of fold.closed = null, only under an owner destination_ok accepts."""
+    return _set_mission(mission, reason, False, now, programs)
+
+
+def family_duplicate(slug, ticket, programs=None):
+    """The other manifest of `slug`'s fold family that already holds `ticket` open, or None. An unlocked
+    best-effort read: a race only yields the engine's `fold_duplicate` note."""
+    ms = read_all(programs)
+    owner = pf.terminal_owner(slug, ms)
+    if owner is None:
+        return None
+    for s in [owner] + pf.fold_family(owner, ms):
+        if s != slug and any(b.get("ticket") == ticket for b in ms[s].get("bindings") or []):
+            return s
+    return None
 
 
 def migration_floor(slug, programs=None):

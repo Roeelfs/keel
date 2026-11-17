@@ -2,8 +2,8 @@
 """work_state.py — every piece of manager work is a bound map ticket with a derived state.
 
 One engine owns the binding record (ticket -> carriers), derives each map ticket's state, and
-emits flags: UNBOUND, READY_NOT_DISPATCHED, STALLED, BAKE_OWED, STALE_OPEN, DUPLICATE_TITLE, PROOF_FAILED
-(only the first two block). It never merges, pushes,
+emits flags: UNBOUND, READY_NOT_DISPATCHED, MISSION_UNDRIVEN, STALLED, BAKE_OWED, STALE_OPEN, DUPLICATE_TITLE,
+PROOF_FAILED (only the first three block). It never merges, pushes,
 deploys or bakes, and it writes no tracker state. Ticket ids are opaque strings; the tracker is
 reached only through the manifest's `map.snapshot_cmd` (contract `work-state-tracker/<major>`).
 
@@ -12,6 +12,9 @@ Commands (all take --program <slug>):
   guard                           no network, no git; state facts on stdin; exit 4 = blocking
   bind | carrier | retire         the only writers of manifest `bindings` (work_state_store.py)
   migrate [--all] [--dry-run]     lanes/claims -> bindings + events (work_state_migrate.py)
+  migrate --folds --census|--apply|--finish|--verify   legacy fold shapes -> fold records
+  absorb --from <slug>            fold a program in: the one writer of absorbed_by / fold (work_state_store.py)
+  mission-close | mission-reopen  --mission <slug> --reason <text>: a folded program's mission state
   bake-body <ship>                the bake ticket body, key set read from merge-and-retire.md
   bake-exempt                     R15 docs-only predicate over a PR's or a push's changed paths
   lane-row                        append one full lane row (spawn-lane.sh, codex-dispatch.sh)
@@ -42,7 +45,9 @@ LEASE = {"lane": 5400, "session": 14400, "pr_pending": 1500, "launch": 600, "car
 TRACKER_STALE_S = 7200
 TRUNCATED_BLOCKER = "relations_truncated"
 WAKE_GRACE_S = 600
-FLAGS = ("UNBOUND", "READY_NOT_DISPATCHED", "STALLED", "BAKE_OWED", "STALE_OPEN", "DUPLICATE_TITLE", "PROOF_FAILED")
+FLAGS = ("UNBOUND", "READY_NOT_DISPATCHED", "MISSION_UNDRIVEN", "STALLED", "BAKE_OWED", "STALE_OPEN", "DUPLICATE_TITLE",
+         "PROOF_FAILED")
+LIFTED = ("STALLED", "BAKE_OWED", "STALE_OPEN", "PROOF_FAILED", "DUPLICATE_TITLE")  # folded flags, non-blocking
 DUP_IGNORED = frozenset({"canceled", "duplicate"})
 LANE_UNBOUND_AGE_S = 7 * 86400
 MERGE_AND_RETIRE = os.path.join(HERE, "..", "references", "merge-and-retire.md")
@@ -207,7 +212,8 @@ def carrier_state(c, ctx):
     if t in ("agent", "workflow", "bg"):
         live = None if ctx["live_bg"] is None else c["id"] in ctx["live_bg"]
         out = c.get("outfile")
-        return live, _h(bool(out and ctx["outfiles"].get(out))), None
+        # Unknown liveness has an unknown fingerprint: an unproven background carrier is never STALLED (row 11).
+        return live, None if live is None else _h(bool(out and ctx["outfiles"].get(out))), None
     if t == "card":
         return now - st.parse_iso(c["bound_at"]) < LEASE["card"], None, None
     if t == "bake":
@@ -294,6 +300,58 @@ def validate_hold(h, ctx, kids, by_ticket, live_of):
         return None if b and any(c["type"] == "founder" for c in b["carriers"]) else \
             f"founder-gated: grill {target} has no founder carrier"
     return f"unknown hold reason {reason!r}"
+
+
+def mission_drivers(bindings, ctx):
+    """Carriers with positive evidence of life, judged by the OWNER's ctx: a session present within the session
+    lease, a lane whose pid and start time match, or a bg/agent/workflow id in the owner's live_bg. Unknown is
+    never a driver; founder, bake, card and wake hold a ticket but never drive a goal."""
+    now, live_bg, out = ctx["now"], ctx.get("live_bg"), []
+    for b in bindings:
+        for c in b["carriers"]:
+            t = c["type"]
+            if t == "session":
+                row = ctx["sessions"].get(c["id"]) or ctx["sessions"].get(ctx["cli"].get(c["id"], ""))
+                ok = bool(row) and pf.session_present(row, now, LEASE["session"])
+            elif t == "lane":
+                ok = carrier_state(c, ctx)[0] is True
+            else:
+                ok = t in ("bg", "agent", "workflow") and live_bg is not None and c["id"] in live_bg
+            if ok:
+                out.append(f"{t}:{c['id']}")
+    return out
+
+
+def fold_view(ctx):
+    """The owner's view of its fold family -> (mission rows, {slug: lifted flags + notes}, MISSION_UNDRIVEN rows,
+    notes). Each open mission is driven only by a carrier on the absorbed manifest itself (mission_drivers)."""
+    members = ctx.get("fold_members") or []
+    rows, folded, undriven, notes = [], {}, [], []
+    held = {}
+    for slug, bs in [(ctx["slug"], ctx["bindings"])] + [(f["slug"], f["bindings"]) for f in members if not f["self"]]:
+        for b in bs:
+            held.setdefault(b["ticket"], set()).add(slug)
+            for c in b["carriers"]:
+                if c["type"] not in st.SHARED_CARRIERS:
+                    held.setdefault(f"{c['type']}:{c['id']}", set()).add(slug)
+    notes += [f"fold_duplicate:{k}:{','.join(sorted(v))}" for k, v in sorted(held.items()) if len(v) > 1]
+    for f in members:
+        notes += f["notes"]
+        if f["sub"] is not None:
+            sub, _ = derive(f["sub"])
+            folded[f["slug"]] = {"flags": {k: sub["flags"][k] for k in LIFTED if sub["flags"][k]}, "notes": sub["notes"]}
+        if not f["open"]:
+            continue
+        drivers = mission_drivers(f["bindings"], ctx)
+        fold = f["fold"] if isinstance(f["fold"], dict) else {}
+        rows.append({"program": f["slug"], "goal": f["goal"], "map": f.get("map"), "since": fold.get("since"),
+                     "undriven": not drivers, "drivers": drivers, "bindings": len(f["bindings"]), "notes": f["notes"]})
+        if not drivers:
+            undriven.append({"item": f["slug"], "why": f"open mission {f['goal']!r} has no live driver on {f['slug']}",
+                             "fix": f["fix"] or f"work_state.py bind --program {f['slug']} --ticket <its ticket>, then a "
+                                                f"session, lane or launched background carrier; or work_state.py "
+                                                f"mission-close --mission {f['slug']} --reason <evidence>"})
+    return rows, folded, undriven, notes
 
 
 def derive(ctx):
@@ -488,7 +546,11 @@ def derive(ctx):
     # UNBOUND carriers (R22)
     if not map_id:
         flags["UNBOUND"].append({"item": "map", "why": "the program has no map", "fix": "create the map"})
-    bound_ids = {c["id"] for b in bindings for c in b["carriers"]}
+    missions, folded, undriven, fnotes = fold_view(ctx)
+    flags["MISSION_UNDRIVEN"] = undriven
+    notes += fnotes
+    family_bindings = bindings + [b for f in ctx.get("fold_members") or [] if not f["self"] for b in f["bindings"]]
+    bound_ids = {c["id"] for b in family_bindings for c in b["carriers"]}
     floor = ctx.get("floor") or 0
     sessions, cli = ctx["sessions"], ctx["cli"]
     for sid in sorted(ctx["family_sessions"]):
@@ -514,8 +576,8 @@ def derive(ctx):
             flags["UNBOUND"].append({"item": lane, "why": f"lane row ({'live pid' if live else 'outfile, < 7 d'}) in no binding",
                                      "fix": f"work_state.py bind --program {slug} --ticket <its ticket>, then carrier "
                                             f"--type lane --id {lane}"})
-    bound_branches = {b.get("branch") for b in bindings if b.get("branch")}
-    bound_prs = {st.publication_key(b["publication"]) for b in bindings if b.get("publication")}
+    bound_branches = {b.get("branch") for b in family_bindings if b.get("branch")}
+    bound_prs = {st.publication_key(b["publication"]) for b in family_bindings if b.get("publication")}
     carrier_sessions = [sessions.get(c["id"]) or sessions.get(cli.get(c["id"], "")) for b in bindings
                         for c in b["carriers"] if c["type"] == "session"]
     carrier_sessions += [sessions.get(s) for s in ctx["family_sessions"]]
@@ -537,10 +599,13 @@ def derive(ctx):
         notes.append(f"ready_dropped:tracker_age_{int(ctx['tracker_age_s'])}s")
         ready_block = []
     blocking += ready_block
+    blocking += [dict(x, flag="MISSION_UNDRIVEN") for x in undriven]  # a Hold never exempts it
     exits = ctx.get("exit_criteria") or []
     green = sum(1 for e in exits if isinstance(e, dict) and e.get("green") is True)
     exit_tag = f"exit {green}/{len(exits)}" if exits else "exit unset"
-    if status == "DONE":
+    if status == "DONE" and missions:
+        notes += [f"status_done_open_mission_{m['program']}:no_exemption" for m in missions]
+    elif status == "DONE":
         if tracker is not None and counts["open"] == 0 and green == len(exits):
             blocking = []
             notes.append("exempt:status_done_zero_open")
@@ -554,7 +619,8 @@ def derive(ctx):
         notes.append("grilling:only_founder_items_exempt")
     frontier = [i["ticket"] for i in items if i["state"] == "ready"]
     map_line = (f"Map {map_id}: done {counts['done']} / open {counts['open']} / blocked {counts['blocked']}; "
-                f"frontier now: {', '.join(frontier) or 'none'}; {exit_tag}")
+                f"frontier now: {', '.join(frontier) or 'none'}; {exit_tag}" +
+                (f"; missions open {len(missions)}, undriven {len(undriven)}" if ctx.get("fold_members") else ""))
     snap = {"schema": SCHEMA, "program": slug, "map": map_id, "taken_at": st.now_iso(now),
             "remote_age_s": {"tracker": None if ctx.get("tracker_age_s") is None else int(ctx["tracker_age_s"]),
                              "gh": None if ctx.get("gh_age_s") is None else int(ctx["gh_age_s"])},
@@ -563,7 +629,8 @@ def derive(ctx):
                                                          for x in blocking],
             "awaiting_manager": awaiting, "holds": holds, "frontier": frontier,
             "waiters": waiters.derive(ctx, CLOSED),
-            "pending_events": list(ctx.get("pending_events") or []), "map_line": map_line, "notes": notes}
+            "pending_events": list(ctx.get("pending_events") or []), "map_line": map_line, "notes": notes,
+            "missions": missions, "folded": folded}
     return snap, {"fp": new_fp, "ready_since": new_ready}
 
 
@@ -583,6 +650,7 @@ def run_snapshot(slug, *, mode="snapshot", refresh=False, stdin_facts=None, prog
         cache["fp"] = dict(cache.get("fp") or {}, **parts["fp"])
         cache["fp"] = {k: v for k, v in cache["fp"].items() if any(b["ticket"] == k for b in ctx["bindings"])}
         cache["ready_since"] = parts["ready_since"]
+        cache["missions"] = {"taken_at": snap["taken_at"], "rows": snap["missions"]}
         if ctx["tracker"] is not None:  # no tracker read: no edges, so nothing to tell and nothing to forget
             fresh = set(st.claim_notices(slug, waiters.notice_keys(snap["waiters"]),
                                          waiters.still_told(ctx, CLOSED), programs))
@@ -699,8 +767,23 @@ def main(argv=None):
         lr.add_argument(k, default="")
     lr.add_argument("--pid", type=int, required=True)
     lr.add_argument("--account-preferred", choices=("true", "false"), default=None)
+    ab = sub.add_parser("absorb")
+    ab.add_argument("--program", required=True, help="the absorbing program")
+    ab.add_argument("--from", dest="frm", required=True, help="the program being folded in")
+    ab.add_argument("--closed-reason", help="fold a goal already done or dropped: the mission starts closed")
+    ab.add_argument("--by", default=os.environ.get("CLAUDE_SESSION_ID") or "")
+    for verb in ("mission-close", "mission-reopen"):
+        mp = sub.add_parser(verb)
+        mp.add_argument("--mission", required=True)
+        mp.add_argument("--reason", required=True)
     mg = sub.add_parser("migrate")
     mg.add_argument("--program")
+    mg.add_argument("--folds", action="store_true")
+    mg.add_argument("--census", action="store_true")
+    mg.add_argument("--out")
+    mg.add_argument("--apply", metavar="PLAN")
+    mg.add_argument("--finish", metavar="PLAN")
+    mg.add_argument("--verify", metavar="PLAN")
     mg.add_argument("--all", action="store_true")
     mg.add_argument("--dry-run", action="store_true")
     mg.add_argument("--ticket-for", action="append", default=[], help="'<lane name>=<ticket>' after ticket-add")
@@ -716,9 +799,13 @@ def main(argv=None):
                 print(snap["map_line"])
                 for x in snap["blocking"]:
                     print(f"BLOCKING {x['flag']} {x['item']}: {x['fix']}")
-                for fl in ("STALLED", "BAKE_OWED", "STALE_OPEN", "DUPLICATE_TITLE", "PROOF_FAILED"):
+                for fl in LIFTED:
                     for x in snap["flags"][fl]:
                         print(f"{fl} {x['item']}: {x.get('why') or x.get('publication')}")
+                for fs, fv in sorted(snap["folded"].items()):
+                    for fl, xs in fv["flags"].items():
+                        for x in xs:
+                            print(f"folded.{fs} {fl} {x['item']}: {x.get('why') or x.get('publication')}")
                 for w in snap["waiters"]:
                     if w["notify"]:
                         print(f"NOTIFY {w['waiter']} -> {w['tell']}: {w['message']}")
@@ -778,6 +865,45 @@ def main(argv=None):
                                     account_preferred=None if a.account_preferred is None
                                     else a.account_preferred == "true"))
             return 0
+        if a.cmd == "absorb":
+            if not a.by:
+                raise ValueError("absorb: --by is required (defaults to $CLAUDE_SESSION_ID)")
+            res = st.absorb(a.program, a.frm, by=a.by, closed_reason=a.closed_reason)
+            _emit(res)
+            return 0
+        if a.cmd in ("mission-close", "mission-reopen"):
+            setter = st.close_mission if a.cmd == "mission-close" else st.reopen_mission
+            _emit(setter(a.mission, a.reason))
+            return 0
+        if a.cmd == "migrate" and a.folds:
+            import work_state_migrate as wm
+            if a.census:
+                plan = wm.fold_census()
+                if a.out:
+                    with open(a.out, "w") as fh:
+                        json.dump(plan, fh, indent=2, sort_keys=True)
+                    print(a.out)
+                else:
+                    _emit(plan)
+                return 0
+            path = a.apply or a.finish or a.verify
+            if not path:
+                raise ValueError("migrate --folds needs --census, --apply PLAN, --finish PLAN or --verify PLAN")
+            with open(path) as fh:
+                plan = json.load(fh)
+            if plan.get("schema") != wm.CENSUS_SCHEMA:
+                raise ValueError(f"{path}: not a {wm.CENSUS_SCHEMA} plan")
+            if a.apply:
+                res = wm.fold_apply(plan, by=os.environ.get("CLAUDE_SESSION_ID") or "migrate-folds")
+                _emit(res)
+                return 1 if res["refused"] else 0
+            if a.finish:
+                res = wm.fold_finish(plan)
+                _emit(res)
+                return 1 if res["refused"] else 0
+            viol = wm.fold_verify(plan)
+            _emit({"violations": viol})
+            return 1 if viol else 0
         if a.cmd == "migrate":
             import work_state_migrate as wm
             if a.all:

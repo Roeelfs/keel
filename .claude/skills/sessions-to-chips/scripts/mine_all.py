@@ -104,13 +104,14 @@ def state_fold(slug, programs_dir, lineage_last, manifest):
             "newest": newest, "verdict": verdict}
 
 
-def candidate_owner(sid, c, cands, fams, rows, here):
+def candidate_owner(sid, c, cands, fams, rows, here, manifests=()):
     """roots value for one candidate: itself (unrouted or promote), or for `absorb <slug>` the
-    absorber's current manager here, else its newest instance. An absorb slug naming another
-    candidate maps to that candidate."""
+    absorber's current manager here, else its newest instance. The absorb slug resolves through
+    the fold record to its terminal owner (row 11); the route record itself is never rewritten.
+    An absorb slug naming another candidate maps to that candidate."""
     if c["route"] != "absorb":
         return sid
-    target = c.get("program")
+    target = pf.terminal_owner(c.get("program"), manifests) or c.get("program")
     if target in fams and fams[target]["managers"]:
         mgrs = [rows[s] for s in fams[target]["managers"]]
         live_here = [m for m in mgrs if m["_acct"] == here and not m.get("isArchived")]
@@ -119,11 +120,13 @@ def candidate_owner(sid, c, cands, fams, rows, here):
     return other or sid
 
 
-def program_entry(kind, slug, key, mgrs, lineage, man, conflict, rows, here, now, floor, programs_dir):
+def program_entry(kind, slug, key, mgrs, lineage, man, conflict, rows, here, now, floor, programs_dir, manifests=()):
     """One program row, the same shape for a manager family and a candidate (kind). None when its
-    whole lineage is older than the window."""
+    whole lineage is older than the window, unless it owes an open folded mission (row 11): an owner
+    that owes a mission stays visible however long it has been quiet."""
+    missions = pf.open_missions(slug, manifests) if kind == "manager" else []
     lineage_last = max([ts_of(rows[m["sid"]]) for m in mgrs] + [ts_of(rows[s]) for s in lineage] or [0])
-    if lineage_last < floor:
+    if lineage_last < floor and not missions:
         return None
     cp, cp_src, cp_sid = checkpoint_for(mgrs, here, floor)
     # Live = some session of the program is present over the window (program_family: live by the
@@ -145,7 +148,9 @@ def program_entry(kind, slug, key, mgrs, lineage, man, conflict, rows, here, now
     return {"kind": kind, "slug": slug, "key": key, "managers": mgrs, "lineage": lineage, "live": live,
             "present_here": present_here, "checkpoint": cp, "checkpoint_sid": cp_sid, "checkpoint_src": cp_src,
             "moved": moved, "absorbed_by": man.get("absorbed_by"), "conflict": conflict,
-            "relay_to": relay_to, "fold": state_fold(slug, programs_dir, lineage_last, man)}
+            "relay_to": relay_to, "fold": state_fold(slug, programs_dir, lineage_last, man),
+            "owner": pf.terminal_owner(slug, manifests) if man.get("absorbed_by") else slug,
+            "missions_open": missions, "fold_record": pf.fold_note(dict(man, program=slug)) is None}
 
 
 def run_script(name, argv, env):
@@ -266,7 +271,7 @@ def mine(a):
     cands = pf.program_candidates(rows, floor * 1000, pf.load_routes(routes_file),
                                   os.environ.get("CLAUDE_SESSION_ID"), manifests)
     for sid, c in cands.items():
-        c["owner"] = candidate_owner(sid, c, cands, fams, rows, here)
+        c["owner"] = candidate_owner(sid, c, cands, fams, rows, here, manifests)
     roots_file = os.path.join(work, "candidates.json")
     with open(roots_file, "w") as fh:
         json.dump({sid: {k: c[k] for k in ("owner", "route", "program", "slug", "children", "prs")}
@@ -282,7 +287,7 @@ def mine(a):
     for slug, f in sorted(fams.items()):
         mgrs = [manager_facts(rows[s], chain_of(s)) for s in f["managers"]]
         p = program_entry("manager", slug, f["key"], mgrs, f["lineage"], f["manifest"] or {}, f["conflict"],
-                          rows, here, now, floor, programs_dir)
+                          rows, here, now, floor, programs_dir, manifests)
         if p:
             programs.append(p)
     for sid, c in sorted(cands.items()):

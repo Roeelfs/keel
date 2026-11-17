@@ -910,5 +910,664 @@ class ProofFlagTests(unittest.TestCase):
             self.assertTrue(snap["flags"]["PROOF_FAILED"])
 
 
+# ---------- row 11: a folded program's mission survives ----------
+
+def fold_dir():
+    return tempfile.mkdtemp(prefix="folds-", dir=TMP)
+
+
+def put(P, slug, **kw):
+    m = {"program": slug, "goal": f"goal of {slug}", "manager_session": f"local_{slug}mgr", "updated_at": iso(-60),
+         "map": {"issue": f"M-{slug}", "snapshot_cmd": ["fake-tracker", "{map}"]}, "bindings": []}
+    m.update(kw)
+    m = {k: v for k, v in m.items() if v is not None}
+    with open(os.path.join(P, slug + ".json"), "w") as fh:
+        json.dump(m, fh)
+    return m
+
+
+def get(P, slug):
+    with open(os.path.join(P, slug + ".json")) as fh:
+        return json.load(fh)
+
+
+def rows_of(P, slug, event=None):
+    return [r for r in st._log_rows(slug, P) if event is None or r.get("event") == event]
+
+
+def old_scope_slugs(P, slug):
+    """The pre-ship program_scope's scope derivation, kept verbatim as a fixture: the owner plus the string
+    entries of its own `absorbs` list. Code from before row 11 is correct only while the mirror covers it."""
+    try:
+        m = get(P, slug)
+    except OSError:
+        return {slug}
+    return {slug} | {a for a in m.get("absorbs") or [] if isinstance(a, str)}
+
+
+class Boom(RuntimeError):
+    pass
+
+
+class FailOn:
+    """Patch `owner.name` to raise Boom on its nth call (1-based); every other call runs the real function."""
+
+    def __init__(self, owner, name, nth):
+        self.owner, self.name, self.nth, self.n = owner, name, nth, 0
+
+    def __enter__(self):
+        self.real = getattr(self.owner, self.name)
+        real = self.real
+
+        def wrapped(*a, **kw):
+            self.n += 1
+            if self.n == self.nth:
+                raise Boom(f"{self.name} #{self.nth}")
+            return real(*a, **kw)
+        setattr(self.owner, self.name, wrapped)
+        return self
+
+    def __exit__(self, *exc):
+        setattr(self.owner, self.name, self.real)
+
+
+class FoldWriter(unittest.TestCase):
+    def setUp(self):
+        self.P = fold_dir()
+        put(self.P, "a")
+        put(self.P, "b")
+
+    def absorb(self, into, frm, **kw):
+        return st.absorb(into, frm, by="local_tester", now=NOW, programs=self.P, **kw)
+
+    def test_absorb_writes_mirror_then_pointer_then_one_row_per_log(self):
+        r = self.absorb("a", "b")
+        a, b = get(self.P, "a"), get(self.P, "b")
+        self.assertEqual(a["absorbs"], ["b"])
+        self.assertEqual(b["absorbed_by"], "a")
+        self.assertEqual(b["fold"], {"id": f"b@{st.now_iso(NOW)}", "since": st.now_iso(NOW), "by": "local_tester",
+                                     "closed": None})
+        self.assertEqual((r["wrote"], sorted(r["events"])), (True, ["a", "b"]))
+        for s in ("a", "b"):
+            self.assertEqual([x["fold_id"] for x in rows_of(self.P, s, "absorb")], [b["fold"]["id"]])
+        before = {s: os.path.getmtime(os.path.join(self.P, s + ".json")) for s in ("a", "b")}
+        r2 = self.absorb("a", "b")
+        self.assertEqual((r2["wrote"], r2["events"]), (False, []))
+        self.assertEqual(before, {s: os.path.getmtime(os.path.join(self.P, s + ".json")) for s in ("a", "b")})
+        self.assertEqual(len(rows_of(self.P, "a", "absorb")), 1)
+
+    def test_pointer_without_fold_is_repaired(self):
+        put(self.P, "b", absorbed_by="a")
+        r = self.absorb("a", "b")
+        self.assertTrue(r["wrote"])
+        self.assertIn("repair: fold record written", r["notes"])
+        st.validate_fold(get(self.P, "b")["fold"])
+        self.assertEqual(get(self.P, "a")["absorbs"], ["b"])
+
+    def test_crash_before_mirror_leaves_both_manifests_unchanged(self):
+        a0, b0 = get(self.P, "a"), get(self.P, "b")
+        with FailOn(st._Locked, "write", 1), self.assertRaises(Boom):
+            self.absorb("a", "b")
+        self.assertEqual((get(self.P, "a"), get(self.P, "b")), (a0, b0))
+
+    def test_crash_after_mirror_old_scope_already_covers_and_rerun_completes(self):
+        with FailOn(st._Locked, "write", 2), self.assertRaises(Boom):
+            self.absorb("a", "b")
+        self.assertIn("b", old_scope_slugs(self.P, "a"))
+        self.assertNotIn("absorbed_by", get(self.P, "b"))
+        r = self.absorb("a", "b")
+        self.assertTrue(r["wrote"])
+        self.assertEqual(get(self.P, "a")["absorbs"], ["b"])  # the mirror is never written twice
+        self.assertEqual(get(self.P, "b")["absorbed_by"], "a")
+
+    def test_crash_between_appends_rerun_appends_only_the_missing_row(self):
+        for nth in (1, 2):
+            P = fold_dir()
+            put(P, "a")
+            put(P, "b")
+            with FailOn(st, "append_event", nth), self.assertRaises(Boom):
+                st.absorb("a", "b", by="t", now=NOW, programs=P)
+            self.assertEqual(get(P, "b")["absorbed_by"], "a")  # committed at step 2
+            r = st.absorb("a", "b", by="t", now=NOW, programs=P)
+            self.assertFalse(r["wrote"])
+            fid = get(P, "b")["fold"]["id"]
+            for s in ("a", "b"):
+                self.assertEqual([x["fold_id"] for x in rows_of(P, s, "absorb")], [fid], (nth, s))
+
+    def test_old_scope_covers_a_chain_built_by_two_absorbs(self):
+        put(self.P, "c")
+        self.absorb("b", "c")
+        self.absorb("a", "b")
+        self.assertEqual(old_scope_slugs(self.P, "a"), {"a", "b", "c"})
+        self.assertEqual(pf.fold_family("a", st.read_all(self.P)), ["b", "c"])
+
+    def test_retry_after_a_chained_fold_succeeds_without_writing(self):
+        put(self.P, "c")
+        with FailOn(st, "append_event", 1), self.assertRaises(Boom):
+            self.absorb("b", "a")  # a -> b committed, no events
+        self.absorb("c", "b")       # b -> c: a now rides c
+        r = self.absorb("b", "a")
+        self.assertEqual((r["wrote"], sorted(r["events"])), (False, ["a", "b"]))
+        self.assertEqual(pf.terminal_owner("a", st.read_all(self.P)), "c")
+
+    def test_reciprocal_absorbs_in_two_processes_one_wins(self):
+        script = os.path.join(self.P, "absorb_one.py")
+        with open(script, "w") as fh:
+            fh.write("import sys\nsys.path.insert(0, %r)\nimport work_state_store as st\n"
+                     "try:\n    st.absorb(sys.argv[1], sys.argv[2], by='t', programs=sys.argv[3]); print('ok')\n"
+                     "except st.SchemaError as e:\n    print('refused', e)\n" % HERE)
+        with st._GraphLock(self.P):  # both children queue on the graph lock, then race for it
+            procs = [subprocess.Popen([sys.executable, script, x, y, self.P], stdout=subprocess.PIPE, text=True)
+                     for x, y in (("a", "b"), ("b", "a"))]
+            time.sleep(0.5)
+        outs = sorted(p.communicate(timeout=30)[0].strip() for p in procs)
+        self.assertEqual(outs[0], "ok")
+        self.assertTrue(outs[1].startswith("refused") and "cycle" in outs[1], outs)
+        a, b = get(self.P, "a"), get(self.P, "b")
+        self.assertFalse(a.get("absorbed_by") and b.get("absorbed_by"))
+
+    def test_refusals(self):
+        put(self.P, "c")
+        put(self.P, "done", status="DONE")
+        put(self.P, "nomgr", manager_session=None)
+        put(self.P, "nogoal", goal="")
+        cases = [(("a", "a"), "itself"), (("a", "nogoal"), "no goal"), (("done", "c"), "DONE"),
+                 (("nomgr", "c"), "manager_session")]
+        for (into, frm), why in cases:
+            with self.assertRaises(st.SchemaError) as e:
+                self.absorb(into, frm)
+            self.assertIn(why, str(e.exception))
+        self.absorb("a", "b")
+        with self.assertRaises(st.SchemaError) as e:
+            self.absorb("b", "c")  # b is absorbed: the message names the terminal owner
+        self.assertIn("fold into a instead", str(e.exception))
+        with self.assertRaises(st.SchemaError) as e:
+            self.absorb("b", "a")
+        self.assertIn("cycle", str(e.exception))
+        with self.assertRaises(st.SchemaError) as e:
+            self.absorb("c", "b")
+        self.assertIn("already absorbed by a", str(e.exception))
+
+    def test_closed_fold_into_done_owner_needs_no_open_family_mission(self):
+        put(self.P, "done", status="DONE")
+        put(self.P, "c")
+        self.absorb("b", "c")  # c's mission is open, under b
+        with self.assertRaises(st.SchemaError) as e:
+            self.absorb("done", "b", closed_reason="shipped")
+        self.assertIn("c", str(e.exception))
+        st.close_mission("c", "shipped in PR 9", now=NOW, programs=self.P)
+        r = self.absorb("done", "b", closed_reason="shipped")
+        self.assertTrue(r["wrote"])
+        self.assertEqual(get(self.P, "b")["fold"]["closed"]["reason"], "shipped")
+        with self.assertRaises(st.SchemaError) as e:
+            st.reopen_mission("b", "not done after all", now=NOW, programs=self.P)
+        self.assertIn("DONE", str(e.exception))
+
+    def test_no_snapshot_cmd_notes_fold_no_tracker(self):
+        put(self.P, "b", map={"issue": "M-b"})
+        self.assertIn("fold_no_tracker:b", self.absorb("a", "b")["notes"])
+
+
+class MissionSetters(unittest.TestCase):
+    def setUp(self):
+        self.P = fold_dir()
+        put(self.P, "a")
+        put(self.P, "b")
+        st.absorb("a", "b", by="t", now=NOW, programs=self.P)
+
+    def events(self, slug):
+        return [r["event"] for r in rows_of(self.P, slug) if r.get("event") in st.MISSION_EVENTS]
+
+    def test_close_twice_writes_once_and_logs_once(self):
+        r1 = st.close_mission("b", "evidence", now=NOW, programs=self.P)
+        r2 = st.close_mission("b", "evidence", now=NOW, programs=self.P)
+        self.assertEqual((r1["wrote"], r2["wrote"], r2["events"]), (True, False, []))
+        self.assertEqual((self.events("b"), self.events("a")), (["mission-close"], ["mission-close"]))
+        self.assertEqual(get(self.P, "b")["fold"]["closed"]["reason"], "evidence")
+
+    def test_crash_before_events_rerun_completes_them_once(self):
+        with FailOn(st, "append_event", 1), self.assertRaises(Boom):
+            st.close_mission("b", "evidence", now=NOW, programs=self.P)
+        self.assertIsNotNone(get(self.P, "b")["fold"]["closed"])
+        r = st.close_mission("b", "evidence", now=NOW, programs=self.P)
+        self.assertFalse(r["wrote"])
+        self.assertEqual((self.events("b"), self.events("a")), (["mission-close"], ["mission-close"]))
+
+    def test_close_reopen_close_logs_three_in_order(self):
+        for fn in (st.close_mission, st.reopen_mission, st.close_mission):
+            fn("b", "why", now=NOW, programs=self.P)
+        self.assertEqual(self.events("b"), ["mission-close", "mission-reopen", "mission-close"])
+
+    def test_reason_required_and_unfolded_refused(self):
+        with self.assertRaises(st.SchemaError):
+            st.close_mission("b", " ", programs=self.P)
+        with self.assertRaises(st.SchemaError):
+            st.close_mission("a", "x", programs=self.P)
+
+
+class FoldResolver(unittest.TestCase):
+    def g(self, **edges):
+        return {s: {"program": s, "absorbed_by": t} for s, t in edges.items()}
+
+    def test_chain_resolves_to_its_live_end(self):
+        g = self.g(a=None, b="a", c="b")
+        self.assertEqual((pf.terminal_owner("c", g), pf.fold_family("a", g)), ("a", ["b", "c"]))
+        self.assertEqual(pf.fold_chain("c", g), (["c", "b", "a"], None))
+
+    def test_cycle_and_missing_target_have_notes_and_no_owner(self):
+        g = self.g(a="b", b="a", c="gone")
+        self.assertTrue(pf.fold_chain("a", g)[1].startswith("fold_cycle:"))
+        self.assertEqual(pf.fold_chain("c", g)[1], "fold_target_missing:gone")
+        self.assertIsNone(pf.terminal_owner("a", g))
+        self.assertIsNone(pf.terminal_owner("c", g))
+        self.assertEqual(pf.fold_family("a", g), [])
+
+    def test_open_missions_count_missing_and_malformed_records_open(self):
+        fold = {"id": "x@t", "since": iso(-60), "by": "t", "closed": None}
+        g = {"a": {"program": "a"},
+             "b": {"program": "b", "absorbed_by": "a", "fold": fold},
+             "c": {"program": "c", "absorbed_by": "a", "fold": dict(fold, closed={"at": iso(-1), "reason": "r"})},
+             "d": {"program": "d", "absorbed_by": "a"},
+             "e": {"program": "e", "absorbed_by": "a", "fold": {"id": "e"}}}
+        self.assertEqual(pf.open_missions("a", g), ["b", "d", "e"])
+        self.assertEqual((pf.fold_note(g["d"]), pf.fold_note(g["e"])), ("fold_record_missing:d", "fold_malformed:e"))
+
+
+FOLD = {"id": "b@2026-11-03T11:00:00Z", "since": "2026-11-03T11:00:00Z", "by": "t", "closed": None}
+
+
+def member(slug="b", bindings=(), **kw):
+    m = {"slug": slug, "goal": f"goal of {slug}", "fold": dict(FOLD), "map": f"M-{slug}", "open": True,
+         "bindings": list(bindings), "sub": None, "fix": None, "self": False, "notes": []}
+    m.update(kw)
+    return m
+
+
+def blocking_flags(s):
+    return [(x["flag"], x["item"]) for x in s["blocking"]]
+
+
+PAST_LEASE = str(int((NOW - ws.LEASE["session"] - 600) * 1000))
+
+
+def incident_bindings():
+    """The live incident's carrier mix on the absorbed manifest: 13 bg, 2 agent, 6 sessions past the lease,
+    one card, one wake. None of it is positive evidence of life for the owner."""
+    cs = [carrier("bg", f"bg{i}") for i in range(13)] + [carrier("agent", f"ag{i}") for i in range(2)]
+    cs += [carrier("card", "card-1", bound_at=iso(-60)), carrier("wake", "wake-1")]
+    sessions = [carrier("session", SESSION_ROWS[i]["sessionId"]) for i in range(min(6, len(SESSION_ROWS)))]
+    return [binding(f"T-{i + 1}", [c]) for i, c in enumerate(cs + sessions)], sessions
+
+
+class MissionDriver(unittest.TestCase):
+    def test_open_mission_without_binding_blocks(self):
+        s = snap(fold_members=[member()])
+        self.assertIn(("MISSION_UNDRIVEN", "b"), blocking_flags(s))
+        self.assertEqual(s["missions"][0]["program"], "b")
+        self.assertTrue(s["missions"][0]["undriven"])
+        self.assertIn("missions open 1, undriven 1", s["map_line"])
+
+    def test_incident_shape_still_flags(self):
+        bs, sessions = incident_bindings()
+        rows = {c["id"]: session_row(i, lastActivityAt=PAST_LEASE) for i, c in enumerate(sessions)}
+        s = snap(fold_members=[member(bindings=bs)], sessions=rows, live_bg={"other"})
+        self.assertIn(("MISSION_UNDRIVEN", "b"), blocking_flags(s))
+        self.assertEqual(s["missions"][0]["drivers"], [])
+
+    def test_each_positive_evidence_clears_it(self):
+        sid = SESSION_ROWS[1]["sessionId"]
+        lane = {"lane": "L1", "pid": 4242, "pid_start": "Mon Nov 3 10:00:00 2026"}
+        cases = [
+            ({"sessions": {sid: session_row(1)}}, carrier("session", sid)),
+            ({"lanes": {"L1": lane}, "pids": {4242: "Mon Nov 3 10:00:00 2026"}}, carrier("lane", "L1")),
+            ({"live_bg": {"bg7"}}, carrier("bg", "bg7")),
+        ]
+        for extra, c in cases:
+            s = snap(fold_members=[member(bindings=[binding("T-9", [c])])], **extra)
+            self.assertNotIn("MISSION_UNDRIVEN", [f for f, _ in blocking_flags(s)], c)
+            self.assertEqual(s["missions"][0]["drivers"], [f"{c['type']}:{c['id']}"])
+
+    def test_owner_live_bg_none_is_unknown_not_a_driver(self):
+        s = snap(fold_members=[member(bindings=[binding("T-9", [carrier("bg", "bg7")])])], live_bg=None)
+        self.assertIn(("MISSION_UNDRIVEN", "b"), blocking_flags(s))
+
+    def test_closed_mission_does_not_flag(self):
+        closed = dict(FOLD, closed={"at": iso(-1), "reason": "r"})
+        s = snap(fold_members=[member(fold=closed, open=False)])
+        self.assertEqual(s["missions"], [])
+        self.assertNotIn("MISSION_UNDRIVEN", [f for f, _ in blocking_flags(s)])
+
+    def test_malformed_fold_is_a_note_and_the_flag(self):
+        s = snap(fold_members=[member(fold={"id": "x"}, notes=["fold_malformed:b"])])
+        self.assertIn("fold_malformed:b", s["notes"])
+        self.assertIn(("MISSION_UNDRIVEN", "b"), blocking_flags(s))
+
+    def test_done_and_hold_do_not_exempt(self):
+        done = copy.deepcopy(TRACKER)
+        for c in done["children"]:
+            c["state"] = tstate("completed")
+        s = snap(fold_members=[member()], tracker=done, state={"status": "DONE"})
+        self.assertIn(("MISSION_UNDRIVEN", "b"), blocking_flags(s))
+        self.assertIn("status_done_open_mission_b:no_exemption", s["notes"])
+        self.assertNotIn("exempt:status_done_zero_open", s["notes"])
+
+    def test_folded_child_session_is_bound_for_the_owner(self):
+        row = session_row(1)
+        sid = row["sessionId"]
+        base = dict(sessions={sid: row}, family_sessions={sid})
+        self.assertIn(sid, [x["item"] for x in snap(**base)["flags"]["UNBOUND"]])
+        s = snap(fold_members=[member(bindings=[binding("T-9", [carrier("session", sid)])])], **base)
+        self.assertNotIn(sid, [x["item"] for x in s["flags"]["UNBOUND"]])
+
+    def test_ticket_in_two_family_manifests_is_a_duplicate_note(self):
+        s = snap(bindings=[binding("T-6", [carrier("card", "c1", bound_at=iso(-60))])],
+                 fold_members=[member(bindings=[binding("T-6", [carrier("card", "c2", bound_at=iso(-60))])])])
+        self.assertIn("fold_duplicate:T-6:b,p", s["notes"])
+
+
+class FoldedEndToEnd(unittest.TestCase):
+    """build_ctx + derive on manifests in a scratch store: the owner's snapshot over its folded manifests."""
+
+    def setUp(self):
+        self.P = fold_dir()
+        self.a, self.b = "fa" + str(time.time_ns()), "fb" + str(time.time_ns())
+        put(self.P, self.a)
+        put(self.P, self.b)
+        st.absorb(self.a, self.b, by="t", programs=self.P)
+
+    def run_a(self, **kw):
+        return ws.run_snapshot(self.a, programs=self.P, runner=FakeRunner(), **kw)
+
+    def test_incident_shape_flags_exit_4_no_stall_and_caches_missions(self):
+        bs, _ = incident_bindings()
+        m = get(self.P, self.b)
+        put(self.P, self.b, **dict(m, bindings=bs))
+        s, rc = self.run_a()
+        self.assertEqual(rc, 4)
+        self.assertIn(("MISSION_UNDRIVEN", self.b), blocking_flags(s))
+        stalled = (s["folded"].get(self.b) or {}).get("flags", {}).get("STALLED") or []
+        self.assertFalse([x for x in stalled if str(x["item"]).startswith("T-")
+                          and any(c["type"] in ("bg", "agent") for b in bs if b["ticket"] == x["item"]
+                                  for c in b["carriers"])])
+        cache = src.read_cache(self.a)
+        self.assertEqual([r["program"] for r in cache["missions"]["rows"]], [self.b])
+        self.assertTrue(cache["missions"]["rows"][0]["undriven"])
+
+    def test_close_clears_reopen_restores_and_retire_flags_again(self):
+        st.close_mission(self.b, "evidence", programs=self.P)
+        s, _ = self.run_a()
+        self.assertNotIn("MISSION_UNDRIVEN", [f for f, _ in blocking_flags(s)])
+        st.reopen_mission(self.b, "back", programs=self.P)
+        s, _ = self.run_a()
+        self.assertIn(("MISSION_UNDRIVEN", self.b), blocking_flags(s))
+        children = {c["ticket"] for c in TRACKER["children"]}
+        st.bind(self.b, "T-6", children=children, map_id=f"M-{self.b}", programs=self.P)
+        st.carrier(self.b, "T-6", "bg", "bg-live", programs=self.P)
+        s, _ = self.run_a(mode="guard", stdin_facts={"state_facts": {}, "live_bg": ["bg-live"]})
+        self.assertNotIn("MISSION_UNDRIVEN", [f for f, _ in blocking_flags(s)])
+        st.retire(self.b, "T-6", carrier_ids=["bg-live"], reason="done", programs=self.P)
+        s, _ = self.run_a(mode="guard", stdin_facts={"state_facts": {}, "live_bg": ["bg-live"]})
+        self.assertIn(("MISSION_UNDRIVEN", self.b), blocking_flags(s))
+
+    def test_missing_fold_record_is_a_note_never_a_schema_error(self):
+        m = get(self.P, self.b)
+        m.pop("fold")
+        put(self.P, self.b, **m)
+        s, rc = self.run_a()
+        self.assertEqual(rc, 4)
+        self.assertIn(f"fold_record_missing:{self.b}", s["notes"])
+        self.assertIn(("MISSION_UNDRIVEN", self.b), blocking_flags(s))
+
+    def test_unmigrated_folded_manifest_gets_note_and_migrate_fix(self):
+        m = get(self.P, self.b)
+        put(self.P, self.b, **dict(m, lanes=[]))
+        s, _ = self.run_a()
+        self.assertIn(f"folded_unmigrated:{self.b}", s["notes"])
+        fix = [x["fix"] for x in s["blocking"] if x["flag"] == "MISSION_UNDRIVEN"]
+        self.assertEqual(fix, [f"work_state.py migrate --program {self.b}"])
+
+    def test_lifecycle_on_the_absorbed_manifest(self):
+        open_t1 = tracker_of([child("T-50", 0, "Owner work", "completed", "task")])
+
+        class MapRunner(FakeRunner):  # the owner's map lacks T-1; only the absorbed map knows it closed
+            def __call__(inner, argv, **kw):
+                inner.tracker = open_t1 if argv[0] == "fake-tracker" and argv[1] == f"M-{self.a}" else TRACKER
+                res = FakeRunner.__call__(inner, argv, **kw)
+                if argv[:3] == ["gh", "pr", "view"]:
+                    res.stdout = json.dumps(dict(GH_ROWS[0], number=7, state="MERGED", mergedAt=iso(-3600)))
+                return res
+        children = {c["ticket"] for c in TRACKER["children"]}
+        st.bind(self.b, "T-1", children=children, map_id=f"M-{self.b}", publication={"repo": "o/r", "pr": 7},
+                programs=self.P)
+        s, _ = ws.run_snapshot(self.a, programs=self.P, runner=MapRunner())
+        self.assertIn(self.b, s["folded"])
+        self.assertNotIn("T-1", [x["item"] for x in s["blocking"]])
+        for fl, xs in s["folded"][self.b]["flags"].items():
+            self.assertIn(fl, ws.LIFTED)
+        allow = ws._retire_allow(self.b, self.P)  # closure is proven from b's own tracker tier
+        ok, why = allow(get(self.P, self.b)["bindings"][0])
+        self.assertFalse(ok)
+        self.assertIn("bake ticket's binding exists", why)
+        st.bind(self.b, "T-2", children=children, map_id=f"M-{self.b}", programs=self.P)
+        out = st.retire(self.b, "T-1", reason="shipped", allow=ws._retire_allow(self.b, self.P), programs=self.P)
+        self.assertEqual(out["ticket"], "T-1")
+
+    def test_bind_refuses_a_ticket_open_elsewhere_in_the_family(self):
+        children = {c["ticket"] for c in TRACKER["children"]}
+        st.bind(self.a, "T-6", children=children, map_id=f"M-{self.a}", programs=self.P)
+        with self.assertRaises(st.SchemaError):
+            st.bind(self.b, "T-6", children=children, map_id=f"M-{self.b}", programs=self.P)
+
+
+class FoldWaiters(unittest.TestCase):
+    def test_absorbed_manifest_session_carrier_owns_the_ticket(self):
+        sid = SESSION_ROWS[1]["sessionId"]
+        progs = [{"program": "a", "manager_session": "local_amgr", "bindings": []},
+                 {"program": "b", "absorbed_by": "a", "manager_session": "local_bmgr",
+                  "bindings": [binding("T-9", [carrier("session", sid)])]}]
+        c = ctx(programs=progs, sessions={}, cli={})
+        self.assertIn(sid, waiters._owners("T-9", c))
+        progs[1]["bindings"] = []
+        progs[1]["map"] = {"issue": "T-9"}
+        self.assertEqual(waiters._owners("T-9", c), "local_amgr")  # the owner's manager answers, not b's
+
+
+def snapshot_files(P):
+    out = {}
+    for f in sorted(os.listdir(P)):
+        if f.endswith(".json"):
+            with open(os.path.join(P, f)) as fh:
+                out[f] = fh.read()
+    return out
+
+
+class MigrateFolds(unittest.TestCase):
+    def setUp(self):
+        self.P = P = fold_dir()
+        self.sid = SESSION_ROWS[1]["sessionId"]
+        put(P, "own", supersedes=["x4"], absorbs=["x5", {"program": "x6", "note": "legacy dict"}])
+        with open(os.path.join(P, "own.state.md"), "w") as fh:
+            fh.write("# own\n\n## Taken over from `x7`\n\nhandover\n")
+        put(P, "x1", absorbed_by="own", bindings=[binding("T-1", [carrier("session", self.sid)])])
+        put(P, "x2", status="merged-into-own")
+        put(P, "x3", superseded_by="own")
+        for s in ("x4", "x5", "x6"):
+            put(P, s)
+        put(P, "x7", bindings=[binding("T-7", [carrier("card", "c7", bound_at=iso(-60))])])
+        put(P, "y", status="superseded-by-x2")  # a chain: y -> x2 -> own
+
+    def census(self):
+        return wm.fold_census(programs=self.P, now=NOW)
+
+    def edge(self, plan, a):
+        return next(e for e in plan["edges"] if e["absorbed"] == a)
+
+    def apply(self, plan):
+        return wm.fold_apply(plan, by="t", programs=self.P, now=NOW)
+
+    def test_census_lists_six_shapes_resolves_chain_and_records_exact_values(self):
+        before = snapshot_files(self.P)
+        plan = self.census()
+        shapes = {c["shape"] for e in plan["edges"] for c in e["claims"]}
+        self.assertEqual(shapes, {"absorbed_by", "status", "superseded_by", "supersedes", "absorbs", "absorbs_dict",
+                                  "prose"})
+        self.assertEqual(sorted(e["absorbed"] for e in plan["edges"]), ["x1", "x2", "x3", "x4", "x5", "x6", "x7", "y"])
+        self.assertEqual(self.edge(plan, "y")["recorded_targets"], ["x2"])
+        self.assertEqual(self.edge(plan, "y")["proposed_target"], "own")  # resolved to the live end
+        self.assertEqual(self.edge(plan, "x1")["disposition"], "open")  # a session carrier
+        self.assertTrue(self.edge(plan, "x3")["disposition"].startswith("closed: "))
+        self.assertEqual(plan["legacy"]["own"], {"supersedes": ["x4"], "absorbs": [{"program": "x6", "note": "legacy dict"}]})
+        self.assertEqual(plan["legacy"]["x2"], {"status": "merged-into-own"})
+        self.assertEqual(plan["legacy"]["x3"], {"superseded_by": "own"})
+        self.assertEqual(plan["binding_keys"]["x1"], [["T-1", "session", self.sid]])
+        self.assertEqual(plan["binding_keys"]["x7"], [["T-7", "card", "c7"]])
+        self.assertEqual(snapshot_files(self.P), before)  # read-only
+
+    def test_apply_then_old_scope_covers_every_absorbed_slug(self):
+        res = self.apply(self.census())
+        self.assertEqual(res["refused"], [])
+        ms = st.read_all(self.P)
+        for s in ("x1", "x2", "x3", "x4", "x5", "x6", "x7", "y"):
+            self.assertIsNone(pf.fold_note(ms[s]), s)
+            self.assertEqual(pf.terminal_owner(s, ms), "own")
+        self.assertTrue({"x1", "x2", "x3", "x4", "x5", "x6", "x7", "y"} <= old_scope_slugs(self.P, "own"))
+        self.assertIsNone(ms["x1"]["fold"]["closed"])
+        self.assertIsNotNone(ms["x3"]["fold"]["closed"])
+        self.assertEqual(ms["x2"]["status"], "merged-into-own")  # apply removes nothing
+
+    def test_apply_refusals_leave_every_manifest_untouched(self):
+        P = self.P
+        base = self.census()
+        bad = copy.deepcopy(base)
+        self.edge(bad, "x3")["disposition"] = None
+        put(P, "c1", status="merged-into-c2")
+        put(P, "c2", status="merged-into-c1")
+        put(P, "z", absorbed_by="own", status="merged-into-x5")
+        put(P, "done", status="DONE")
+        put(P, "w", status="merged-into-done", bindings=[binding("T-2", [carrier("session", "local_w1")])])
+        before = snapshot_files(P)
+        plan = self.census()
+        refused = "\n".join(self.apply(plan)["refused"]) + "\n" + "\n".join(self.apply(bad)["refused"])
+        for want in ("x3: disposition", "c1: cycle", "z: conflict", "w: open mission cannot move under done"):
+            self.assertIn(want, refused)
+        self.assertEqual(snapshot_files(P), before)
+
+    def test_apply_rerun_after_crash_applies_each_edge_once(self):
+        plan = self.census()
+        with FailOn(st, "append_event", 5), self.assertRaises(Boom):
+            self.apply(plan)
+        self.assertEqual(self.apply(plan)["refused"], [])
+        for e in plan["edges"]:
+            fid = get(self.P, e["absorbed"])["fold"]["id"]
+            self.assertEqual(len([r for r in rows_of(self.P, e["absorbed"], "absorb") if r["fold_id"] == fid]), 1)
+            self.assertEqual(len([r for r in rows_of(self.P, "own", "absorb") if r["fold_id"] == fid]), 1)
+
+    def test_finish_removes_exact_values_keeps_strings_and_refuses_changed(self):
+        plan = self.census()
+        self.apply(plan)
+        m = get(self.P, "x3")
+        put(self.P, "x3", **dict(m, superseded_by="someone-else"))
+        res = wm.fold_finish(plan, programs=self.P)
+        self.assertIn("x3", res["refused"])
+        own = get(self.P, "own")
+        self.assertNotIn("supersedes", own)
+        self.assertEqual([e for e in own["absorbs"] if isinstance(e, dict)], [])
+        self.assertTrue({"x5", "x1"} <= set(own["absorbs"]))
+        self.assertNotIn("status", get(self.P, "x2"))
+        self.assertEqual(get(self.P, "x3")["superseded_by"], "someone-else")
+
+    def test_finish_refuses_an_added_absorbs_dict(self):
+        plan = self.census()
+        self.apply(plan)
+        own = get(self.P, "own")
+        put(self.P, "own", **dict(own, absorbs=own["absorbs"] + [{"program": "late"}]))
+        res = wm.fold_finish(plan, programs=self.P)
+        self.assertIn("own", res["refused"])
+        self.assertIn({"program": "late"}, get(self.P, "own")["absorbs"])
+
+    def test_finish_logs_before_removing_and_rerun_logs_no_second_event(self):
+        plan = self.census()
+        self.apply(plan)
+        with FailOn(st._Locked, "write", 1), self.assertRaises(Boom):
+            wm.fold_finish(plan, programs=self.P)
+        first = sorted(plan["legacy"])[0]
+        self.assertEqual(len(rows_of(self.P, first, "fold-migrated")), 1)  # the audit row landed first
+        wm.fold_finish(plan, programs=self.P)
+        for slug in plan["legacy"]:
+            self.assertEqual(len(rows_of(self.P, slug, "fold-migrated")), 1, slug)
+        self.assertEqual(wm.fold_finish(plan, programs=self.P)["removed"], {})
+
+    def test_verify_fails_each_class_and_passes_after_new_bind_and_retire(self):
+        plan = self.census()
+        v = wm.fold_verify(plan, programs=self.P)
+        self.assertTrue(any(x.startswith("fold_unrecorded:") for x in v))
+        self.assertTrue(any(x.startswith("legacy_present:") for x in v))
+        self.apply(plan)
+        wm.fold_finish(plan, programs=self.P)
+        self.assertEqual(wm.fold_verify(plan, programs=self.P), [])
+        st.bind("x1", "M-x1", children=None, map_id="M-x1", programs=self.P)
+        st.retire("x1", "T-1", reason="done", programs=self.P)
+        self.assertEqual(wm.fold_verify(plan, programs=self.P), [])
+        own = get(self.P, "own")
+        put(self.P, "own", **dict(own, absorbs=[a for a in own["absorbs"] if a != "x4"]))
+        x5 = get(self.P, "x5")
+        put(self.P, "x5", **dict(x5, absorbed_by="gone"))
+        x7 = get(self.P, "x7")
+        put(self.P, "x7", **dict(x7, bindings=[]))
+        x3 = get(self.P, "x3")
+        put(self.P, "x3", **dict(x3, superseded_by="own"))
+        v = wm.fold_verify(plan, programs=self.P)
+        for want in ("mirror_missing:x4:own", "fold_unrecorded:x5", "binding_lost:x7:T-7:card:c7", "legacy_present:x3:superseded_by"):
+            self.assertIn(want, "\n".join(v))
+
+    def test_chain_with_missing_fold_keeps_its_edge_and_is_repaired(self):  # G-astra3-1
+        P = fold_dir()
+        put(P, "a")
+        put(P, "b", absorbed_by="a")
+        put(P, "c", absorbed_by="b")
+        plan = wm.fold_census(programs=P, now=NOW)
+        self.assertEqual(self.edge(plan, "c")["proposed_target"], "b")
+        self.assertEqual(self.edge(plan, "c")["terminal_owner"], "a")
+        self.assertEqual(wm.fold_apply(plan, by="t", programs=P, now=NOW)["refused"], [])
+        ms = st.read_all(P)
+        self.assertEqual((ms["c"]["absorbed_by"], pf.fold_note(ms["c"]), pf.fold_note(ms["b"])), ("b", None, None))
+        self.assertEqual(old_scope_slugs(P, "a"), {"a", "b", "c"})
+        self.assertEqual(wm.fold_verify(plan, programs=P), [])
+
+    def test_cli_census_writes_a_plan_and_verify_exits_1(self):
+        out = os.path.join(self.P, "plan.json")
+        env = dict(os.environ, WORK_STATE_PROGRAMS=self.P)
+        r = subprocess.run([sys.executable, os.path.join(HERE, "work_state.py"), "migrate", "--folds", "--census",
+                            "--out", out], capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(out) as fh:
+            self.assertEqual(json.load(fh)["schema"], wm.CENSUS_SCHEMA)
+        r = subprocess.run([sys.executable, os.path.join(HERE, "work_state.py"), "migrate", "--folds", "--verify", out],
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 1)
+
+
+class MigrateProgramRace(unittest.TestCase):
+    def test_refuses_when_a_bind_lands_between_plan_and_write(self):
+        P = fold_dir()
+        put(P, "r", bindings=None, lanes=[{"name": "old", "status": "completed", "kind": "agent"}])
+        real = st.validate_bindings
+        state = {"n": 0}
+
+        def racing(bs):
+            state["n"] += 1
+            if state["n"] == 1:  # a concurrent writer lands a binding after planning, before the lock
+                m = get(P, "r")
+                put(P, "r", **dict(m, bindings=[binding("T-6")]))
+            return real(bs)
+        st.validate_bindings = racing
+        try:
+            res = wm.migrate_program("r", programs=P, rows={}, now=NOW)
+        finally:
+            st.validate_bindings = real
+        self.assertEqual(res.get("error"), "manifest changed since planning; re-run")
+        self.assertEqual([b["ticket"] for b in get(P, "r")["bindings"]], ["T-6"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

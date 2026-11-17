@@ -242,6 +242,8 @@ def migrate_program(slug, *, dry_run=False, ticket_for=None, resolved=(), progra
         return dict(res, written=False, error="todo_open: complete each todo with the tracker adapter, then re-run")
     st.validate_bindings(p["manifest"]["bindings"])
     with st._Locked(slug, programs) as lk:
+        if any(lk.manifest.get(k) != m.get(k) for k in ("bindings", "lanes", "claims")):
+            return dict(res, written=False, error="manifest changed since planning; re-run")
         n = lk.write(dict({k: v for k, v in lk.manifest.items() if k not in ("lanes", "claims")},
                           bindings=p["manifest"]["bindings"]))
     if st.migration_floor(slug, programs) is None:
@@ -276,3 +278,261 @@ def migrate_all(*, dry_run=True, programs=None, now=None):
             elif isinstance(v, int) and k != "size_after_b":
                 totals[k] = totals.get(k, 0) + v
     return {"dry_run": dry_run, "programs": len(out), "totals": totals, "per_program": out}
+
+
+# ---------- migrate --folds: legacy fold shapes -> fold records (row 11) ----------
+# Census is read-only. Apply writes fold records only through work_state_store.absorb. Finish removes only
+# the exact legacy values the census recorded. Every write pass holds the graph lock (folds.lock).
+
+FOLD_STATUS = re.compile(r"^\s*(merged-into|superseded-by)-(\S+)\s*$", re.I)
+BARE_FOLD_STATUS = ("superseded", "absorbed")
+PROSE_FOLD = re.compile(r"^##\s+Taken over from\s+`?([^`\s]+)`?", re.M)
+DRIVER_TYPES = ("session", "lane", "bg", "agent", "workflow")
+CENSUS_SCHEMA = "fold-census/1"
+
+
+def _fold_claims(ms, programs):
+    """-> ({absorbed: [{shape, recorded_target}]}, {slug: exact legacy values --finish may remove})."""
+    claims, legacy = {}, {}
+
+    def add(absorbed, shape, target):
+        if absorbed:
+            claims.setdefault(absorbed, []).append({"shape": shape, "recorded_target": target})
+    for slug, m in sorted(ms.items()):
+        rec = {}
+        if m.get("absorbed_by"):
+            add(slug, "absorbed_by", m["absorbed_by"])
+        status = str(m.get("status") or "")
+        hit = FOLD_STATUS.match(status)
+        if hit or status.strip().lower() in BARE_FOLD_STATUS:
+            add(slug, "status", hit.group(2) if hit else None)
+            rec["status"] = m["status"]
+        if "superseded_by" in m:
+            add(slug, "superseded_by", m["superseded_by"] if isinstance(m["superseded_by"], str) else None)
+            rec["superseded_by"] = m["superseded_by"]
+        if "supersedes" in m:
+            for t in (m["supersedes"] if isinstance(m["supersedes"], list) else [m["supersedes"]]):
+                add(t if isinstance(t, str) else None, "supersedes", slug)
+            rec["supersedes"] = m["supersedes"]
+        dicts = []
+        for e in m.get("absorbs") or []:
+            if isinstance(e, str):
+                add(e, "absorbs", slug)
+            elif isinstance(e, dict):
+                add(e.get("program"), "absorbs_dict", slug)
+                dicts.append(e)
+        if dicts:
+            rec["absorbs"] = dicts
+        try:
+            with open(st.manifest_path(slug, programs)[:-5] + ".state.md") as fh:
+                for name in PROSE_FOLD.findall(fh.read()):
+                    add(name, "prose", slug)
+        except OSError:
+            pass
+        if rec:
+            legacy[slug] = rec
+    return claims, legacy
+
+
+def _binding_keys(m):
+    out = []
+    for b in m.get("bindings") or []:
+        out += [[b.get("ticket"), c.get("type"), c.get("id")] for c in b.get("carriers") or []] or \
+            [[b.get("ticket"), None, None]]
+    return out
+
+
+def _open_children(slug):
+    data = (src.read_cache(slug).get("tracker") or {}).get("data")
+    if not data:
+        return None
+    return sum(1 for c in data.get("children") or []
+               if ((c.get("state") or {}).get("type")) not in ("completed", "canceled", "duplicate"))
+
+
+def fold_census(programs=None, now=None):
+    """Read-only. -> the plan: every legacy fold edge from every shape, keyed by the absorbed program."""
+    now = time.time() if now is None else now
+    ms = st.read_all(programs)
+    claims, legacy = _fold_claims(ms, programs)
+    parent = {}
+    for a, cs in claims.items():
+        ptr = (ms.get(a) or {}).get("absorbed_by")
+        targets = sorted({c["recorded_target"] for c in cs if c["recorded_target"] and c["recorded_target"] != a})
+        parent[a] = ptr if ptr else (targets[0] if len(targets) == 1 else None)
+    graph = {s: {"program": s, "absorbed_by": parent.get(s)} for s in set(ms) | set(parent)}
+    for s in list(graph):
+        if s not in ms and not parent.get(s):
+            del graph[s]  # an unknown slug resolves as fold_target_missing
+    edges = []
+    for a, cs in sorted(claims.items()):
+        m = ms.get(a)
+        targets = sorted({c["recorded_target"] for c in cs if c["recorded_target"]})
+        conflicts = []
+        if m is None:
+            conflicts.append(f"{a} has no manifest")
+        if len([t for t in targets if t != a]) > 1:
+            conflicts.append(f"targets disagree: {', '.join(t for t in targets if t != a)}")
+        if not [t for t in targets if t != a]:
+            conflicts.append("no target named: fill proposed_target in the plan")
+        chain, note = pf.fold_chain(a, graph)
+        cycle = bool(note and note.startswith("fold_cycle"))
+        if note and not cycle and m is not None and parent.get(a):
+            conflicts.append(note)
+        ptr = (m or {}).get("absorbed_by")
+        proposed = ptr if ptr else (None if note else chain[-1])
+        owner = None if note else chain[-1]
+        committed = bool(m and ptr and pf.fold_note(m) is None)
+        carriers = [f"{c['type']}:{c['id']}" for b in (m or {}).get("bindings") or [] for c in b.get("carriers") or []
+                    if c.get("type") in DRIVER_TYPES]
+        kids = _open_children(a) if m else None
+        if committed:
+            closed = m["fold"]["closed"]
+            disposition = "open" if closed is None else f"closed: {closed['reason']}"
+        elif any(c.split(":")[0] in ("session", "lane") for c in carriers) or (kids or 0) > 0:
+            disposition = "open"
+        else:
+            disposition = "closed: goal done or dropped before fold (census)"
+        fam = [owner] + pf.fold_family(owner, graph) if owner else []
+        mine = {b.get("ticket") for b in (m or {}).get("bindings") or []}
+        dups = sorted({t for s in fam if s != a and s in ms for b in ms[s].get("bindings") or []
+                       for t in [b.get("ticket")] if t in mine})
+        dest = st.destination_ok(owner, ms) if owner else (False, "no owner")
+        edges.append({"absorbed": a, "claims": cs, "recorded_targets": targets, "proposed_target": proposed,
+                      "terminal_owner": owner, "committed": committed, "drivers": carriers, "open_map_children": kids,
+                      "unmigrated": [k for k in ("lanes", "claims") if k in (m or {})], "family_duplicates": dups,
+                      "conflicts": conflicts, "self_edge": a in targets, "cycle": cycle,
+                      "destination_ok": dest[0], "destination_why": dest[1], "disposition": disposition})
+    keys = {s: _binding_keys(ms[s]) for e in edges for s in (e["absorbed"], e["terminal_owner"]) if s in ms}
+    return {"schema": CENSUS_SCHEMA, "taken_at": st.now_iso(now), "programs": programs or st.PROGRAMS,
+            "edges": edges, "legacy": legacy, "binding_keys": keys}
+
+
+def _closed_reason(disposition):
+    return None if disposition == "open" else (disposition.split(":", 1)[1].strip() or disposition)
+
+
+def _fold_preflight(plan, ms):
+    errs = []
+    for e in plan["edges"]:
+        a, d = e["absorbed"], e.get("disposition")
+        if not d or not (d == "open" or (d.startswith("closed:") and d[7:].strip())):
+            errs.append(f"{a}: disposition is null or not 'open' / 'closed: <reason>'")
+        if e.get("conflicts"):
+            errs.append(f"{a}: conflict: {'; '.join(e['conflicts'])}")
+        if e.get("self_edge"):
+            errs.append(f"{a}: self-edge")
+        if e.get("cycle"):
+            errs.append(f"{a}: cycle")
+        if not e.get("proposed_target"):
+            errs.append(f"{a}: no proposed_target")
+            continue
+        if a not in ms or not (ms[a].get("goal") or "").strip():
+            errs.append(f"{a}: no manifest or no goal")
+            continue
+        ptr = ms[a].get("absorbed_by")
+        if ptr and ptr != e["proposed_target"]:
+            errs.append(f"{a}: already absorbed by {ptr}, plan says {e['proposed_target']} (never overwritten)")
+        graph = dict(ms, **{a: dict(ms[a], absorbed_by=e["proposed_target"])})
+        owner = pf.terminal_owner(a, graph)
+        if d == "open":
+            ok, why = st.destination_ok(owner, ms)
+            if not ok:
+                errs.append(f"{a}: open mission cannot move under {owner}: {why}")
+    return errs
+
+
+def fold_apply(plan, *, by, programs=None, now=None):
+    """Refuses the whole plan on any preflight error, every manifest untouched; else absorb per edge (a committed
+    edge is a retry and writes nothing). Removes nothing."""
+    with st._GraphLock(programs):
+        ms = st.read_all(programs)
+        errs = _fold_preflight(plan, ms)
+        if errs:
+            return {"applied": [], "refused": errs}
+        applied = []
+        for e in plan["edges"]:
+            r = st.absorb(e["proposed_target"], e["absorbed"], by=by, closed_reason=_closed_reason(e["disposition"]),
+                          now=now, programs=programs)
+            applied.append(dict(r, absorbed=e["absorbed"], into=e["proposed_target"]))
+        return {"applied": applied, "refused": []}
+
+
+def fold_finish(plan, *, programs=None):
+    """Remove exactly the recorded legacy values, per manifest. The `fold-migrated` event is appended BEFORE the
+    removal, so a crash between them loses no audit row; a re-run that finds the event appends no second one."""
+    out = {"removed": {}, "refused": {}, "complete": []}
+    with st._GraphLock(programs):
+        for slug, rec in sorted(plan["legacy"].items()):
+            if not os.path.exists(st.manifest_path(slug, programs)):
+                out["refused"][slug] = "manifest gone"
+                continue
+            with st._Locked(slug, programs) as lk:
+                m, remove, why = lk.manifest, {}, None
+                for k, v in rec.items():
+                    if k == "absorbs":
+                        dicts = [e for e in m.get("absorbs") or [] if isinstance(e, dict)]
+                        if any(d not in v for d in dicts):
+                            why = "absorbs changed since census; re-census"
+                        elif dicts:
+                            remove["absorbs"] = dicts
+                    elif k in m and m[k] != v:
+                        why = f"{k} changed since census; re-census"
+                    elif k in m:
+                        remove[k] = v
+                if why:
+                    out["refused"][slug] = why
+                    continue
+                if not remove:
+                    out["complete"].append(slug)
+                    continue
+                if not any(r.get("event") == "fold-migrated" and r.get("plan") == plan["taken_at"]
+                           for r in st._log_rows(slug, programs)):
+                    st.append_event(slug, {"event": "fold-migrated", "plan": plan["taken_at"], "removed": remove},
+                                    programs)
+                new = {k: v for k, v in m.items() if k not in remove}
+                if "absorbs" in remove:
+                    new["absorbs"] = [e for e in m["absorbs"] if not isinstance(e, dict)]
+                lk.write(new)
+                out["removed"][slug] = sorted(remove)
+    return out
+
+
+def fold_verify(plan, *, programs=None):
+    """Acceptance A4 -> list of violations (empty = pass). New binds and retires since the census never fail it."""
+    ms, viol = st.read_all(programs), []
+    for slug, rec in sorted(plan["legacy"].items()):
+        m = ms.get(slug) or {}
+        for k, v in rec.items():
+            cur = [e for e in m.get("absorbs") or [] if isinstance(e, dict) and e in v] if k == "absorbs" else \
+                (m.get(k) == v and k in m)
+            if cur:
+                viol.append(f"legacy_present:{slug}:{k}")
+    for e in plan["edges"]:
+        a = e["absorbed"]
+        m = ms.get(a)
+        if not m or m.get("absorbed_by") != e["proposed_target"] or pf.fold_note(m) is not None:
+            viol.append(f"fold_unrecorded:{a}")
+            continue
+        chain, note = pf.fold_chain(a, ms)
+        if note:
+            viol.append(f"{note}:{a}")
+            continue
+        if a not in [x for x in ms[chain[-1]].get("absorbs") or [] if isinstance(x, str)]:
+            viol.append(f"mirror_missing:{a}:{chain[-1]}")
+    since = st.parse_iso(plan["taken_at"])
+    for slug, keys in sorted(plan["binding_keys"].items()):
+        m = ms.get(slug) or {}
+        now_keys = {tuple(k) for k in _binding_keys(m)}
+        tickets = {b.get("ticket") for b in m.get("bindings") or []}
+        gone = [r for r in st._log_rows(slug, programs) if st.parse_iso(r.get("ts")) >= since - 1]
+        for t, ctype, cid in keys:
+            if (t, ctype, cid) in now_keys or (ctype is None and t in tickets):
+                continue
+            if any(r.get("event") == "binding-retired" and r.get("lane") == t for r in gone):
+                continue
+            if any(r.get("event") == "carrier-retired" and r.get("lane") == t
+                   and any(c.get("id") == cid for c in r.get("carriers") or []) for r in gone):
+                continue
+            viol.append(f"binding_lost:{slug}:{t}:{ctype}:{cid}")
+    return viol

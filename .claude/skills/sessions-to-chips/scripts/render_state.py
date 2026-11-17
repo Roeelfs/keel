@@ -131,6 +131,16 @@ def read_grills(slug, problems):
     return {"open": open_q, "answered": answered}
 
 
+def missions_of(snap):
+    """The owner's open folded missions (row 11), from the engine snapshot: program, its goal, map, since, binding
+    count, undriven. None when there is no snapshot (unknown, never 'none open')."""
+    if snap is None:
+        return None
+    return [{"program": r["program"], "goal": r.get("goal"), "map": r.get("map"), "since": r.get("since"),
+             "bindings": r.get("bindings") or 0, "undriven": bool(r.get("undriven"))}
+            for r in snap.get("missions") or []]
+
+
 def read_snapshot(slug, deadline, problems):
     """The engine's snapshot under the remaining deadline; on timeout, its cached tier with no network."""
     base = [sys.executable, "-I", os.path.join(HERE, "work_state.py")]
@@ -574,7 +584,7 @@ def build_payload(slug, now, run=subprocess.run, deadline=None):
                    "age_s": ((snap or {}).get("remote_age_s") or {}).get("tracker")})
     payload = {
         "schema": SCHEMA, "kind": "program", "program": slug, "name": name, "generated_at": utc(now), "goal": manifest.get("goal"),
-        "map": manifest.get("map"), "destination": view.get("destination"),
+        "map": manifest.get("map"), "missions": missions_of(snap), "destination": view.get("destination"),
         "updated_at": (head or {}).get("updated_at"), "head": head,
         "status": at_wake.get("status"), "at_wake_at": at_wake.get("at"),
         "now": {"outcomes": out_now, "needs_you": needs_you(view, grills, snap),

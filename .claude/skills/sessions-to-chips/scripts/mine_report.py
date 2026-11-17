@@ -92,10 +92,23 @@ def _orphan_sweep_kits(sweep, owned):
     return out
 
 
+def _owner(p):
+    """The program that answers for p: itself, or for a folded program its terminal owner (row 11,
+    program_family.terminal_owner, computed by mine_all); the immediate absorber when unresolved."""
+    return (p.get("owner") or p["absorbed_by"]) if p.get("absorbed_by") else p["slug"]
+
+
+def _mission_kit(p):
+    return (f"Program {p['slug']} owes open folded mission(s) " + ", ".join(f"`{m}`" for m in p["missions_open"])
+            + " and has no manager on this account. For each, reply `start " + p["slug"] + "` to drive it (then `"
+            "work_state.py bind --program <mission>` plus a carrier), or close it with `work_state.py mission-close "
+            "--mission <mission> --reason <evidence>`; the dispatcher starts nothing unasked.")
+
+
 def ruling_recipients(ctx):
     """Who a cross-cutting ruling must reach: every live manager here, every present lineage
     session here of a live program with no live manager here (orphan children never load the
-    role), and each absorbed program's absorber. Full local_ ids, sorted."""
+    role), and each absorbed program's terminal owner. Full local_ ids, sorted."""
     progs = {p["slug"]: p for p in ctx["programs"]}
     out = set()
     for p in ctx["programs"]:
@@ -103,7 +116,7 @@ def ruling_recipients(ctx):
             out.add(p["relay_to"])
         elif p["live"]:
             out |= set(p.get("present_here") or [])
-        absorber = progs.get(p["absorbed_by"]) if p["absorbed_by"] else None
+        absorber = progs.get(_owner(p)) if p["absorbed_by"] else None
         if absorber and absorber["relay_to"]:
             out.add(absorber["relay_to"])
     return sorted(out)
@@ -171,14 +184,21 @@ def build_plan(ctx):
                {"id": "worktree-sweep", "prompt": os.path.join(PROMPTS, "worktree-sweep.md"), "model": "sonnet",
                 "inputs": {"CHECKPOINT": ctx["since_iso"], "REPOS": repos,
                            "KNOWN": os.path.join(ctx["work"], "handoff-sweep.json")}, "out": worktrees}]
-    messages, kits = [], []
+    messages, kits, repairs = [], [], {}
+    for p in ctx["programs"]:
+        if p.get("absorbed_by") and p.get("fold_record") is False:
+            repairs.setdefault(_owner(p), []).append(
+                f"`{p['slug']}` has no fold record: run `work_state.py absorb --program {_owner(p)} --from {p['slug']}`")
     for p in ctx["programs"]:
         children = [s["out"] for s in phase2 if s.get("program") == p["slug"]]
         rows_file, n_rows = sweeps_of.get(p["slug"], (None, 0))
-        if not (p["moved"] or children or n_rows or p["kind"] == "candidate"):
+        if not (p["moved"] or children or n_rows or p["kind"] == "candidate" or p.get("missions_open")
+                or repairs.get(p["slug"])):
             continue
         base = {"program": p["slug"], "handoff": handoff_of.get(p["slug"]), "children": children,
                 "decisions": decisions, "worktrees": worktrees, "sweeps": rows_file, "state": p["fold"]["state"]}
+        if repairs.get(p["slug"]):
+            base["repairs"] = repairs[p["slug"]]
         if p["kind"] == "candidate":  # the dispatcher resolves the target from the route at send time
             messages.append(dict(base, kind="candidate", target=None, session=p["session"], route=p.get("route")))
             if not p.get("route"):
@@ -186,13 +206,19 @@ def build_plan(ctx):
                             f"{p['prs']} PRs, handoff `{handoff_of.get(p['slug'])}`. Reply `absorb <slug>` (recommended "
                             f"when its tickets sit in that program's map), `promote`, or `leave`; the dispatcher records "
                             f"it with `mine_report.py --route {p['session']} <reply>`.")
-        elif not p["live"]:  # whole family archived: its rows ride the absorber's message, never a start
-            absorber = next((q for q in ctx["programs"] if q["slug"] == p["absorbed_by"]), None)
+        elif not p["live"] and p.get("missions_open"):  # a quiet owner still owes its folded missions
+            messages.append(dict(base, kind="no-manager-here", target=None, missions=p["missions_open"]))
+            kits.append(_mission_kit(p))
+        elif not p["live"]:  # whole family archived: its rows ride the owner's message, never a start
+            absorber = next((q for q in ctx["programs"] if q["slug"] == _owner(p)), None)
             messages.append(dict(base, kind="closed-program-rows", target=(absorber or {}).get("relay_to")))
         elif p["absorbed_by"]:
-            messages.append(dict(base, kind="fold-notice", target=p["relay_to"], absorber=p["absorbed_by"]))
+            messages.append(dict(base, kind="fold-notice", target=p["relay_to"], absorber=_owner(p)))
         elif p["relay_to"]:
             messages.append(dict(base, kind="catchup", target=p["relay_to"]))
+        elif p.get("missions_open"):
+            messages.append(dict(base, kind="no-manager-here", target=None, missions=p["missions_open"]))
+            kits.append(_mission_kit(p))
         else:
             messages.append(dict(base, kind="no-manager-here", target=None))
             kits.append(f"Program {p['slug']} has no manager on this account. Reply `start {p['slug']}` (recommended: "

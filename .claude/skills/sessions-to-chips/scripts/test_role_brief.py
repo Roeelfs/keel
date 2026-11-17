@@ -230,5 +230,29 @@ class Load(Base):
         self.assertFalse(os.path.exists(rb.ack_path("demo", self.programs)))
 
 
+class MissionHealth(Base):
+    """Row 11: one health line per undriven open mission, read from the engine's snapshot cache."""
+
+    def lines(self, missions=None, write=True):
+        ws_dir = os.path.join(self.tmp, "ws")
+        os.makedirs(ws_dir, exist_ok=True)
+        if write:
+            _write(os.path.join(ws_dir, "demo.json"), json.dumps({} if missions is None else {"missions": missions}))
+        now = dt.datetime(2026, 11, 5, 12, tzinfo=dt.timezone.utc)
+        with mock.patch.dict(os.environ, {"WORK_STATE_DIR": ws_dir}), \
+                mock.patch.object(rb, "keel_behind", return_value=(0, "/k")):
+            return [x for x in rb.health_lines("demo", self.programs, now=now) if x.startswith("mission")]
+
+    def test_undriven_row_prints_driven_row_does_not(self):
+        rows = [{"program": "lost", "undriven": True}, {"program": "kept", "undriven": False}]
+        self.assertEqual(self.lines({"taken_at": "2026-11-05T11:30:00Z", "rows": rows}),
+                         ["mission lost: undriven (snapshot 30m old)"])
+        self.assertEqual(self.lines({"taken_at": "2026-11-05T11:30:00Z", "rows": rows[1:]}), [])
+
+    def test_no_cache_key_reads_unknown(self):
+        self.assertEqual(self.lines(None), ["missions: unknown (no snapshot)"])
+        self.assertEqual(self.lines(write=False), ["missions: unknown (no snapshot)"])
+
+
 if __name__ == "__main__":
     unittest.main()

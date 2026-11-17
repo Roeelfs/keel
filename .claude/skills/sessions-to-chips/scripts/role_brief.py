@@ -267,7 +267,29 @@ def health_lines(slug, programs=None, run=subprocess.run, session=None, now=None
     except OSError:
         if os.path.isfile(base + ".state.md"):
             out.append(f"State page never rendered: run render_state.py --program {slug} this turn.")
-    return out + head_health(slug, base, session, now or dt.datetime.now(dt.timezone.utc))
+    now = now or dt.datetime.now(dt.timezone.utc)
+    return out + mission_health(slug, now) + head_health(slug, base, session, now)
+
+
+def mission_health(slug, now):
+    """One line per undriven open folded mission, read from the engine's snapshot cache (row 11). It never
+    re-derives liveness: no cache key means `unknown`, never `none`."""
+    state_dir = os.environ.get("WORK_STATE_DIR") or os.path.join(
+        os.environ.get("S2C_CLAUDE_HOME") or os.path.join(os.path.expanduser("~"), ".claude"), "state", "work-state")
+    try:
+        with open(os.path.join(state_dir, f"{slug}.json")) as fh:
+            missions = json.load(fh).get("missions")
+    except (OSError, ValueError, AttributeError):
+        missions = None
+    if not isinstance(missions, dict):
+        return ["missions: unknown (no snapshot)"]
+    try:
+        taken = dt.datetime.strptime(missions.get("taken_at") or "", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+        age = f"{int((now - taken).total_seconds() // 60)}m old"
+    except ValueError:
+        age = "age unknown"
+    return [f"mission {r.get('program')}: undriven (snapshot {age})" for r in missions.get("rows") or []
+            if r.get("undriven")]
 
 
 # ---------- the brief ----------

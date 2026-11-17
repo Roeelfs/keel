@@ -425,7 +425,11 @@
   function lands() {
     return el('div', { class: 'lands' }, el('div', { class: 'eyebrow' }, 'What this track is achieving'),
       el('p', { class: 'destination' }, data.destination || data.goal || 'No destination written'),
-      data.destination && data.goal && data.goal !== data.destination ? el('p', { class: 'goal-under' }, 'Goal: ' + data.goal) : null);
+      data.destination && data.goal && data.goal !== data.destination ? el('p', { class: 'goal-under' }, 'Goal: ' + data.goal) : null,
+      (data.missions || []).length ? el('ul', { class: 'goal-under' }, data.missions.map(function (m) {
+        return el('li', null, 'Folded mission ' + m.program + ': ' + (m.goal || 'no goal') + ' (map ' + (m.map || 'none') +
+          ', since ' + (m.since || '?') + ', ' + m.bindings + ' binding(s)) ', m.undriven ? pill('undriven', 'warn') : null);
+      })) : null);
   }
   function nextOutcomes() {
     var list = (data.now || {}).outcomes || [];

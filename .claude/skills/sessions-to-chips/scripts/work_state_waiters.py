@@ -1,14 +1,28 @@
 """Derived handoffs from tracker relations and existing ticket ownership; the told record is the store's."""
 
+import program_family as pf
+
 
 def _session(sid, ctx):
     row = ctx["sessions"].get(sid) or ctx["sessions"].get(ctx["cli"].get(sid, "")) or {}
     return f"{row['title']} ({sid})" if row.get("title") else sid
 
 
+def _live(p):
+    return p is not None and not p.get("absorbed_by") and str(p.get("status") or "").lower() not in ("done", "closed")
+
+
 def _programs(ctx):
-    return [p for p in ctx.get("programs") or [] if not p.get("absorbed_by")
-            and str(p.get("status") or "").lower() not in ("done", "closed")]
+    """Every manifest whose bindings count, each with the manager that answers for it: a live program answers
+    for itself; an absorbed manifest is answered for by its live terminal owner (row 11)."""
+    ms = ctx.get("programs") or []
+    by_slug = {p.get("program"): p for p in ms if p.get("program")}
+    out = []
+    for p in ms:
+        owner = p if not p.get("absorbed_by") else by_slug.get(pf.terminal_owner(p.get("program"), by_slug))
+        if _live(owner):
+            out.append(dict(p, manager_session=owner.get("manager_session") or owner.get("orchestrator_session")))
+    return out
 
 
 def _owners(ticket, ctx, *, managers=True):
@@ -20,7 +34,7 @@ def _owners(ticket, ctx, *, managers=True):
         return ", ".join(_session(s, ctx) for s in sessions)
     if not managers:
         return ""
-    managers = {p.get("manager_session") or p.get("orchestrator_session") for p in programs
+    managers = {p.get("manager_session") for p in programs
                 if ticket == (p.get("map") or {}).get("issue")
                 or any(b["ticket"] == ticket for b in p.get("bindings") or [])}
     if ticket in {c["ticket"] for c in (ctx.get("tracker") or {}).get("children") or []}:
