@@ -436,5 +436,103 @@ class RulingRecipientsTests(unittest.TestCase):
         self.assertTrue(any("trust" in k and "cwd" in k for k in plan["phases"][2]["founder_kits"]))
 
 
+def fold_prog(slug, live=True, relay_to=None, absorbed_by=None, owner=None, missions_open=(), fold_record=True,
+              moved=True):
+    return {"kind": "manager", "slug": slug, "key": slug, "managers": [{"sid": f"local_{slug}0000001"}],
+            "lineage": [], "live": live, "present_here": [], "checkpoint": NOW - H, "checkpoint_src": "test",
+            "checkpoint_sid": None, "moved": moved, "absorbed_by": absorbed_by, "conflict": False,
+            "relay_to": relay_to, "fold": {"state": f"/nonexistent/{slug}.state.md"},
+            "owner": owner or (None if absorbed_by else slug), "missions_open": list(missions_open),
+            "fold_record": fold_record}
+
+
+class FoldRoutingTests(unittest.TestCase):
+    """Row 11: mining resolves every fold through program_family.terminal_owner."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.manifests = [{"slug": "a"}, {"slug": "b", "absorbed_by": "a"}, {"slug": "c", "absorbed_by": "b"}]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def plan(self, programs):
+        root = self.tmp.name
+        ledger = os.path.join(root, "ledger")
+        os.makedirs(ledger, exist_ok=True)
+        ctx = {"date": "2026-11-17", "s2c": root, "now": NOW, "work": root, "programs": programs, "digests": {},
+               "ledger_dir": ledger, "routes_file": os.path.join(root, "routes.jsonl"), "since_iso": "x",
+               "here": "aaaa", "dry_run": True}
+        return mine_report.build_plan(ctx)
+
+    def messages(self, plan):
+        return {m["program"]: m for m in plan["phases"][2]["messages"]}
+
+    def test_absorb_route_through_a_chain_resolves_to_the_terminal_owners_manager(self):
+        rows = {"local_a0000001": {"sessionId": "local_a0000001", "_acct": "aaaa", "lastActivityAt": int(NOW * 1000)}}
+        fams = {"a": {"managers": ["local_a0000001"]}}
+        cand = {"route": "absorb", "program": "b", "slug": "x"}
+        before = dict(cand)
+        owner = mine_all.candidate_owner("local_x", cand, {"local_x": cand}, fams, rows, "aaaa", self.manifests)
+        self.assertEqual(owner, "local_a0000001")
+        self.assertEqual(cand, before)  # the route record is never rewritten
+
+    def test_fold_notice_names_the_terminal_owner_and_still_reaches_a_live_old_manager(self):
+        progs = [fold_prog("a", relay_to="local_a0000001"),
+                 fold_prog("c", relay_to="local_c0000001", absorbed_by="b", owner="a")]
+        m = self.messages(self.plan(progs))
+        self.assertEqual((m["c"]["kind"], m["c"]["absorber"], m["c"]["target"]), ("fold-notice", "a", "local_c0000001"))
+        self.assertNotIn("repairs", m["a"])
+
+    def test_pointer_without_fold_record_adds_the_repair_line_to_the_owner(self):
+        progs = [fold_prog("a", relay_to="local_a0000001"),
+                 fold_prog("c", relay_to="local_c0000001", absorbed_by="b", owner="a", fold_record=False)]
+        m = self.messages(self.plan(progs))
+        self.assertEqual(m["c"]["kind"], "fold-notice")  # the handover notice is unchanged
+        self.assertEqual(m["a"]["repairs"], ["`c` has no fold record: run `work_state.py absorb --program a --from c`"])
+
+    def test_closed_program_rows_and_rulings_go_to_the_terminal_owner(self):
+        progs = [fold_prog("a", relay_to="local_a0000001"),
+                 fold_prog("c", live=False, absorbed_by="b", owner="a")]
+        plan = self.plan(progs)
+        m = self.messages(plan)
+        self.assertEqual((m["c"]["kind"], m["c"]["target"]), ("closed-program-rows", "local_a0000001"))
+        self.assertIn("local_a0000001", plan["ruling_recipients"])
+
+    def test_quiet_owner_with_an_open_mission_gets_no_manager_here(self):
+        plan = self.plan([fold_prog("a", live=False, moved=False, missions_open=["c"])])
+        m = self.messages(plan)
+        self.assertEqual((m["a"]["kind"], m["a"]["missions"]), ("no-manager-here", ["c"]))
+        kit = [k for k in plan["phases"][2]["founder_kits"] if "`c`" in k]
+        self.assertTrue(kit and "mission-close" in kit[0] and "bind --program" in kit[0], kit)
+
+
+class FoldOwnerFloorTests(unittest.TestCase):
+    """An owner whose whole lineage is past the window floor stays visible while it owes an open mission."""
+
+    def setUp(self):
+        fx = self.fx = Fixture()
+        old = NOW - 30 * 24 * H
+        fx.transcript("-wt-q", "cli-q", [turn(11, old, "user"), turn(12, old, parent=u(11))], mtime=old)
+        fx.session(ACCT_HERE, "local_q0000001", "[Manager] Quiet owner", "cli-q", last=old, lastAssistantUuid=u(12))
+        progs = os.path.join(fx.home, "orchestrator", "programs")
+        fold = {"id": "lost@2026-10-01T00:00:00Z", "since": "2026-10-01T00:00:00Z", "by": "t", "closed": None}
+        for m in ({"program": "quiet-owner", "goal": "g", "manager_session": "local_q0000001"},
+                  {"program": "lost", "goal": "the lost goal", "manager_session": "local_l0000001",
+                   "absorbed_by": "quiet-owner", "fold": fold}):
+            with open(os.path.join(progs, m["program"] + ".json"), "w") as fh:
+                json.dump(m, fh)
+
+    def tearDown(self):
+        self.fx.tmp.cleanup()
+
+    def test_owner_past_the_floor_is_kept_and_routed_no_manager_here(self):
+        r, work = self.fx.run("--dry-run", "--here", "aaaa")
+        plan = json.load(open([os.path.join(work, f) for f in os.listdir(work) if f.endswith("mine-plan.json")][0]))
+        self.assertIn("quiet-owner", plan["program_slugs"], r.stdout[-1500:] + r.stderr[-1500:])
+        m = {x["program"]: x for x in plan["phases"][2]["messages"]}
+        self.assertEqual((m["quiet-owner"]["kind"], m["quiet-owner"]["missions"]), ("no-manager-here", ["lost"]))
+
+
 if __name__ == "__main__":
     unittest.main()

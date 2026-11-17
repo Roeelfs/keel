@@ -237,10 +237,9 @@ def sys_python():
 
 def program_scope(slug, rows, programs=None):
     """-> (manager sids, manager ids incl. CLI ids, family non-manager sids). Program identity is
-    program_family's: exact-id resolution, plus the family's instances; absorbed programs' children
-    count toward their absorber."""
+    program_family's: exact-id resolution, plus the family's instances; every program whose terminal
+    owner is `slug` (fold_family, inverted from `absorbed_by`) has its children counted here."""
     manifests = pf.load_manifests(programs)
-    by_slug = {m["slug"]: m for m in manifests}
     fams = pf.families(rows, manifests)
 
     def managers_of(s):
@@ -250,7 +249,7 @@ def program_scope(slug, rows, programs=None):
                 out.add(sid)
         return out
 
-    slugs = [slug] + [a for a in ((by_slug.get(slug) or {}).get("absorbs") or []) if isinstance(a, str)]
+    slugs = [slug] + pf.fold_family(slug, manifests)
     mgrs = set().union(*(managers_of(s) for s in slugs))
     lineage = set()
     for sid in rows:
@@ -259,6 +258,60 @@ def program_scope(slug, rows, programs=None):
             lineage.add(sid)
     ids = set(mgrs) | {rows[s].get("cliSessionId") for s in mgrs if rows[s].get("cliSessionId")}
     return mgrs, ids, lineage
+
+
+def fold_members(slug, manifest, mode, now, *, refresh=False, programs=None, runner=subprocess.run, check=None):
+    """One record per member of fold_family(slug), plus the slug itself when it is folded into a cycle or a
+    missing target (its open mission is then flagged on itself). A member holding bindings or an open mission
+    gets a sub-context: its own bindings and its own tracker (`snapshot_cmd`, TTL-refreshed in snapshot,
+    cache-only in guard), `live_bg` None. An unmigrated or invalid member gets none, and a note."""
+    graph = pf._graph(pf.load_manifests(programs or st.PROGRAMS))
+    members = pf.fold_family(slug, graph)
+    _, own_note = pf.fold_chain(slug, graph) if manifest.get("absorbed_by") else ([], None)
+    out = []
+    for m_slug in members + ([slug] if own_note else []):
+        try:
+            m = manifest if m_slug == slug else st.read_manifest(m_slug, programs)
+        except (OSError, ValueError):
+            out.append({"slug": m_slug, "goal": None, "fold": None, "open": True, "bindings": [], "sub": None,
+                        "notes": [f"folded_unreadable:{m_slug}"], "fix": None, "self": False})
+            continue
+        rec = {"slug": m_slug, "goal": m.get("goal"), "fold": m.get("fold"), "map": (m.get("map") or {}).get("issue"),
+               "open": pf.mission_open(dict(m, program=m_slug)), "bindings": [], "sub": None, "fix": None,
+               "self": m_slug == slug, "notes": [n for n in (pf.fold_note(dict(m, program=m_slug)),
+                                                             own_note if m_slug == slug else None) if n]}
+        out.append(rec)
+        if rec["self"]:
+            rec["bindings"] = m.get("bindings") or []
+            continue
+        if "lanes" in m or "claims" in m:
+            rec["notes"].append(f"folded_unmigrated:{m_slug}")
+            rec["fix"] = f"work_state.py migrate --program {m_slug}"
+            continue
+        try:
+            st.validate_bindings(m.get("bindings") or [])
+        except st.SchemaError as exc:
+            rec["notes"].append(f"folded_invalid:{m_slug}:{exc}")
+            continue
+        rec["bindings"] = m.get("bindings") or []
+        if not (rec["bindings"] or rec["open"]):
+            continue
+        cache = read_cache(m_slug)
+        offline = mode == "guard"
+        tracker, t_age, tnotes, _ = load_tracker(m_slug, m, cache, now, refresh=refresh, offline=offline,
+                                                 runner=runner, check=check)
+        prs, _, gnotes = load_gh(m_slug, rec["bindings"], cache, now, refresh=refresh, offline=offline, runner=runner)
+        if not offline:
+            write_cache(m_slug, cache)
+        floor = st.migration_floor(m_slug, programs)
+        rec["sub"] = {"now": now, "slug": m_slug, "map_id": (m.get("map") or {}).get("issue"),
+                      "exit_criteria": None, "absorbed": True, "bindings": rec["bindings"], "tracker": tracker,
+                      "tracker_age_s": t_age, "has_tracker_cmd": bool(tracker_cmd(m)[0]), "prs": prs,
+                      "gh_age_s": None, "family_sessions": set(), "manager_ids": set(), "git": None, "state": {},
+                      "live_bg": None, "fp_cache": cache.get("fp") or {}, "ready_since": {}, "programs": [],
+                      "floor": floor if floor is not None else now - 86400, "pending_events": [],
+                      "notes": tnotes + gnotes}
+    return out
 
 
 def build_ctx(slug, *, mode="snapshot", refresh=False, stdin_facts=None, programs=None, runner=subprocess.run,
@@ -278,10 +331,12 @@ def build_ctx(slug, *, mode="snapshot", refresh=False, stdin_facts=None, program
     notes += gh_notes
     rows = pf.session_index()
     mgrs, mgr_ids, lineage = program_scope(slug, rows, programs)
+    folded = fold_members(slug, manifest, mode, now, refresh=refresh, programs=programs, runner=runner, check=check)
     lanes = st.read_lane_rows(now=now)
-    pids = [r.get("pid") for r in lanes.values()] + [c.get("pid") for b in bindings for c in b["carriers"]]
+    every = bindings + [b for f in folded for b in f["bindings"]]
+    pids = [r.get("pid") for r in lanes.values()] + [c.get("pid") for b in every for c in b["carriers"]]
     pmap = ps_pids(pids, runner=runner)
-    outs = {c.get("outfile") for b in bindings for c in b["carriers"] if c.get("outfile")}
+    outs = {c.get("outfile") for b in every for c in b["carriers"] if c.get("outfile")}
     outs |= {r.get("outfile") for r in lanes.values() if r.get("outfile")}
     outfiles = {o: os.path.exists(o) for o in outs}
     git = None
@@ -310,7 +365,7 @@ def build_ctx(slug, *, mode="snapshot", refresh=False, stdin_facts=None, program
     ownership = []
     for p in pf.load_manifests(programs or st.PROGRAMS):
         try:
-            ownership.append(st.read_manifest(p["slug"], programs))
+            ownership.append(dict(st.read_manifest(p["slug"], programs), program=p["slug"]))
         except (OSError, ValueError):
             continue  # An unreadable owner must never manufacture a recipient.
     ctx = {"now": now, "slug": slug, "map_id": (manifest.get("map") or {}).get("issue"),
@@ -321,7 +376,12 @@ def build_ctx(slug, *, mode="snapshot", refresh=False, stdin_facts=None, program
            "sessions": rows, "cli": cli, "family_sessions": lineage, "manager_ids": mgr_ids, "lanes": lanes, "proof_failures": lane_proof.failure_counts(),
            "pids": pmap, "outfiles": outfiles, "git": git, "state": facts, "live_bg": live_bg,
            "fp_cache": cache.get("fp") or {}, "ready_since": cache.get("ready_since") or {},
-           "floor": st.migration_floor(slug, programs), "pending_events": events, "notes": notes}
+           "floor": st.migration_floor(slug, programs), "pending_events": events, "notes": notes,
+           "fold_members": folded}
+    shared = {k: ctx[k] for k in ("sessions", "cli", "lanes", "pids", "outfiles", "proof_failures")}
+    for f in folded:
+        if f["sub"] is not None:
+            f["sub"].update(shared)
     if ctx["floor"] is None:
         ctx["floor"] = now - 86400
         notes.append("no_migration_floor:using_24h")

@@ -202,6 +202,14 @@ def wake_lines(at_wake_at):
     return ruling_lines(since) + instruction_changes(since) + [freshness_line()]
 
 
+def mission_lines(missions):
+    """One line per open folded mission (row 11). No snapshot prints nothing here: role_brief owns the
+    `missions: unknown` health line."""
+    return [f"{m['program']}: {m.get('goal') or 'no goal'} (map {m.get('map') or 'none'}, "
+            f"since {m.get('since') or '?'}, {m.get('bindings', 0)} binding(s), "
+            f"{'UNDRIVEN' if m.get('undriven') else 'driven'})" for m in missions or []]
+
+
 def brief(p, wake=None):
     """-> text. Sections in the founder's order: destination, done, architecture, design, decisions, next, holds,
     proof owed, then the keys to update. `wake` (from wake_lines) follows the head lines, outside the MAX_LINES bound."""
@@ -212,6 +220,7 @@ def brief(p, wake=None):
     narrative = f"State head updated {p.get('updated_at') or 'never'}" + (f" by {writer}" if writer else "") + \
         (f"; stale: {', '.join(f'{n} {k}' for k, n in (stale.get('counts') or {}).items()) or 'changes'} since then" if stale.get("stale") else "")
     out = [head, narrative, "", "Destination: " + (p.get("destination") or p.get("goal") or "not written"), ""]
+    out += _section("Open folded missions", mission_lines(p.get("missions")), cap=6)
     done = [f"{_day(d.get('date'))} {d['what']}" + (f" ({_refs(d['refs'])})" if d.get("refs") else "") +
             (f" [your claim; proof reaches {story.step_words(d.get('reached'))}]" if d.get("claim") else "")
             for d in st.get("done") or []]

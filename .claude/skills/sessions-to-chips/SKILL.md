@@ -146,13 +146,13 @@ account's stopped children ARE the program's work. By `kind`:
 
 - `catchup`: the manager here keeps its sidebar group, worktree and family; the handoff replaces
   its stale context. Archive older duplicate managers here. Rename BEFORE the catch-up.
-- `fold-notice`: the program was absorbed (manifest `absorbed_by`). The live manager is a duplicate
-  owner: it hands its live child over at its next checkpoint and runs hygiene; the absorber gets a
-  takeover note in its own message.
+- `fold-notice`: absorbed (`absorbed_by`). The live manager, a duplicate owner, hands its live child
+  over at its next checkpoint and runs hygiene; the terminal owner gets a takeover note
+  (CATCHUP_MESSAGE.md, with `repairs` and `missions`).
 - `no-manager-here`: grill the human in this session (start one, or leave it standalone;
   recommended answer first) and START NOTHING unasked. Under "relay to existing managers", list the
   program and its handoff path instead.
-- `closed-program-rows`: the family is archived; its rows ride the absorber's message.
+- `closed-program-rows`: archived, no open mission; rows ride the owner's message.
 - Config age is never a reason to re-dispatch: run `scripts/config_freshness.py` and refresh the
   `STALE-*` rows by message ([references/config-freshness.md](references/config-freshness.md)).
 

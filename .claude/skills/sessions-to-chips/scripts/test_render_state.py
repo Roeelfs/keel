@@ -604,6 +604,61 @@ class EndToEnd(unittest.TestCase):
         self.assertTrue(any(b["kind"] == "overlap" and {b["a"], b["b"]} == {"one", "two"} for b in index["blockers"]))
 
 
+class FoldedMissions(unittest.TestCase):
+    """Row 11: the owner's page and --context brief list its open folded missions with the absorbed goal; a
+    closed mission is omitted; nothing about missions is written into state.md."""
+
+    def setUp(self):
+        # Pin the store and the engine subprocess to this module's dirs: a module imported later in a full
+        # discover run rebinds both the store constants and os.environ.
+        import work_state_store as store
+        from unittest import mock
+        for name, value in (("PROGRAMS", PROGRAMS), ("STATE_DIR", WS)):
+            self.addCleanup(setattr, store, name, getattr(store, name))
+            setattr(store, name, value)
+        env = mock.patch.dict(os.environ, {
+            "S2C_CLAUDE_HOME": TMP, "S2C_STORE": os.path.join(TMP, "store"),
+            "S2C_SESSION_INDEX": os.path.join(TMP, "index.json"), "WORK_STATE_PROGRAMS": PROGRAMS,
+            "WORK_STATE_DIR": WS, "WORK_STATE_LANE_ROWS": os.path.join(TMP, "lanes.jsonl"),
+            "WORK_STATE_ANALYTICS": os.path.join(TMP, "analytics.jsonl")})
+        env.start()
+        self.addCleanup(env.stop)
+        clean_derived()
+        self.owner = write_program("mission-owner")
+        fold = {"id": "mission-open@2026-11-03T10:00:00Z", "since": "2026-11-03T10:00:00Z", "by": "t", "closed": None}
+        for slug, goal, f in (("mission-open", "Ship the folded payments goal", fold),
+                              ("mission-shut", "A finished folded goal",
+                               dict(fold, id="mission-shut@2026-11-03T10:00:00Z",
+                                    closed={"at": "2026-11-03T11:00:00Z", "reason": "landed"}))):
+            write_program(slug, manifest={"program": slug, "goal": goal, "manager_session": "gone",
+                                          "map": {"issue": slug.upper()}, "bindings": [],
+                                          "absorbed_by": "mission-owner", "fold": f})
+
+    def test_page_and_context_list_only_open_missions_and_state_md_stays_clean(self):
+        with open(self.owner + ".state.md") as fh:
+            before = fh.read()
+        render("mission-owner")
+        _, payload = payload_of(self.owner + ".state.html")
+        rows = payload["missions"]
+        self.assertEqual([r["program"] for r in rows], ["mission-open"])
+        self.assertEqual(rows[0]["goal"], "Ship the folded payments goal")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(rs.main(["--program", "mission-owner", "--context"], run=GhFake()), 0)
+        text = out.getvalue()
+        self.assertIn("Open folded missions", text)
+        self.assertIn("mission-open: Ship the folded payments goal", text)
+        self.assertNotIn("mission-shut", text)
+        with open(self.owner + ".state.md") as fh:
+            after = fh.read()
+        self.assertEqual(before, after)
+        self.assertNotIn("mission", after.lower())
+
+    def test_no_snapshot_means_unknown_not_none_open(self):
+        self.assertIsNone(rs.missions_of(None))
+        self.assertEqual(rs.missions_of({"missions": []}), [])
+
+
 class Degraded(unittest.TestCase):
     def setUp(self):
         clean_derived()

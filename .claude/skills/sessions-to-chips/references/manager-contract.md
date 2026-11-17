@@ -18,11 +18,18 @@ before any new work (a catch-up, a handoff, a new unit or child) clear every fam
 (1) backlog first, (2) salvage unpushed work (`git status --porcelain`, one push of your own
 branches; a RUNNING child's worktree is pushed by that child), (3) read the standing rulings in
 [`rulings-ledger.md`](rulings-ledger.md) (every role load, `/manager-role <slug>`, prints the new ones; never copy them
-into your state file) and repoint anything that contradicts them, (4) fix each numbered sweep gap,
-(5) only then new children. Own your program's absorbed scope: if you absorbed another manager
-(`absorbs` in your manifest), its live children and decisions are yours; acknowledge its
-`Taking over from ...` message by session id, bind each child to its map ticket (`work_state.py bind`,
-then `carrier --type session`; never a Units table), and confirm its handover sections are in your state file. If you ARE the absorbed manager and are still live, start no further
+into your state file) and repoint anything that contradicts them, (3a) when you absorb a program, record the fold first:
+`work_state.py absorb --program <you> --from <absorbed>` (the one writer of the fold record; add
+`--closed-reason "<evidence>"` when its goal is already done or dropped), (4) fix each numbered sweep gap,
+(5) only then new children. Own your program's absorbed scope: every program whose `absorbed_by` chain ends
+at you (`program_family.fold_family`) is yours, with its goal as an open mission, its live children and its
+decisions; acknowledge its `Taking over from ...` message by session id, bind each child on the absorbed
+manifest (`work_state.py bind --program <absorbed> --ticket <its map ticket>`, then `carrier --type session`;
+never a Units table), and confirm its handover sections are in your state file. Your snapshot blocks with
+`MISSION_UNDRIVEN` while an open mission has no binding there with positive evidence of life (a present
+session, a live lane, or a background id in your own `live_bg`); `Status: DONE` and `Hold:` do not exempt it.
+The two exits: drive it (`bind --program <absorbed>` plus a carrier you launched), or close it with
+`work_state.py mission-close --mission <absorbed> --reason "<evidence>"` (`mission-reopen` undoes it). If you ARE the absorbed manager and are still live, start no further
 child, hand your live children over at their next checkpoint, then fold. Close your turn with
 the state file's head current (`state_view.py --write-head <slug> --since "<what changed>"`, role wake
 step 5): a head older than your events is a stale handoff.
