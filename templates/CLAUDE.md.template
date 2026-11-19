@@ -93,6 +93,11 @@ quality bar — e.g. "correctness over speed", "never lose customer data".}}
 - Worktrees live under {{`.worktrees/` or your convention}}; launch the agent from
   the main checkout, then `cd` into the worktree.
 
+## Compact Instructions
+
+- A `[Manager]` session (keel's sessions-to-chips): never summarize role text. Keep only
+  `Role: v<id>` and `Run /manager-role <slug>`; the role is reloaded from disk after the compaction.
+
 ## Security
 
 - {{Point to `docs/security-policy.md` and state the top 2-3 hard rules — e.g.

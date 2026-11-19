@@ -282,7 +282,13 @@ Decisions log to
 **Role check (enforced), before the arm check:** a manager whose `<slug>.role.json` is missing, names an older
 role version, was written by another session, or predates the session's last compaction is blocked once per
 turn until it runs `/manager-role <slug>` ([`role.md`](role.md)); it has its own once-per-turn stamp and a
-kill-switch file. **Page check (shadow):** a turn that changed `<slug>.state.md` while the page stayed older logs
+kill-switch file. The load is recorded only after the whole brief reached the reader: a `| head -N` read records
+nothing (line 2 still carries a one-line digest of what is new), and the load points the owner manifest
+(`absorbed_by` followed) at the running session.
+**Compaction (managers):** never summarize role text. A compaction summary keeps only `Role: v<id>` and
+`Run /manager-role <slug>`; the rules are reloaded from disk, never carried as a paraphrase (2026-11-17: a
+summary carried an old version's rules as prose, and nothing reloaded them).
+**Page check (shadow):** a turn that changed `<slug>.state.md` while the page stayed older logs
 `would_block:page_not_rendered`; a touch-file switches it to blocking.
 
 ## Owned child continuation invariant

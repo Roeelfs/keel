@@ -254,5 +254,71 @@ class MissionHealth(Base):
         self.assertEqual(self.lines(write=False), ["missions: unknown (no snapshot)"])
 
 
+class TruncatedReadAndDigest(Base):
+    """2026-11-19: managers piped the brief through `| head -2` and the load still recorded. The ack is now the
+    last act after the whole brief reached the reader, and line 2 carries the changes."""
+
+    def run_cli(self, pipe_cmd, session="s1"):
+        env = dict(os.environ, WORK_STATE_PROGRAMS=self.programs, MANAGER_ROLE_OVERLAY=self.ov,
+                   WORK_STATE_DIR=os.path.join(self.tmp, "ws"))
+        cmd = f'"{sys.executable}" -I "{os.path.join(HERE, "role_brief.py")}" --program demo --session {session}'
+        return subprocess.run(f"{cmd} 2>&1 | {pipe_cmd}", shell=True, capture_output=True, text=True, env=env,
+                              timeout=60)
+
+    def test_head_two_records_nothing(self):
+        out = self.run_cli("head -2")
+        self.assertEqual(len(out.stdout.splitlines()), 2)
+        self.assertFalse(os.path.exists(rb.ack_path("demo", self.programs)), out.stdout)
+
+    def test_a_full_read_records_the_load(self):
+        out = self.run_cli("cat")
+        self.assertIn("End of role brief v", out.stdout)
+        self.assertTrue(os.path.exists(rb.ack_path("demo", self.programs)), out.stdout[-400:])
+
+    def test_line_two_is_the_digest_of_new_rules(self):
+        now = dt.datetime(2026, 11, 5, 12, tzinfo=dt.timezone.utc)
+        with mock.patch.object(rb, "keel_behind", return_value=(0, "/k")):
+            first = rb.brief("demo", "s1", now, self.programs)[0].splitlines()[1]
+        self.assertTrue(first.startswith("NEW SINCE YOUR LAST LOAD"), first)
+        self.assertIn("evening change", first)
+        since = dt.datetime(2026, 11, 5, 17, tzinfo=dt.timezone.utc)
+        line = rb.digest_line(since)
+        self.assertIn("evening change", line)
+        self.assertNotIn("old change", line)
+        self.assertIn("nothing", rb.digest_line(dt.datetime(2026, 11, 6, 0, tzinfo=dt.timezone.utc)))
+
+
+class OwnerClaim(Base):
+    """A load points the owner manifest at the running session, following `absorbed_by`."""
+
+    def manifest(self, slug, **kw):
+        _write(os.path.join(self.programs, slug + ".json"), json.dumps(dict({"program": slug}, **kw)))
+
+    def read(self, slug):
+        with open(os.path.join(self.programs, slug + ".json")) as fh:
+            return json.load(fh)
+
+    def test_the_absorber_gets_the_running_session(self):
+        self.manifest("harness", manager_session="local_2d34eeca (old account)", orchestrator_session="old-cli",
+                      updated_at="2026-11-16T12:00:00Z")
+        self.manifest("repo-hygiene", manager_session="new-cli", absorbed_by="harness", fold={})
+        now = dt.datetime(2026, 11, 19, 12, tzinfo=dt.timezone.utc)
+        with mock.patch.object(rb, "own_ids", return_value={"new-cli", "local_a1cfd2ad-0000"}):
+            owner, note = rb.claim_owner("repo-hygiene", "new-cli", now, self.programs)
+        self.assertEqual((owner, note), ("harness", None))
+        m = self.read("harness")
+        self.assertEqual(m["manager_session"], "local_a1cfd2ad-0000 (cli new-cli)")
+        self.assertEqual(m["orchestrator_session"], "new-cli")
+        self.assertEqual(m["updated_at"], "2026-11-19T12:00:00Z")
+        self.assertNotIn("updated_at", self.read("repo-hygiene"))
+
+    def test_no_manifest_or_no_session_writes_nothing(self):
+        now = dt.datetime(2026, 11, 19, 12, tzinfo=dt.timezone.utc)
+        self.assertEqual(rb.claim_owner("demo", "s1", now, self.programs), (None, None))
+        self.manifest("demo", manager_session="x")
+        self.assertEqual(rb.claim_owner("demo", "", now, self.programs), (None, None))
+        self.assertEqual(self.read("demo")["manager_session"], "x")
+
+
 if __name__ == "__main__":
     unittest.main()

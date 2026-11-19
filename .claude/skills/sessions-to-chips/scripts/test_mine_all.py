@@ -534,5 +534,29 @@ class FoldOwnerFloorTests(unittest.TestCase):
         self.assertEqual((m["quiet-owner"]["kind"], m["quiet-owner"]["missions"]), ("no-manager-here", ["lost"]))
 
 
+class AbsorbedManifestNeverCapturesASession(unittest.TestCase):
+    """An absorbed manifest still naming a live session (the 2026-11-19 Harness case: repo-hygiene, absorbed by
+    harness, held the resumed manager's ids) resolves to its absorber, never to itself."""
+
+    def test_absorbed_hit_resolves_to_the_owner(self):
+        with tempfile.TemporaryDirectory() as d:
+            sid = "f7c96cac-0000-4000-8000-000000000001"
+            for slug, extra in (("harness", {"manager_session": "local_2d34eeca (old account)"}),
+                                ("repo-hygiene", {"manager_session": sid, "absorbed_by": "harness",
+                                                  "fold": {}, "status": "done"})):
+                with open(os.path.join(d, slug + ".json"), "w") as fh:
+                    json.dump(dict({"program": slug}, **extra), fh)
+            os.utime(os.path.join(d, "harness.json"), (1, 1))  # the absorbed one is newer on disk
+            got = pf.manifest_for({sid}, pf.load_manifests(d))
+            self.assertEqual(got["slug"], "harness")
+
+    def test_a_broken_fold_is_dropped(self):
+        with tempfile.TemporaryDirectory() as d:
+            sid = "abcdef12-0000-4000-8000-000000000001"
+            with open(os.path.join(d, "orphan.json"), "w") as fh:
+                json.dump({"program": "orphan", "manager_session": sid, "absorbed_by": "gone"}, fh)
+            self.assertIsNone(pf.manifest_for({sid}, pf.load_manifests(d)))
+
+
 if __name__ == "__main__":
     unittest.main()
