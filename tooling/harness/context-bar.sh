@@ -22,6 +22,48 @@ esac
 
 input=$(cat)
 
+# --- Usage snapshot writer (rate_limits -> per-account JSON) ---
+# Detached and fully silenced: never delays, alters, or fails the statusline output.
+# Skips silently when rate_limits or an account identity is unavailable. Writes no tokens.
+_usage_snapshot() {
+    local rl
+    rl=$(printf '%s' "$input" | jq -c '
+        .rate_limits // empty
+        | {five_hour: (.five_hour // null), seven_day: (.seven_day // null)}
+        | map_values(if type == "object" and (.used_percentage|type) == "number"
+                     then {used_percentage, resets_at: (if (.resets_at|type) == "number" then .resets_at else null end)}
+                     else null end)
+        | select(.five_hour != null or .seven_day != null)' 2>/dev/null) || return 0
+    [[ -n "$rl" ]] || return 0
+
+    local dir="${CLAUDE_USAGE_DIR:-$HOME/.claude/run/claude-usage}"
+    umask 077
+    mkdir -p "$dir" 2>/dev/null || return 0
+
+    # Identity: the payload carries none (docs, 2026-11-19), so use `claude auth status`,
+    # cached per config dir for 10 min so redraws do not spawn it each time.
+    local cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}" key cache email="" mtime now
+    key=$(printf '%s' "$cfg" | cksum | cut -d' ' -f1)
+    cache="$dir/.identity-$key"
+    now=$(date +%s)
+    if [[ -f "$cache" ]]; then
+        mtime=$(stat -f %m "$cache" 2>/dev/null || stat -c %Y "$cache" 2>/dev/null)
+        [[ -n "$mtime" && $((now - mtime)) -lt 600 ]] && email=$(<"$cache")
+    fi
+    if [[ -z "$email" ]]; then
+        email=$(claude auth status --json 2>/dev/null | jq -r '.email // empty' 2>/dev/null)
+        [[ "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$ ]] || return 0
+        printf '%s' "$email" > "$cache.$$" && mv -f "$cache.$$" "$cache"
+    fi
+    [[ "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$ ]] || return 0
+
+    local out="$dir/$email.json" tmp="$dir/.$email.json.$$"
+    jq -n --arg a "$email" --argjson rl "$rl" --argjson t "$now" \
+        '{account: $a, five_hour: $rl.five_hour, seven_day: $rl.seven_day, written_at: $t}' \
+        > "$tmp" 2>/dev/null && mv -f "$tmp" "$out" || rm -f "$tmp"
+}
+( _usage_snapshot ) </dev/null >/dev/null 2>&1 &
+
 # Extract model, directory, session name, and cwd
 model=$(echo "$input" | jq -r '.model.display_name // .model.id // "?"')
 session_name=$(echo "$input" | jq -r '.session.name // .session_name // empty')
