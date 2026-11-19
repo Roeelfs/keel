@@ -313,6 +313,8 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(r.returncode, 3, r.stderr)
                 self.assertIn("claude /login", r.stderr)
                 self.assertNotIn(text, r.stdout)
+                self.assertIn("LANE RESULT: rc=3 runtime=claude", r.stdout)
+                self.assertIn("AUTH DEAD", r.stdout)
 
     def test_a_non_auth_error_envelope_is_re_emitted_and_fails(self):
         env = json.dumps({"type": "result", "subtype": "success", "is_error": True,
@@ -322,7 +324,51 @@ class RuntimeTests(unittest.TestCase):
                 self.run_env = {"STUB_RC": rc, "STUB_ENVELOPE": env}
                 r, _ = self.spawn(self.base, "--runtime", "claude")
                 self.assertEqual(r.returncode, 1, r.stderr)
-                self.assertEqual(r.stdout, env)
+                # The envelope is re-emitted unchanged; only the LANE RESULT block trails it.
+                self.assertTrue(r.stdout.startswith(env + "\n"), r.stdout)
+                self.assertIn("LANE RESULT: rc=1 runtime=claude", r.stdout)
+
+    # ---- LANE RESULT: the trailing block a run_in_background caller reads ---------------
+    def result_block(self, stdout):
+        lines = stdout.splitlines()
+        heads = [i for i, l in enumerate(lines) if l.startswith("LANE RESULT: ")]
+        self.assertEqual(len(heads), 1, stdout)
+        return lines[heads[0]], lines[heads[0] + 1:]
+
+    def test_lane_result_block_ends_a_claude_lane_with_its_last_five_lines(self):
+        text = "\n".join("line %d" % i for i in range(1, 8))
+        self.run_env = {"STUB_ENVELOPE": json.dumps(
+            {"type": "result", "subtype": "success", "is_error": False, "result": text})}
+        r, _ = self.spawn(self.base, "--runtime", "claude")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        head, tail = self.result_block(r.stdout)
+        self.assertEqual(head, "LANE RESULT: rc=0 runtime=claude artifact=none mission=%s" % self.mission)
+        self.assertEqual(tail, ["  line %d" % i for i in range(3, 8)])
+
+    def test_lane_result_block_names_the_codex_outfile_as_artifact(self):
+        # The research class used to exec codex, which skipped any trailing output.
+        outfile = self.root / "codex-last.txt"
+        outfile.write_text("done\nartifact at /x/report.md\n")
+        self.run_env = {"LANE_OUT": str(outfile)}
+        r, _ = self.spawn(self.base, "--runtime", "codex", "--class", "research")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        head, tail = self.result_block(r.stdout)
+        self.assertEqual(head, "LANE RESULT: rc=0 runtime=codex artifact=%s mission=%s" % (outfile, self.mission))
+        self.assertEqual(tail, ["  done", "  artifact at /x/report.md"])
+
+    def test_lane_result_block_prints_on_early_failure(self):
+        r, _ = self.spawn(self.base, "--no-such-flag")
+        self.assertEqual(r.returncode, 2)
+        head, tail = self.result_block(r.stdout)
+        self.assertEqual(head, "LANE RESULT: rc=2 runtime=none artifact=none mission=%s" % self.mission)
+        self.assertEqual(tail, [])
+
+    def test_lane_result_block_carries_a_failed_lane_rc(self):
+        self.run_env = {"STUB_RC": "7"}
+        r, _ = self.spawn(self.base, "--runtime", "claude")
+        self.assertEqual(r.returncode, 7)
+        head, _ = self.result_block(r.stdout)
+        self.assertTrue(head.startswith("LANE RESULT: rc=7 runtime=claude "), head)
 
     # ---- Claude account preflight: preferred login is named in a private file -----------
     # Synthetic addresses only (example.invalid): this repo is public.

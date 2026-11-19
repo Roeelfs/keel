@@ -166,7 +166,24 @@ time, and write it next to the lane in the state file (`## AT-WAKE`: lane, artif
 1. **Event-driven (the default).** Launch through something the harness tracks, so its exit re-invokes
    you: `Bash` with `run_in_background: true` (the `spawn-lane.sh` call itself, outfile named), an
    `Agent`, a `Workflow`, or a `start_session` child (its end-of-turn note). Never detach a lane with
-   `nohup`, `disown` or `( … &)`, and never pipe the spawn: an untracked process fires nothing.
+   `nohup`, `disown`, a bare `&` or `( … &)`, and never pipe the spawn: an untracked process fires
+   nothing (2026-11-19: two lanes launched with `nohup spawn-lane.sh … &` never reported, and the
+   founder had to ask for a check).
+
+   **A headless lane is request/response (founder, 2026-11-19).** Dispatch it with
+   `run_in_background` (one tracked Bash call). The completion notification is the response: when it
+   arrives, read the `LANE RESULT` block at the end of the task output, grade by artifact
+   (§Grading a lane), and continue in the same turn. `spawn-lane.sh` ends every exit, an early refusal
+   included, with exactly one block:
+
+   ```
+   LANE RESULT: rc=<n> runtime=<claude|codex|none> artifact=<path|none> mission=<file|stdin|none>
+     <last <=5 non-empty lines of the lane's final message>
+   ```
+
+   `artifact` is the Codex `-o` outfile, or `LANE_RECORD_OUTFILE` for a Claude lane (else `none`); the
+   mission's own named artifact is still what you grade. `rc=3` with `AUTH DEAD` is one human
+   `claude /login`. Only a lane the harness cannot track gets kind 2.
 2. **Self-armed, only where no event can exist.** CI, a deploy, a Codex lane started outside the
    harness, or any process you could not launch tracked: arm ONE event-bound `ScheduleWakeup` sized to
    that event's p90 (CI p50 5 / p90 12 min; deploy p50 14 / p90 27), prompt = the state-file path.
@@ -1058,6 +1075,9 @@ There is no default wake cadence.
 
 ## Grading a lane
 
+- **Start from the `LANE RESULT` block, then grade the artifact.** A headless lane's completion
+  notification ends with it (§Every dispatch has a wake); `rc` and the final lines are the claim, the
+  artifact is the evidence.
 - **Grade by ARTIFACT, never by the completion envelope.** Before marking a lane done, check the
   objective thing it was asked to produce: commits on the branch, the named file, the row. A green
   `subtype:"success"` over **zero commits** is a dead lane (observed: exit 1 on an API 429 after 66

@@ -79,6 +79,66 @@ LANE_SCRIPT_DIR="$(lane_script_dir)"
 MISSION_SRC="" ; WORKTREE="" ; MODEL="" ; MODE="bypassPermissions" ; LANE_CWD="" ; MCP_CFG="" ; LANE_EFFORT="medium"
 PROOF=() ; TICKET="" ; MAX_TURNS="" ; MAX_BUDGET=""
 RUNTIME="" ; AUTO_PICKED=0 ; ALLOW_NETWORK=0 ; CLASS="standard" ; CLASS_SET=0
+GUARD_STATE="" ; LANE_LAUNCHED=0 ; AUTH_DEAD=0 ; LANE_PID=""
+
+# ---- LANE RESULT: the response a tracked caller reads -------------------------------------
+# A manager launches this script with `run_in_background` (one tracked Bash call), so the
+# harness re-invokes it when the lane exits. That completion notification is the response, and
+# this block is what it reads: every exit, an early refusal included, ends stdout with
+#   LANE RESULT: rc=<n> runtime=<r> artifact=<path-or-none> mission=<file>
+# plus the last <=5 lines of the lane's final message. Earlier output is unchanged.
+# (A detached `nohup … &` launch fires no notification at all; 2026-11-19 the founder had to ask.)
+lane_final_lines() {
+  # $1 = file, $2 = json (claude envelope) | text (codex -o last message)
+  [ -s "$1" ] || return 0
+  python3 -I -c '
+import json, sys
+path, kind = sys.argv[1], sys.argv[2]
+try:
+    text = open(path, encoding="utf-8", errors="replace").read()
+    if kind == "json":
+        e = json.loads(text)
+        if isinstance(e, list):
+            e = next((x for x in reversed(e) if isinstance(x, dict) and x.get("type") == "result"), {})
+        text = e.get("result") if isinstance(e, dict) else None
+        text = text if isinstance(text, str) else ""
+except (OSError, ValueError):
+    sys.exit(0)
+for line in [l for l in text.splitlines() if l.strip()][-5:]:
+    print("  " + line)
+' "$1" "$2" 2>/dev/null || true
+}
+lane_result() {
+  local rc=$? artifact=none
+  trap - EXIT
+  [ -z "$GUARD_STATE" ] || rm -f "$GUARD_STATE"
+  if [ "$LANE_LAUNCHED" = 1 ] && [ "$RUNTIME" = codex ]; then artifact="${LANE_OUT:-none}"; fi
+  if [ "$LANE_LAUNCHED" = 1 ] && [ "$RUNTIME" = claude ]; then artifact="${LANE_RECORD_OUTFILE:-none}"; fi
+  [ "$LANE_LAUNCHED" = 1 ] && printf '\n'
+  printf 'LANE RESULT: rc=%s runtime=%s artifact=%s mission=%s\n' \
+    "$rc" "${RUNTIME:-none}" "$artifact" "$( [ "$MISSION_SRC" = "-" ] && echo stdin || echo "${MISSION_SRC:-none}" )"
+  if [ "$AUTH_DEAD" = 1 ]; then
+    echo "  AUTH DEAD: run \`claude /login\`, then re-spawn the lane."
+  elif [ "$LANE_LAUNCHED" = 1 ] && [ "$RUNTIME" = codex ]; then
+    lane_final_lines "${LANE_OUT:-}" text
+  elif [ "$LANE_LAUNCHED" = 1 ]; then
+    lane_final_lines "${LANE_OUT:-}" json
+    rm -f "${LANE_OUT:-}"
+  fi
+  exit "$rc"
+}
+trap lane_result EXIT
+
+# Run the lane as a child this launcher waits on and can signal: a kill of this pid must stop
+# the lane (not orphan it), and the EXIT trap above must still run after it.
+await_lane() {
+  LANE_PID=$1 ; LANE_RC=0
+  trap 'kill -TERM "$LANE_PID" 2>/dev/null' TERM INT
+  wait "$LANE_PID" || LANE_RC=$?
+  # A trapped signal interrupts the first wait; reap the child for its real exit status.
+  if kill -0 "$LANE_PID" 2>/dev/null; then wait "$LANE_PID" || LANE_RC=$?; fi
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     # --proof consumes the remaining argv, without eval; put launcher options first.
@@ -167,9 +227,6 @@ esac
 
 # Snapshot every existing worktree before dispatch. The guard resolves a newly created
 # lane worktree against its own initial HEAD, never the launching checkout's HEAD.
-GUARD_STATE=""
-cleanup() { [ -z "$GUARD_STATE" ] || rm -f "$GUARD_STATE"; }
-trap cleanup EXIT
 if [ "$CLASS" = implementation ] || [ "${#PROOF[@]}" -gt 0 ]; then
   GUARD_STATE="$(mktemp "${TMPDIR:-/tmp}/lane-heads.XXXXXX")"
   python3 "$LANE_SCRIPT_DIR/lane_commit_guard.py" snapshot "$PWD" > "$GUARD_STATE"
@@ -362,26 +419,13 @@ the manager pushes after grading. If you find yourself wanting to push, you are 
 
   # Same stdin discipline as the claude path, and for the same reason: `codex exec` with an
   # inherited pipe hangs on "Reading additional input from stdin" and never runs the mission.
-  # ---- zero-commit guard (implementation lanes only) -------------------------------------
-  # An implementation lane exists to commit. A clean exit with HEAD unchanged is a dead lane
-  # wearing a success code. Research lanes legitimately commit nothing, so they keep exec.
-  if [ "$CLASS" != implementation ] && [ "${#PROOF[@]}" -eq 0 ]; then
-    if [ "$MISSION_SRC" = "-" ]; then
-      exec env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE CYNAP_HEADLESS_LANE=1 \
-        codex exec "${CARGS[@]}" "$MISSION"
-    else
-      exec env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE CYNAP_HEADLESS_LANE=1 \
-        codex exec "${CARGS[@]}" "$MISSION" < /dev/null
-    fi
-  fi
-  CODEX_RC=0
-  if [ "$MISSION_SRC" = "-" ]; then
-    env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE CYNAP_HEADLESS_LANE=1 \
-      codex exec "${CARGS[@]}" "$MISSION" || CODEX_RC=$?
-  else
-    env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE CYNAP_HEADLESS_LANE=1 \
-      codex exec "${CARGS[@]}" "$MISSION" < /dev/null || CODEX_RC=$?
-  fi
+  # The mission is already in argv (a `-` mission was read above), so stdin is always /dev/null.
+  # Never exec: the lane must return here so the LANE RESULT block prints for every class.
+  LANE_LAUNCHED=1
+  env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE CYNAP_HEADLESS_LANE=1 \
+    codex exec "${CARGS[@]}" "$MISSION" < /dev/null &
+  await_lane $!
+  CODEX_RC=$LANE_RC
   PROOF_RC=0
   run_proof "$LANE_KEY" || PROOF_RC=$?
   [ "$CODEX_RC" -ne 0 ] && exit "$CODEX_RC"
@@ -416,12 +460,12 @@ ARGS+=( -p --output-format json --permission-prompts none )
 # The JSON envelope is captured, not exec'd, so an auth death can be told apart from a run.
 # A headless lane that is not logged in answers with envelope subtype:"success",
 # is_error:true and rc=1: indistinguishable from a work failure unless the result text is read.
-LANE_OUT="$(mktemp "${TMPDIR:-/tmp}/spawn-lane-out.XXXXXX")"
-trap 'rm -f "$LANE_OUT"; cleanup' EXIT
+LANE_OUT="$(mktemp "${TMPDIR:-/tmp}/spawn-lane-out.XXXXXX")"  # removed by lane_result
 claude_account_preflight
 record_lane_row "$LANE_SESSION" claude "${LANE_RECORD_OUTFILE:-}"
 # Run claude as a child we can signal: with `exec` a kill of this pid killed claude, and
 # capturing the envelope must not turn a lane cancel into an orphaned, still-working lane.
+LANE_LAUNCHED=1
 if [ "$MISSION_SRC" = "-" ]; then
   env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDECODE \
     CLAUDE_CODE_FORK_SUBAGENT=0 CYNAP_HEADLESS_LANE=1 \
@@ -431,15 +475,10 @@ else
     CLAUDE_CODE_FORK_SUBAGENT=0 CYNAP_HEADLESS_LANE=1 \
     claude "${ARGS[@]}" "$MISSION" < /dev/null > "$LANE_OUT" &
 fi
-CLAUDE_PID=$!
-trap 'kill -TERM "$CLAUDE_PID" 2>/dev/null' TERM INT
-CLAUDE_RC=0
-wait "$CLAUDE_PID" || CLAUDE_RC=$?
-# A trapped signal interrupts the first wait; reap the child for its real exit status.
-if kill -0 "$CLAUDE_PID" 2>/dev/null; then wait "$CLAUDE_PID" || CLAUDE_RC=$?; fi
+await_lane $!
+CLAUDE_RC=$LANE_RC
 PROOF_RC=0
 run_proof "$LANE_SESSION" || PROOF_RC=$?
-AUTH_DEAD=0
 python3 -c 'import json,sys
 try:
     e=json.load(open(sys.argv[1]))
