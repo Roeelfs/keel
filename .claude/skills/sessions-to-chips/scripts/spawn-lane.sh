@@ -30,7 +30,8 @@
 #   --runtime codex   A separate billing pool, routed through codex-headroom.sh.
 #   Explicit --runtime always wins over the measurement.
 #   SPAWN_LANE_POOL_MEASUREMENTS=<file>  replaces the live measurement with a lane_pool.py input
-#                     document (tests; a Claude-account usage reader does not exist yet).
+#                     document (tests). Live Claude readings come from usage snapshots at
+#                     $LANE_POOL_CLAUDE_USAGE_DIR (default ~/.claude/run/claude-usage).
 #
 # WHY A CODEX LANE COULD NOT SHIP UNTIL NOW, and what changed (probed 2026-08-24):
 #   The Codex-first rule kept failing its metric because no Codex route could COMMIT, so
@@ -115,19 +116,14 @@ if [ -r "$LANE_HOOK" ]; then . "$LANE_HOOK"; fi
 # launcher only picks the headless runtime, and refuses an option the chosen runtime would drop.
 CLAUDE_CLASS=0
 case "$CLASS" in standard|research|implementation) CLAUDE_CLASS=1 ;; esac
-# Measurement for lane_pool.py. Codex: the headroom gate's --json reading, with its consultation
-# log pointed at /dev/null (a probe is not a dispatch). Claude: no per-account usage reader exists
-# (probed 2026-11-19), so it is null and the pick falls back to claude until one does.
+# Measurement for lane_pool.py --measure. Codex: the headroom gate's --json reading, with its
+# consultation log pointed at /dev/null (a probe is not a dispatch). Claude: each account's usage
+# snapshot (lane_pool.py docstring); a missing, stale, expired or malformed one is unmeasured.
 lane_pool_measurements() {
   if [ -n "${SPAWN_LANE_POOL_MEASUREMENTS:-}" ]; then cat "$SPAWN_LANE_POOL_MEASUREMENTS" 2>/dev/null; return 0; fi
   local gate="$HOME/.claude/scripts/codex-headroom.sh" codex=""
   [ -x "$gate" ] && codex="$(CODEX_HEADROOM_LOG=/dev/null "$gate" --json 2>/dev/null)" || codex=""
-  CODEX_READING="$codex" python3 -I -c 'import json, os
-try:
-    c = json.loads(os.environ["CODEX_READING"])
-except ValueError:
-    c = None
-print(json.dumps({"codex": c, "claude": None}))'
+  printf '%s' "$codex" | python3 -I "$LANE_SCRIPT_DIR/lane_pool.py" --measure
 }
 if [ -z "$RUNTIME" ]; then
   CODEX_ONLY="" ; CLAUDE_ONLY=""

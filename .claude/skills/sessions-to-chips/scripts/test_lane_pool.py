@@ -2,8 +2,11 @@
 """Unit tests for lane_pool.pick: the closest-to-limit headless pool, claude on any doubt."""
 
 import json
+import os
 import subprocess
 import sys
+import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -92,6 +95,114 @@ class CliTests(unittest.TestCase):
     def test_unparseable_stdin_falls_back(self):
         self.assertEqual(self.run_cli("not json")[0], "claude claude")
         self.assertEqual(self.run_cli("")[0], "claude claude")
+
+
+NOW = 1_800_000_000.0
+
+
+class SnapshotTests(unittest.TestCase):
+    """The Claude reader: one usage snapshot per account, unmeasured on any doubt."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, email, used=40, resets=NOW + 3600, written=NOW - 60, mtime=NOW - 60, doc=None, raw=None):
+        path = self.dir / (email + ".json")
+        if raw is None:
+            raw = json.dumps(doc if doc is not None else {
+                "account": email, "seven_day": {"used_percentage": used, "resets_at": resets},
+                "five_hour": {"used_percentage": 5, "resets_at": NOW + 600}, "written_at": written})
+        path.write_text(raw)
+        os.utime(path, (mtime, mtime))
+        return path
+
+    def read(self):
+        return lane_pool.claude_snapshots(self.dir, NOW)
+
+    def test_fresh_snapshot_is_measured_under_an_opaque_label(self):
+        self.write("one@example.invalid", used=62.5)
+        accounts, notes = self.read()
+        self.assertEqual(notes, [])
+        self.assertEqual(len(accounts), 1)
+        self.assertEqual(accounts[0]["used_percent"], 62.5)
+        label = accounts[0]["account"]
+        self.assertRegex(label, lane_pool.LABEL_RE)
+        self.assertNotIn("@", label)
+        self.assertTrue(label.startswith("one-"))
+
+    def test_stale_snapshot_is_unmeasured(self):
+        for written, mtime in ((NOW - 31 * 60, NOW - 60), (NOW - 60, NOW - 31 * 60)):
+            with self.subTest(written=written, mtime=mtime):
+                self.write("one@example.invalid", written=written, mtime=mtime)
+                accounts, notes = self.read()
+                self.assertEqual(accounts, [])
+                self.assertIn("stale", notes[0])
+
+    def test_expired_window_is_unmeasured(self):
+        for resets in (NOW, NOW - 1):
+            with self.subTest(resets=resets):
+                self.write("one@example.invalid", resets=resets)
+                accounts, notes = self.read()
+                self.assertEqual(accounts, [])
+                self.assertIn("expired", notes[0])
+
+    def test_malformed_snapshot_is_unmeasured(self):
+        email = "one@example.invalid"
+        week = {"used_percentage": 40, "resets_at": NOW + 3600}
+        cases = {
+            "not json": dict(raw="{nope"),
+            "not an object": dict(raw="[]"),
+            "account mismatch": dict(doc={"account": "two@example.invalid", "seven_day": week, "written_at": NOW}),
+            "no seven_day": dict(doc={"account": email, "written_at": NOW}),
+            "string percent": dict(used="40"),
+            "negative percent": dict(used=-1),
+            "bool percent": dict(used=True),
+            "no resets_at": dict(doc={"account": email, "seven_day": {"used_percentage": 40}, "written_at": NOW}),
+            "no written_at": dict(doc={"account": email, "seven_day": week}),
+        }
+        for name, kwargs in cases.items():
+            with self.subTest(case=name):
+                self.write(email, **kwargs)
+                accounts, notes = self.read()
+                self.assertEqual(accounts, [])
+                self.assertIn("malformed", notes[0])
+                self.assertNotIn("@", notes[0])
+
+    def test_two_accounts_are_both_measured_and_the_closer_one_wins(self):
+        self.write("one@example.invalid", used=30)
+        self.write("two@example.invalid", used=85)
+        self.write("three@example.invalid", used=99, written=NOW - 3600)  # stale: skipped
+        accounts, notes = self.read()
+        self.assertEqual([a["used_percent"] for a in accounts], [30, 85])
+        self.assertEqual(len(notes), 1)
+        runtime, pool, _ = lane_pool.pick({"codex": codex(50), "claude": accounts})
+        self.assertEqual((runtime, pool), ("claude", "claude:" + accounts[1]["account"]))
+
+    def test_no_snapshots_means_claude_unmeasured(self):
+        for directory in (self.dir, self.dir / "absent"):
+            with self.subTest(directory=directory):
+                doc, notes = lane_pool.measure(json.dumps(codex(50)), directory, NOW)
+                self.assertEqual((doc["claude"], notes), ([], []))
+                self.assertTrue(lane_pool.pick(doc)[2].startswith("fallback: claude unmeasured"))
+
+    def test_measure_cli_reads_the_env_dir_and_names_skips_on_stderr(self):
+        now = time.time()
+        fresh = self.write("one@example.invalid", used=70, resets=now + 3600, written=now, mtime=now)
+        self.write("two@example.invalid", resets=now - 1, written=now, mtime=now)
+        env = dict(os.environ, LANE_POOL_CLAUDE_USAGE_DIR=str(self.dir))
+        r = subprocess.run([sys.executable, "-I", str(SCRIPT), "--measure"], input="garbage",
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        doc = json.loads(r.stdout)
+        self.assertIsNone(doc["codex"])
+        self.assertEqual([a["used_percent"] for a in doc["claude"]], [70])
+        self.assertIn("snapshot unmeasured: expired", r.stderr)
+        self.assertNotIn("@", r.stdout + r.stderr)
+        self.assertTrue(fresh.exists())
 
 
 if __name__ == "__main__":
