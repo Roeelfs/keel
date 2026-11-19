@@ -45,10 +45,12 @@ class GateTests(unittest.TestCase):
         self.assertDenied(self.run_hook("Agent", {"prompt": "Role: implementation\nFix it.", "model": "opus"}))
         self.assertEqual(self.log_rows()[0]["verdict"], "deny")
         reason = self.run_hook("Agent", {"prompt": "Build it."})["permissionDecisionReason"]
-        # Lane order (2026-11-19): headless Claude is offered first, Codex second.
-        claude_first = reason.index("spawn-lane.sh --mission <promptfile> --cwd <worktree> --model opus")
-        codex_second = reason.index("spawn-lane.sh --runtime codex --mission <promptfile>")
-        self.assertLess(claude_first, codex_second)
+        # Lane runtime (2026-11-19): the pool pick (no --runtime) is offered first, a named Codex lane after.
+        pool_pick = reason.index("spawn-lane.sh --mission <promptfile> --cwd <worktree> --model opus")
+        codex_named = reason.index("spawn-lane.sh --runtime codex --mission <promptfile>")
+        self.assertLess(pool_pick, codex_named)
+        self.assertIn("closest to its limit", reason)
+        self.assertIn("native last", reason)
         self.assertEqual(self.log_rows()[0]["eligibility"], "headless")
 
     def test_unset_model_inherits_opus_and_is_gated(self):

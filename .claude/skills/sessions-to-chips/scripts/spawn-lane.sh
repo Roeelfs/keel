@@ -13,14 +13,24 @@
 # for shell syntax. Proof rc 0 passes, 75 defers (launcher rc 75), other failures exit 4.
 # Heavy commands must name the project's heavy-lock wrapper in this argv.
 #
-#   --runtime claude  The DEFAULT (founder ruling 2026-11-19: Claude headless lanes first, Codex
-#                     lanes second). No reason flag, no model gate: any model runs here, and no
-#                     model means sonnet. --class must be standard|research|implementation.
-#   --runtime codex   The second runtime: a separate billing pool, routed through
-#                     codex-headroom.sh. Pass it explicitly.
-#   No --runtime:     claude. A codex-only option (--allow-network, or a --class other than
+#   No --runtime:     the measured headless pool CLOSEST to its limit with room left (founder
+#                     ruling 2026-11-19: "always use the closest limit possible, with native as
+#                     last"). Pools: Codex (codex-headroom.sh --json) and each measured Claude
+#                     account; one at or over its limit is skipped. scripts/lane_pool.py decides.
+#                     Unmeasured pools → claude, and stderr says which and why. A claude-only
+#                     option (--worktree, --mcp-config or LANE_MCP_CONFIG, --mode, --max-turns,
+#                     --max-budget-usd) pins claude. A Claude --model does not pin: on an
+#                     auto-picked Codex lane it is dropped for the gate's class route, so a
+#                     security lane names its runtime explicitly. A codex-only option
+#                     (--allow-network, a gpt-* --model, a --class other than
 #                     standard|research|implementation) with no --runtime is refused: say which
 #                     runtime you mean, never a silent switch.
+#   --runtime claude  No reason flag, no model gate: any model runs here, and no model means
+#                     sonnet. --class must be standard|research|implementation.
+#   --runtime codex   A separate billing pool, routed through codex-headroom.sh.
+#   Explicit --runtime always wins over the measurement.
+#   SPAWN_LANE_POOL_MEASUREMENTS=<file>  replaces the live measurement with a lane_pool.py input
+#                     document (tests; a Claude-account usage reader does not exist yet).
 #
 # WHY A CODEX LANE COULD NOT SHIP UNTIL NOW, and what changed (probed 2026-08-24):
 #   The Codex-first rule kept failing its metric because no Codex route could COMMIT, so
@@ -67,7 +77,7 @@ LANE_SCRIPT_DIR="$(lane_script_dir)"
 
 MISSION_SRC="" ; WORKTREE="" ; MODEL="" ; MODE="bypassPermissions" ; LANE_CWD="" ; MCP_CFG="" ; LANE_EFFORT="medium"
 PROOF=() ; TICKET="" ; MAX_TURNS="" ; MAX_BUDGET=""
-RUNTIME="" ; ALLOW_NETWORK=0 ; CLASS="standard" ; CLASS_SET=0
+RUNTIME="" ; AUTO_PICKED=0 ; ALLOW_NETWORK=0 ; CLASS="standard" ; CLASS_SET=0
 while [ $# -gt 0 ]; do
   case "$1" in
     # --proof consumes the remaining argv, without eval; put launcher options first.
@@ -95,20 +105,60 @@ done
 if [ "$MISSION_SRC" = "-" ]; then MISSION="$(cat)"; else MISSION="$(cat "$MISSION_SRC")"; fi
 [ -n "$MISSION" ] || { echo "spawn-lane.sh: empty mission" >&2; exit 2; }
 
-# ---- runtime: headless Claude first, Codex second (founder ruling 2026-11-19) -------------
+# Repo-supplied hook: may export LANE_MCP_CONFIG (and any lane-only env).
+LANE_HOOK="${LANE_CWD:-$PWD}/.claude/lane-env.sh"
+if [ -r "$LANE_HOOK" ]; then . "$LANE_HOOK"; fi
+[ -z "$MCP_CFG" ] && MCP_CFG="${LANE_MCP_CONFIG:-}"
+
+# ---- runtime: the pool closest to its limit, native last (founder ruling 2026-11-19) -----
 # Native Agent/Workflow dispatch stays gated by the codex-first-gate hook (Native-why); this
 # launcher only picks the headless runtime, and refuses an option the chosen runtime would drop.
 CLAUDE_CLASS=0
 case "$CLASS" in standard|research|implementation) CLAUDE_CLASS=1 ;; esac
+# Measurement for lane_pool.py. Codex: the headroom gate's --json reading, with its consultation
+# log pointed at /dev/null (a probe is not a dispatch). Claude: no per-account usage reader exists
+# (probed 2026-11-19), so it is null and the pick falls back to claude until one does.
+lane_pool_measurements() {
+  if [ -n "${SPAWN_LANE_POOL_MEASUREMENTS:-}" ]; then cat "$SPAWN_LANE_POOL_MEASUREMENTS" 2>/dev/null; return 0; fi
+  local gate="$HOME/.claude/scripts/codex-headroom.sh" codex=""
+  [ -x "$gate" ] && codex="$(CODEX_HEADROOM_LOG=/dev/null "$gate" --json 2>/dev/null)" || codex=""
+  CODEX_READING="$codex" python3 -I -c 'import json, os
+try:
+    c = json.loads(os.environ["CODEX_READING"])
+except ValueError:
+    c = None
+print(json.dumps({"codex": c, "claude": None}))'
+}
 if [ -z "$RUNTIME" ]; then
-  CODEX_ONLY=""
+  CODEX_ONLY="" ; CLAUDE_ONLY=""
   [ "$ALLOW_NETWORK" = 1 ] && CODEX_ONLY="$CODEX_ONLY --allow-network"
   [ "$CLAUDE_CLASS" = 0 ] && CODEX_ONLY="$CODEX_ONLY --class $CLASS"
+  case "$MODEL" in gpt-*) CODEX_ONLY="$CODEX_ONLY --model $MODEL" ;; esac
   if [ -n "$CODEX_ONLY" ]; then
-    echo "spawn-lane.sh: the runtime defaults to claude, and${CODEX_ONLY} is codex-only. Claude: drop it. Codex: pass --runtime codex." >&2
+    echo "spawn-lane.sh:${CODEX_ONLY} is codex-only and no --runtime was named. Codex: pass --runtime codex. Claude: drop it." >&2
     exit 2
   fi
-  RUNTIME=claude
+  [ -n "$WORKTREE" ] && CLAUDE_ONLY="$CLAUDE_ONLY --worktree"
+  [ -n "$MCP_CFG" ] && CLAUDE_ONLY="$CLAUDE_ONLY --mcp-config"
+  [ "$MODE" != bypassPermissions ] && CLAUDE_ONLY="$CLAUDE_ONLY --mode"
+  [ -n "$MAX_TURNS$MAX_BUDGET" ] && CLAUDE_ONLY="$CLAUDE_ONLY --max-turns/--max-budget-usd"
+  if [ -n "$CLAUDE_ONLY" ]; then
+    RUNTIME=claude
+    echo "spawn-lane.sh: runtime claude (pinned by claude-only${CLAUDE_ONLY})" >&2
+  else
+    AUTO_PICKED=1
+    PICK="$(lane_pool_measurements | python3 -I "$LANE_SCRIPT_DIR/lane_pool.py")" || PICK=""
+    PICK_RUNTIME="" ; PICK_POOL="" ; PICK_REASON=""
+    { read -r PICK_RUNTIME PICK_POOL; IFS= read -r PICK_REASON; } <<< "$PICK" || true
+    case "$PICK_RUNTIME" in
+      claude|codex) RUNTIME="$PICK_RUNTIME" ;;
+      *) RUNTIME=claude; PICK_POOL=claude; PICK_REASON="fallback: the pool picker gave no answer" ;;
+    esac
+    echo "spawn-lane.sh: runtime $RUNTIME (pool $PICK_POOL; $PICK_REASON)" >&2
+    case "$PICK_POOL" in claude:*)
+      echo "spawn-lane.sh: spawn-lane.sh cannot select a Claude account; this lane runs on the terminal \`claude auth login\` account" >&2 ;;
+    esac
+  fi
 fi
 case "$RUNTIME" in
   claude)
@@ -182,10 +232,6 @@ if isinstance(got, str) and got.strip():
 }
 
 
-# Repo-supplied hook: may export LANE_MCP_CONFIG (and any lane-only env).
-LANE_HOOK="${LANE_CWD:-$PWD}/.claude/lane-env.sh"
-if [ -r "$LANE_HOOK" ]; then . "$LANE_HOOK"; fi
-[ -z "$MCP_CFG" ] && MCP_CFG="${LANE_MCP_CONFIG:-}"
 
 if [ "$RUNTIME" = codex ]; then
   # Codex has no equivalent turn/spend caps. Refuse explicitly rather than drop them.
@@ -223,6 +269,14 @@ if [ "$RUNTIME" = codex ]; then
   [ -z "$EXTRA" ] && [ "$ROUTE" = "$ROUTED_MODEL $EFFORT" ] || {
     echo "spawn-lane.sh: malformed headroom route; refusing" >&2; exit 2;
   }
+  # An auto-picked Codex lane drops a Claude model name (opus/sonnet/haiku/claude-*): the gate's
+  # class route is its model. Only an explicit --runtime codex keeps an explicit --model.
+  if [ "$AUTO_PICKED" = 1 ] && [ -n "$MODEL" ]; then
+    case "$MODEL" in gpt-*) ;; *)
+      echo "spawn-lane.sh: claude model $MODEL does not apply on codex; class $CLASS routes to $ROUTED_MODEL $EFFORT" >&2
+      MODEL="" ;;
+    esac
+  fi
   : "${MODEL:=$ROUTED_MODEL}"
 
   # ---- writable roots: BOTH git dirs, and ENCODED, never interpolated -------------------
