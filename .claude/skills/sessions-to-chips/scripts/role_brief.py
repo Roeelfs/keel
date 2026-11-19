@@ -17,8 +17,12 @@ the overlay rulings ledger, the overlay role notes). It is computed, never bumpe
 of it: the Stop guard and the prompt hooks import `role_version` and `ack_status` from here.
 
 The LOAD RECORD `<programs>/<slug>.role.json` = {version, sources, loaded_at, session_id, degraded} is written
-only here, after the brief prints, even when part of the brief failed (`degraded: true`), so a broken source
-never leaves a manager in an impossible block. Never hand-edit it. Rules: ../references/role.md.
+only here, as the last act after the WHOLE brief reached the reader, even when part of the brief failed
+(`degraded: true`), so a broken source never leaves a manager in an impossible block. A reader that went away
+early (`| head -2`: BrokenPipe on the end-of-brief probe) records nothing. Line 2 is a one-line digest of what is
+new since the last load, so even a truncated read carries the new rules. The same load points the program's
+owner manifest (`absorbed_by` followed) at the running session, so an account switch leaves no stale
+`manager_session`. Never hand-edit the record. Rules: ../references/role.md.
 Module-level imports stay stdlib-only: the Stop guard imports this file under a 2 s budget.
 """
 import argparse
@@ -27,8 +31,10 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 SKILL = os.path.dirname(HERE)
@@ -37,6 +43,9 @@ PUBLIC_LEDGER = os.path.join(SKILL, "references", "rulings-ledger.md")
 CHANGE = re.compile(r"^-\s+(\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?Z)?)\s*\|\s*(.+)$")
 FIRST_LOAD_CHANGES = 10
 DELTA_CAP = 12
+DIGEST_SHOW = 3
+DIGEST_WIDTH = 160
+PIPE_SETTLE_S = 0.3  # time for a `| head -N` reader to exit before the end-of-brief probe write
 ROLE_LABELS = ("role", "overlay")  # sources whose `## Changes` lines are role changes; the ledgers carry rulings
 
 
@@ -171,6 +180,18 @@ def delta_lines(since, sources=None, cap=DELTA_CAP, kinds=("role", "ruling")):
     new = [r for r in keyed if _newer(r[0], since)] if since else keyed[:FIRST_LOAD_CHANGES]
     out = [f"- {d} [{k}] {t}" for d, k, t in new[:cap]]
     return out + ([f"- +{len(new) - cap} more: read {ROLE} and the overlay"] if len(new) > cap else [])
+
+
+def digest_line(since, sources=None, show=DIGEST_SHOW, width=DIGEST_WIDTH):
+    """ONE line, printed second: the newest changes (rules and rulings) since `since`, so `| head -2` still
+    carries them. None `since` = first load in this session: the newest of all."""
+    items = [x[2:] for x in delta_lines(since, sources, cap=10 ** 6)]
+    label = "NEW SINCE YOUR LAST LOAD" + ("" if since else " (first load in this session: newest)")
+    if not items:
+        return f"{label}: nothing."
+    shown = "; ".join(i if len(i) <= width else i[:width - 3] + "..." for i in items[:show])
+    more = f" (+{len(items) - show} more below)" if len(items) > show else ""
+    return f"{label} ({len(items)}): {shown}{more}"
 
 
 # ---------- health ----------
@@ -332,7 +353,9 @@ def brief(slug, session, now, programs=None, run=subprocess.run):
     degraded = role_text is None
     last = (f"you last loaded v{ack.get('version')} at {ack.get('loaded_at')}" if ack and since
             else "first load in this session")
-    out = [f"Manager role v{version} for {slug}, loaded {now:%Y-%m-%dT%H:%M:%SZ} ({last}).",
+    out = [f"Manager role v{version} for {slug}, loaded {now:%Y-%m-%dT%H:%M:%SZ} ({last}); a truncated read "
+           "records nothing.",
+           digest_line(since),
            "Read top to bottom and do the wake steps in order."]
     out += health_lines(slug, programs, run, session, now)
     changes = delta_lines(since, kinds=("role",))  # rulings print in their own block below
@@ -351,6 +374,66 @@ def brief(slug, session, now, programs=None, run=subprocess.run):
     ctx, bad_ctx = context_brief(slug, since, now, run)
     out += ["", "----- context brief -----", ctx]
     return "\n".join(out), version, shas, degraded or bad or bad_ctx
+
+
+# ---------- the load ----------
+
+def _is_pipe(out):
+    try:
+        return stat.S_ISFIFO(os.fstat(out.fileno()).st_mode)
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def emit(text, version, out=None, settle=PIPE_SETTLE_S):
+    """Write the whole brief, then (on a pipe, after `settle`) an end-of-brief probe line. -> False when the
+    reader went away first (`| head -2`): the brief was not read, so the caller records nothing."""
+    out = out or sys.stdout
+    try:
+        out.write(text + "\n")
+        out.flush()
+        if settle and _is_pipe(out):
+            time.sleep(settle)
+        out.write(f"\nEnd of role brief v{version}.\n")
+        out.flush()
+        return True
+    except BrokenPipeError:
+        try:  # the interpreter's exit flush would raise again on the dead pipe
+            os.dup2(os.open(os.devnull, os.O_WRONLY), out.fileno())
+        except (OSError, ValueError, AttributeError):
+            pass
+        return False
+
+
+def claim_owner(slug, session, now, programs=None):
+    """Point the program's terminal owner manifest (`absorbed_by` followed) at the running session: its
+    `manager_session` (and a legacy `orchestrator_session`) name this session and `updated_at` moves, so the
+    guards resolve this session to the owner after an account switch. -> (owner | None, note | None). Never
+    raises: a failed claim is a printed note, the load still records."""
+    if not session:
+        return None, None
+    programs = programs or programs_dir()
+    try:
+        sys.path.insert(0, HERE)
+        import program_family as pf
+        import work_state_store as ws
+        owner = pf.terminal_owner(slug, pf.load_manifests(programs))
+        if not owner:
+            return None, None  # no manifest (or a broken fold): nothing to point
+        local = next((i for i in own_ids(session) if i.startswith("local_")), None)
+        cli = None if session.startswith("local_") else session
+        value = f"{local} (cli {cli})" if local and cli else session
+        with ws._Locked(owner, programs) as lk:
+            m = lk.manifest
+            want = {"manager_session": value}
+            if "orchestrator_session" in m:
+                want["orchestrator_session"] = cli or session
+            if all(m.get(k) == v for k, v in want.items()):
+                return owner, None
+            lk.write(dict(m, **want, updated_at=now.strftime("%Y-%m-%dT%H:%M:%SZ")))
+        return owner, None
+    except Exception as exc:  # a claim that cannot write never blocks the load
+        return None, f"owner manifest not updated ({type(exc).__name__}: {str(exc)[:120]})"
 
 
 # ---------- pre-commit ----------
@@ -404,13 +487,22 @@ def main(argv=None):
                           "delta": [] if st == "current" else delta_lines(since)}))
         return 0
     text, version, shas, degraded = brief(args.program, args.session, now)
-    print(text)
+    if not emit(text, version):
+        return 141  # the reader stopped early: not loaded, the Stop guard will ask again
+    owner, note = claim_owner(args.program, args.session, now)
     try:
         path = write_ack(args.program, version, shas, args.session, degraded, now)
-        print(f"\nRole v{version} recorded in {path}" + (" (degraded: part of the brief failed)" if degraded else ""))
     except OSError as exc:
         print(f"\nRole load NOT recorded ({exc}); the Stop guard will ask again.", file=sys.stderr)
         return 1
+    try:
+        if owner and owner != args.program:
+            print(f"!!! {args.program} is absorbed by {owner}: you manage {owner}; run /manager-role {owner}.")
+        if note:
+            print(note)
+        print(f"Role v{version} recorded in {path}" + (" (degraded: part of the brief failed)" if degraded else ""))
+    except BrokenPipeError:
+        pass
     return 0
 
 

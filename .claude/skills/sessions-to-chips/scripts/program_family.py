@@ -408,7 +408,17 @@ def instance_ids(row, chain_stems=()):
 
 
 def manifest_for(ids, manifests):
-    hits = [m for m in manifests if any(i and any(i.startswith(p) for p in m["ids"]) for i in ids)]
+    """The newest manifest naming one of `ids`, with every absorbed hit replaced by its terminal owner: an
+    absorbed manifest still naming a live session (its manager moved on to the absorber) never captures it.
+    A hit whose fold is broken (cycle, missing target) is dropped."""
+    g = _graph(manifests)
+    hits = []
+    for m in manifests:
+        if not any(i and any(i.startswith(p) for p in m["ids"]) for i in ids):
+            continue
+        owner = terminal_owner(m["slug"], g) if m.get("absorbed_by") else m["slug"]
+        if owner and g.get(owner) is not None:
+            hits.append(g[owner])
     return max(hits, key=lambda m: m["mtime"]) if hits else None
 
 
