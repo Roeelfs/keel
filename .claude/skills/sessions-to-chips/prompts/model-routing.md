@@ -34,22 +34,22 @@ The Codex column names the **class** to pass to `codex-headroom.sh --route <clas
 | Define: spec + moderate proof ledger | Opus | think | standard |
 | Define: one critical coverage review | Sonnet | think | standard |
 | Define: unresolved security/irreversible dispute | Opus + Codex | think harder | security |
-| Build: implementation + targeted tests | Opus (headless Claude first, Codex second) | think | standard |
+| Build: implementation + targeted tests | Opus (closest-to-limit headless pool) | think | standard |
 | Verify-release: finite execution | Sonnet | think | standard |
 | Procedural worker: deterministic command pass | Haiku | (none) | mining |
 | Verify-release: failure-cluster diagnosis | Sonnet | think | standard |
-| Bug fix < 200 LOC | Opus (headless Claude first, Codex second) | think | standard |
-| Trivial < 50 LOC, docs | Opus (headless Claude first, Codex second) | (none) | mining |
+| Bug fix < 200 LOC | Opus (closest-to-limit headless pool) | think | standard |
+| Trivial < 50 LOC, docs | Opus (closest-to-limit headless pool) | (none) | mining |
 | Mining / surveys / parsing | Haiku | (none) | mining |
 | Soak observation | Haiku | (none) | mining |
 | Soak ESCALATE investigation | Sonnet | think | standard |
 | PR comment review (fixes go to the implementer) | Sonnet | think | standard |
-| Refactor (no API change) | Opus (headless Claude first, Codex second) | think | standard |
-| Refactor (API change) | Opus (headless Claude first, Codex second) | think | standard |
+| Refactor (no API change) | Opus (closest-to-limit headless pool) | think | standard |
+| Refactor (API change) | Opus (closest-to-limit headless pool) | think | standard |
 | Hard RCA / critical-path debugging | Opus | think harder | hard-rca |
 | Security review | Opus 5.5 + Codex astra | think harder | security |
 | Irreversible architecture decision | Opus | think hard | architecture |
-| Migration writing | Opus (headless Claude first, Codex second) | think | standard |
+| Migration writing | Opus (closest-to-limit headless pool) | think | standard |
 | Migration risk review | Sonnet | think | standard |
 | Self-managed interactive (writes specs or code) | Opus | think | standard |
 | Wake-driven soak watcher | Haiku | (none) | mining |
@@ -62,8 +62,8 @@ The Codex column names the **class** to pass to `codex-headroom.sh --route <clas
 |---|---|---|
 | Manager | `start_session` (`use_worktree: true`, `context: "fresh"`) | `model: "sonnet"`, `effort: "medium"` |
 | Spec or implementation child the human steers | `start_session` | `model: "opus"`, `effort: "medium"` (more only with a stated reason) |
-| Unattended spec or implementation lane, Claude (first) | `spawn-lane.sh --model opus --class implementation --cwd <worktree>` (claude is the default runtime; no reason flag) | opus, medium |
-| Unattended spec or implementation lane, Codex (second: Claude does not fit) | `spawn-lane.sh --runtime codex --class standard --cwd <worktree>`, or `codex-dispatch.sh <class> …` for a spec document; both ask `~/.claude/scripts/codex-headroom.sh` | the gate's `--route <class>` |
+| Unattended spec or implementation lane, closest-to-limit pool | `spawn-lane.sh --model opus --class implementation --cwd <worktree>` (no `--runtime`: the measured pool nearest its limit wins, claude when unmeasured; no reason flag) | opus, medium on claude; the gate's `--route <class>` on codex |
+| Unattended spec or implementation lane, Codex named (Claude does not fit) | `spawn-lane.sh --runtime codex --class standard --cwd <worktree>`, or `codex-dispatch.sh <class> …` for a spec document; both ask `~/.claude/scripts/codex-headroom.sh` | the gate's `--route <class>` |
 | Mechanical lane or child (mining, census, verification, grading) | `start_session`, `spawn-lane.sh` or `Agent` | `sonnet`/`haiku`, Codex `mining` |
 
 Grade every lane by its artifact, never its exit code: the spec file or commits exist, answer the mission, and name an opus or Codex author.
