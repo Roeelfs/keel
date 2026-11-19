@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""PreToolUse(Agent|Task|Workflow): qualifying lanes run headless, Claude first, Codex second.
+"""PreToolUse(Agent|Task|Workflow): qualifying lanes run headless on the closest-to-limit pool.
 
-Lane order (founder ruling 2026-11-19): a headless Claude lane (spawn-lane.sh, default runtime
-claude) first, a Codex lane second. The hook file keeps its historical name, kill switch and
+Lane runtime (founder ruling 2026-11-19): the headless pool closest to its limit with room left,
+Codex or a Claude headless account (spawn-lane.sh with no --runtime picks it); native is last, since
+it runs the actual sessions. The hook file keeps its historical name, kill switch and
 analytics path so existing registrations and logs keep working.
 
 Native dispatch defaults to deny, regardless of role or model inheritance. Preserve the
@@ -41,12 +42,13 @@ WF_AGENT_RE = re.compile(r"\bagent\s*\(")
 SCRIPT_MAX_BYTES = 512 * 1024
 
 HEADLESS_COMMANDS = (
-    "  1st, headless Claude (default runtime):  ~/.claude/scripts/spawn-lane.sh --mission <promptfile> "
+    "  Headless lane, closest-to-limit pool:  ~/.claude/scripts/spawn-lane.sh --mission <promptfile> "
     "--cwd <worktree> --model opus --class implementation\n"
-    "  2nd, Codex lane:  ~/.claude/scripts/spawn-lane.sh --runtime codex --mission <promptfile> "
+    "  Codex lane, named:  ~/.claude/scripts/spawn-lane.sh --runtime codex --mission <promptfile> "
     "--cwd <worktree> --class implementation\n"
-    "  2nd, Codex document or report:  ~/.claude/scripts/codex-dispatch.sh standard <promptfile> <outfile> [workdir]\n"
-    "(spawn-lane.sh runs headless Claude by default; Codex routes through codex-headroom.sh.)"
+    "  Codex document or report:  ~/.claude/scripts/codex-dispatch.sh standard <promptfile> <outfile> [workdir]\n"
+    "(spawn-lane.sh with no --runtime picks Codex or a Claude account, whichever measured pool is "
+    "closest to its limit; Codex routes through codex-headroom.sh.)"
 )
 
 
@@ -168,8 +170,9 @@ def log(d, verdict, detail):
 def deny_reason(detail):
     return (
         "BLOCKED (headless-lane gate): native %s dispatch requires a reason. Self-contained lanes "
-        "with a document or one-worktree deliverable and no harness state run headless: a headless "
-        "Claude lane first, a Codex lane second, including large read-only research/review passes. "
+        "with a document or one-worktree deliverable and no harness state run headless, on the pool "
+        "closest to its limit (Codex or a Claude account), native last, including large read-only "
+        "research/review passes. "
         "Run:\n%s\n"
         "For a native exception, add ONE line `Native-why: <reason>` (10+ characters) to the prompt. "
         "Reasons: needs harness state, MCP servers or conversation context; interactive work; "

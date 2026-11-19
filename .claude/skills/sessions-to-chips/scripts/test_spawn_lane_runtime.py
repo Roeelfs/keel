@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Behavioral tests for `spawn-lane.sh` runtimes (headless Claude by default, Codex second).
+"""Behavioral tests for `spawn-lane.sh` runtimes (closest-to-limit pool by default, explicit --runtime wins).
 
 Not phrase-matching: a stub `codex` earlier on PATH records the real argv, so these
 assert the command the script actually builds."""
@@ -42,7 +42,12 @@ class RuntimeTests(unittest.TestCase):
         self.home = self.root / "home"
         gate = self.home / ".claude/scripts/codex-headroom.sh"
         gate.parent.mkdir(parents=True)
-        gate.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$STUB_GATE_ARGS"\nprintf "%s\\n" "${STUB_ROUTE:-gpt-6-sol medium}"\nexit "${STUB_GATE_RC:-0}"\n')
+        # The gate appends its argv per call; `--json` answers STUB_GATE_JSON (empty = unreadable)
+        # and records the CODEX_HEADROOM_LOG it was handed, so a probe can be proven unlogged.
+        gate.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$STUB_GATE_ARGS"\n'
+                        'if [ "${1:-}" = --json ]; then printf "%s" "$CODEX_HEADROOM_LOG" > "$STUB_GATE_LOG_ENV"; '
+                        'printf "%s" "${STUB_GATE_JSON:-}"; exit 0; fi\n'
+                        'printf "%s\\n" "${STUB_ROUTE:-gpt-6-sol medium}"\nexit "${STUB_GATE_RC:-0}"\n')
         gate.chmod(0o755)
         self.gate = gate
         self.gate_env = {}
@@ -60,11 +65,15 @@ class RuntimeTests(unittest.TestCase):
 
     def spawn(self, cwd, *extra):
         env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", STUB_OUT=str(self.out),
-                   HOME=str(self.home), CODEX_HEADROOM_LOG="/dev/null",
+                   HOME=str(self.home),
                    STUB_GATE_ARGS=str(self.root / "gate-args.txt"),
-                   STUB_ENV=str(self.root / "env.txt"), **self.gate_env, **self.run_env)
+                   STUB_GATE_LOG_ENV=str(self.root / "gate-log-env.txt"),
+                   STUB_ENV=str(self.root / "env.txt"), **{"CODEX_HEADROOM_LOG": "/dev/null", **self.gate_env, **self.run_env})
         for k in ("WORK_STATE_LANE_ROWS", "S2C_CLAUDE_HOME"):  # the lane row must land under this HOME
             env.pop(k, None)
+        if "SPAWN_LANE_POOL_MEASUREMENTS" not in self.run_env:  # only an injected meter counts
+            env.pop("SPAWN_LANE_POOL_MEASUREMENTS", None)
+        (self.root / "gate-args.txt").unlink(missing_ok=True)
         r = subprocess.run([str(SCRIPT), "--mission", str(self.mission), "--cwd", str(cwd), *extra],
                            capture_output=True, text=True, env=env)
         argv = self.out.read_text().splitlines() if self.out.exists() else []
@@ -76,14 +85,119 @@ class RuntimeTests(unittest.TestCase):
                 return a.split("=", 1)[1]
         return ""
 
-    def test_default_runtime_is_claude(self):
-        # Lane order (founder ruling 2026-11-19): no runtime and no model is a headless Claude lane.
+    def gate_calls(self):
+        p = self.root / "gate-args.txt"
+        return p.read_text().splitlines() if p.exists() else []
+
+    def measure(self, codex=None, claude=None):
+        """Inject a lane_pool.py measurement document (SPAWN_LANE_POOL_MEASUREMENTS)."""
+        f = self.root / "pools.json"
+        f.write_text(json.dumps({"codex": codex, "claude": claude}))
+        self.run_env = dict(self.run_env, SPAWN_LANE_POOL_MEASUREMENTS=str(f))
+
+    def test_unmeasured_default_falls_back_to_claude_and_says_why(self):
+        # Live path: no Claude-account usage reader exists, so the pools cannot be compared.
+        self.gate_env = {"STUB_GATE_JSON": json.dumps({"used_percent": 21.0, "verdict": "ok", "stale": False})}
         result, argv = self.spawn(self.base)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("-p", argv)
         self.assertEqual(argv[argv.index("--model") + 1], "sonnet")
         self.assertNotIn("workspace-write", argv)
-        self.assertFalse((self.root / "gate-args.txt").exists(), "a claude lane never asks the Codex gate")
+        self.assertEqual(self.gate_calls(), ["--json"], "a claude lane only reads the Codex meter")
+        self.assertIn("runtime claude (pool claude; fallback: claude unmeasured", result.stderr)
+
+    def test_the_codex_probe_is_not_logged_as_a_dispatch(self):
+        self.run_env = {"CODEX_HEADROOM_LOG": str(self.root / "dispatch.jsonl")}
+        self.spawn(self.base)
+        self.assertEqual((self.root / "gate-log-env.txt").read_text(), "/dev/null")
+
+    def test_unreadable_codex_meter_falls_back_to_claude(self):
+        for reading in ("", "not json", json.dumps({"used_percent": -1, "verdict": "unknown"})):
+            with self.subTest(reading=reading):
+                self.gate_env = {"STUB_GATE_JSON": reading}
+                r, argv = self.spawn(self.base)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("-p", argv)
+                self.assertIn("fallback: codex and claude unmeasured", r.stderr)
+
+    def test_codex_closer_to_its_limit_gets_the_lane(self):
+        self.measure({"used_percent": 80.0, "verdict": "ok", "stale": False},
+                     [{"account": "a", "used_percent": 40}, {"account": "b", "used_percent": 10}])
+        r, argv = self.spawn(self.base)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("workspace-write", argv)
+        self.assertEqual(self.gate_calls(), ["--route standard"], "injected meter: no live probe")
+        self.assertIn("runtime codex (pool codex; closest to its limit", r.stderr)
+
+    def test_claude_account_closer_to_its_limit_gets_the_lane(self):
+        self.measure({"used_percent": 30.0, "verdict": "ok", "stale": False},
+                     [{"account": "a", "used_percent": 70}, {"account": "b", "used_percent": 90}])
+        r, argv = self.spawn(self.base)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("-p", argv)
+        self.assertEqual(self.gate_calls(), [])
+        self.assertIn("runtime claude (pool claude:b;", r.stderr)
+        self.assertIn("cannot select a Claude account", r.stderr)
+
+    def test_an_auto_picked_codex_lane_drops_a_claude_model_for_the_class_route(self):
+        # Every documented command passes --model opus; a model pin would make the pick dead.
+        self.measure({"used_percent": 80.0, "verdict": "ok", "stale": False}, [{"account": "a", "used_percent": 5}])
+        self.gate_env = {"STUB_ROUTE": "gpt-6-sol medium"}
+        r, argv = self.spawn(self.base, "--model", "opus", "--class", "research")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(argv[argv.index("-m") + 1], "gpt-6-sol")
+        self.assertIn("claude model opus does not apply on codex", r.stderr)
+        # The same Claude model on a claude pick is kept.
+        self.measure({"used_percent": 5.0, "verdict": "ok", "stale": False}, [{"account": "a", "used_percent": 80}])
+        r, argv = self.spawn(self.base, "--model", "opus", "--class", "research")
+        self.assertEqual(argv[argv.index("--model") + 1], "opus")
+
+    def test_a_pool_at_its_limit_is_skipped(self):
+        self.measure({"used_percent": 100.0, "verdict": "warn", "stale": False},
+                     [{"account": "a", "used_percent": 20}])
+        r, argv = self.spawn(self.base)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("-p", argv)
+        self.assertIn("skipped at limit: codex 100%", r.stderr)
+
+    def test_explicit_runtime_beats_the_measurement(self):
+        self.measure({"used_percent": 90.0, "verdict": "ok", "stale": False},
+                     [{"account": "a", "used_percent": 5}])
+        r, argv = self.spawn(self.base, "--runtime", "claude")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("-p", argv)
+        self.assertNotIn("runtime claude (pool", r.stderr)
+        self.measure({"used_percent": 5.0, "verdict": "ok", "stale": False},
+                     [{"account": "a", "used_percent": 90}])
+        r, argv = self.spawn(self.base, "--runtime", "codex")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("workspace-write", argv)
+
+    def test_a_claude_only_option_pins_claude_even_when_codex_is_closer(self):
+        self.measure({"used_percent": 90.0, "verdict": "ok", "stale": False},
+                     [{"account": "a", "used_percent": 5}])
+        cfg = self.root / "mcp.json"; cfg.write_text("{}")
+        for extra in (("--max-turns", "3"), ("--mode", "acceptEdits"), ("--mcp-config", str(cfg)),
+                      ("--worktree", "wt-pin")):
+            with self.subTest(extra=extra):
+                r, argv = self.spawn(self.base, *extra)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("-p", argv)
+                self.assertIn("pinned by claude-only", r.stderr)
+                self.assertEqual(self.gate_calls(), [])
+
+    def test_a_lane_hook_mcp_config_pins_claude(self):
+        # .claude/lane-env.sh is sourced before the pick, so its LANE_MCP_CONFIG cannot be
+        # handed to an auto-picked Codex lane that would then refuse it.
+        self.measure({"used_percent": 90.0, "verdict": "ok", "stale": False},
+                     [{"account": "a", "used_percent": 5}])
+        hook = self.base / ".claude/lane-env.sh"; hook.parent.mkdir()
+        cfg = self.root / "mcp.json"; cfg.write_text("{}")
+        hook.write_text(f"export LANE_MCP_CONFIG={cfg}\n")
+        r, argv = self.spawn(self.base)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(argv[argv.index("--mcp-config") + 1], str(cfg))
+        self.assertIn("pinned by claude-only --mcp-config", r.stderr)
 
     def test_any_model_runs_on_claude_without_a_reason(self):
         # No --claude-reason, no opus gate, no kill switch: a Claude lane is never taxed.
@@ -116,11 +230,11 @@ class RuntimeTests(unittest.TestCase):
         r, argv = self.spawn(self.base, "--runtime", "codex")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("workspace-write", argv)
-        self.assertEqual((self.root / "gate-args.txt").read_text().splitlines(), ["--route", "standard"])
+        self.assertEqual(self.gate_calls(), ["--route standard"])
 
     def test_a_codex_only_option_without_runtime_is_refused(self):
         # Never a silent runtime switch: the caller names codex, or drops the option.
-        for extra in (("--allow-network",), ("--class", "security")):
+        for extra in (("--allow-network",), ("--class", "security"), ("--model", "gpt-6-sol")):
             with self.subTest(extra=extra):
                 r, argv = self.spawn(self.base, *extra)
                 self.assertEqual(r.returncode, 2)
@@ -358,7 +472,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(argv[argv.index("-m") + 1], "gpt-6-sol")
         self.assertIn("model_reasoning_effort=high", argv)
-        self.assertEqual((self.root / "gate-args.txt").read_text().splitlines(), ["--route", "security"])
+        self.assertEqual(self.gate_calls(), ["--route security"])
 
     def test_warning_and_unknown_cap_routes_dispatch(self):
         for rc in ("0", "1"):
