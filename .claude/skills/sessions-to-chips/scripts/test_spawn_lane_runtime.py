@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -69,7 +70,7 @@ class RuntimeTests(unittest.TestCase):
                    STUB_GATE_ARGS=str(self.root / "gate-args.txt"),
                    STUB_GATE_LOG_ENV=str(self.root / "gate-log-env.txt"),
                    STUB_ENV=str(self.root / "env.txt"), **{"CODEX_HEADROOM_LOG": "/dev/null", **self.gate_env, **self.run_env})
-        for k in ("WORK_STATE_LANE_ROWS", "S2C_CLAUDE_HOME"):  # the lane row must land under this HOME
+        for k in ("WORK_STATE_LANE_ROWS", "S2C_CLAUDE_HOME", "LANE_POOL_CLAUDE_USAGE_DIR"):  # the lane row must land under this HOME
             env.pop(k, None)
         if "SPAWN_LANE_POOL_MEASUREMENTS" not in self.run_env:  # only an injected meter counts
             env.pop("SPAWN_LANE_POOL_MEASUREMENTS", None)
@@ -96,7 +97,7 @@ class RuntimeTests(unittest.TestCase):
         self.run_env = dict(self.run_env, SPAWN_LANE_POOL_MEASUREMENTS=str(f))
 
     def test_unmeasured_default_falls_back_to_claude_and_says_why(self):
-        # Live path: no Claude-account usage reader exists, so the pools cannot be compared.
+        # Live path with no Claude usage snapshot: the pools cannot be compared.
         self.gate_env = {"STUB_GATE_JSON": json.dumps({"used_percent": 21.0, "verdict": "ok", "stale": False})}
         result, argv = self.spawn(self.base)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -105,6 +106,20 @@ class RuntimeTests(unittest.TestCase):
         self.assertNotIn("workspace-write", argv)
         self.assertEqual(self.gate_calls(), ["--json"], "a claude lane only reads the Codex meter")
         self.assertIn("runtime claude (pool claude; fallback: claude unmeasured", result.stderr)
+
+    def test_a_fresh_claude_snapshot_is_read_on_the_live_path(self):
+        # The live reader: ~/.claude/run/claude-usage/<email>.json under the lane's HOME.
+        snaps = self.home / ".claude/run/claude-usage"
+        snaps.mkdir(parents=True)
+        now = time.time()
+        (snaps / "one@example.invalid.json").write_text(json.dumps({  # leak-check: allow (fixture address)
+            "account": "one@example.invalid", "written_at": now,
+            "seven_day": {"used_percentage": 90, "resets_at": now + 3600}}))
+        self.gate_env = {"STUB_GATE_JSON": json.dumps({"used_percent": 21.0, "verdict": "ok", "stale": False})}
+        r, argv = self.spawn(self.base)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("-p", argv)
+        self.assertRegex(r.stderr, r"runtime claude \(pool claude:one-[0-9a-f]{8}; closest to its limit")
 
     def test_the_codex_probe_is_not_logged_as_a_dispatch(self):
         self.run_env = {"CODEX_HEADROOM_LOG": str(self.root / "dispatch.jsonl")}

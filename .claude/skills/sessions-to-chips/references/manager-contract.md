@@ -558,8 +558,10 @@ the actual sessions. Each lane goes to the measured headless pool nearest its li
 room, spending the window that would otherwise expire unused: Codex (`codex-headroom.sh`) or a Claude
 headless account (two accounts, each measured). A pool at or over its limit is skipped.
 `spawn-lane.sh` with no `--runtime` makes this pick (`scripts/lane_pool.py`, deterministic); an
-explicit `--runtime` wins. **No Claude-account usage reader exists yet** (probed 2026-11-19), so
-until one is wired the pick falls back to claude and says so on stderr.
+explicit `--runtime` wins. Claude accounts are read from usage snapshots
+(`~/.claude/run/claude-usage/<account>.json`, seven-day `used_percentage`); a missing, stale (>30 min),
+expired or malformed snapshot is unmeasured, and an unmeasured pool makes the pick fall back to claude
+and say so on stderr.
 A self-contained lane with a document or one-worktree deliverable and no harness state qualifies,
 regardless of its role. The `codex-first-gate` hook denies a native dispatch without one prompt line
 `Native-why: <reason>` (10+ trimmed characters). Reasons: needs harness state, MCP servers or this
