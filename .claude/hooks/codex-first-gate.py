@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""PreToolUse(Agent|Task|Workflow): qualifying lanes use Codex or headless runtimes.
+"""PreToolUse(Agent|Task|Workflow): qualifying lanes run headless, Claude first, Codex second.
+
+Lane order (founder ruling 2026-11-19): a headless Claude lane (spawn-lane.sh, default runtime
+claude) first, a Codex lane second. The hook file keeps its historical name, kill switch and
+analytics path so existing registrations and logs keep working.
 
 Native dispatch defaults to deny, regardless of role or model inheritance. Preserve the
 spec-author and sonnet/haiku mechanical exceptions, unless the prompt describes a large
@@ -36,11 +40,13 @@ WF_MODEL_RE = re.compile(r"""\bmodel["']?\s*:\s*["'`]([A-Za-z0-9_.-]+)["'`]""")
 WF_AGENT_RE = re.compile(r"\bagent\s*\(")
 SCRIPT_MAX_BYTES = 512 * 1024
 
-CODEX_COMMANDS = (
-    "  document or report:  ~/.claude/scripts/codex-dispatch.sh standard <promptfile> <outfile> [workdir]\n"
-    "  commits in ONE worktree:  ~/.claude/scripts/spawn-lane.sh --mission <promptfile> --cwd <worktree> "
-    "--class implementation\n"
-    "(class `standard` routes to sol through codex-headroom.sh; spawn-lane.sh runs Codex by default.)"
+HEADLESS_COMMANDS = (
+    "  1st, headless Claude (default runtime):  ~/.claude/scripts/spawn-lane.sh --mission <promptfile> "
+    "--cwd <worktree> --model opus --class implementation\n"
+    "  2nd, Codex lane:  ~/.claude/scripts/spawn-lane.sh --runtime codex --mission <promptfile> "
+    "--cwd <worktree> --class implementation\n"
+    "  2nd, Codex document or report:  ~/.claude/scripts/codex-dispatch.sh standard <promptfile> <outfile> [workdir]\n"
+    "(spawn-lane.sh runs headless Claude by default; Codex routes through codex-headroom.sh.)"
 )
 
 
@@ -141,7 +147,7 @@ def decide(d):
     spec = bool(ROLE_SPEC_RE.search(text)) and (tool != "Workflow" or calls == 1)
     exempt = (mechanical or spec) and not document_pass(text)
     detail = dict(detail, dispatch_runtime="native", native_why=reason[:300] if reason else None,
-                  eligibility="exception" if exempt else "codex-or-headless")
+                  eligibility="exception" if exempt else "headless")
     return ("allow" if reason or exempt else "deny"), detail
 
 
@@ -161,15 +167,16 @@ def log(d, verdict, detail):
 
 def deny_reason(detail):
     return (
-        "BLOCKED (codex-first gate): native %s dispatch requires a reason. Self-contained lanes "
-        "with a document or one-worktree deliverable and no harness state use Codex or headless lanes, "
-        "including large read-only research/review passes. Run:\n%s\n"
+        "BLOCKED (headless-lane gate): native %s dispatch requires a reason. Self-contained lanes "
+        "with a document or one-worktree deliverable and no harness state run headless: a headless "
+        "Claude lane first, a Codex lane second, including large read-only research/review passes. "
+        "Run:\n%s\n"
         "For a native exception, add ONE line `Native-why: <reason>` (10+ characters) to the prompt. "
         "Reasons: needs harness state, MCP servers or conversation context; interactive work; "
         "a sub-minute lookup. Named agents (critic, verifier, security-reviewer) also need this line. "
         "A quota wall is never a reason. Spec authors and sonnet/haiku mechanical lanes remain exempt "
         "unless doing a large document-shaped research/review pass."
-        % (detail.get("surface"), CODEX_COMMANDS)
+        % (detail.get("surface"), HEADLESS_COMMANDS)
     )
 
 
