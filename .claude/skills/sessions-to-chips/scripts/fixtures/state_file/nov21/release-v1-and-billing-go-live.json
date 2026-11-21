@@ -1,0 +1,7 @@
+{
+ "program": "release-v1-and-billing-go-live",
+ "goal": "Public release v1 and billing go-live.",
+ "manager_session": "local_b7000001-0000-4000-8000-000000000000 (cli c0000001-0000-4000-8000-000000000000)",
+ "absorbs": ["synthetic-customers"],
+ "updated_at": "2026-11-19T11:29:10Z"
+}
