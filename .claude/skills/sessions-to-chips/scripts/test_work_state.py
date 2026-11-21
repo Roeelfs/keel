@@ -440,6 +440,14 @@ class Holds(unittest.TestCase):
             self.assertFalse(s["holds"][0]["valid"])
             self.assertIn(ticket, [x["item"] for x in s["blocking"]])
 
+    def test_lane_whose_worktree_was_never_probed_does_not_crash(self):  # a folded lane
+        c = carrier("lane", "L-fold")
+        lanes = {"L-fold": {"pid": 1, "pid_start": "x", "outfile": "", "worktree": "/wt/folded"}}
+        for git in ({}, {"/wt/folded": None}):  # a folded binding's worktree is absent from the probed map
+            live, fp, _ = ws.carrier_state(c, ctx(lanes=lanes, git=git))
+            self.assertFalse(live)
+            self.assertIsNotNone(fp)
+
     def test_bake_carrier_has_a_valid_due_date_and_expires(self):
         c = carrier("bake", "2026-11-04T00:00:00Z")
         st.validate_carrier(c)
@@ -1033,6 +1041,32 @@ class FoldWriter(unittest.TestCase):
             fid = get(P, "b")["fold"]["id"]
             for s in ("a", "b"):
                 self.assertEqual([x["fold_id"] for x in rows_of(P, s, "absorb")], [fid], (nth, s))
+
+    def test_manifest_less_source_folds_as_a_closed_stub(self):
+        r = self.absorb("a", "ghost")
+        g = get(self.P, "ghost")
+        self.assertEqual((g["program"], g["absorbed_by"]), ("ghost", "a"))
+        st.validate_fold(g["fold"])
+        self.assertTrue(g["fold"]["closed"]["reason"].strip())
+        self.assertNotIn("goal", g)
+        self.assertIn("ghost", get(self.P, "a")["absorbs"])
+        self.assertTrue(any(n.startswith("fold_no_manifest:ghost") for n in r["notes"]))
+        ms = st.read_all(self.P)
+        self.assertEqual(pf.terminal_owner("ghost", ms), "a")
+        self.assertEqual(pf.open_missions("a", ms), [])  # no mission was transferred
+        for s_ in ("a", "ghost"):
+            self.assertEqual([x["fold_id"] for x in rows_of(self.P, s_, "absorb")], [g["fold"]["id"]])
+        r2 = self.absorb("a", "ghost")
+        self.assertEqual((r2["wrote"], r2["events"]), (False, []))
+
+    def test_manifest_less_source_keeps_an_explicit_closed_reason(self):
+        self.absorb("a", "ghost", closed_reason="done in PR #9")
+        self.assertEqual(get(self.P, "ghost")["fold"]["closed"]["reason"], "done in PR #9")
+
+    def test_manifest_less_absorber_still_refuses(self):
+        with self.assertRaisesRegex(st.SchemaError, "no manifest for ghost"):
+            self.absorb("ghost", "b")
+        self.assertNotIn("absorbed_by", get(self.P, "b"))
 
     def test_old_scope_covers_a_chain_built_by_two_absorbs(self):
         put(self.P, "c")
