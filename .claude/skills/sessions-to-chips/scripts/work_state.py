@@ -193,7 +193,7 @@ def carrier_state(c, ctx):
         live = bool(pid) and pid in ctx["pids"] and (not start or " ".join(start.split()) == ctx["pids"][pid])
         out = c.get("outfile") or row.get("outfile")
         wt = row.get("worktree")
-        g = (git or {}).get(wt) if wt else {}
+        g = ((git or {}).get(wt) or {}) if wt else {}  # a folded binding's worktree is never probed
         fp = None if git is None else _h(g.get("head"), g.get("paths"), bool(out and ctx["outfiles"].get(out)))
         return live, fp, None
     if t == "session":

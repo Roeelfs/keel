@@ -266,13 +266,17 @@ def read_manifest(slug, programs=None):
 class _Locked:
     """Exclusive flock on <slug>.json.lock for one read-modify-write of the manifest."""
 
-    def __init__(self, slug, programs=None):
+    def __init__(self, slug, programs=None, create=False):
         self.path = manifest_path(slug, programs)
         self.lock = self.path + ".lock"
+        self.create = create
 
     def __enter__(self):
         self.fh = open(self.lock, "a")
         fcntl.flock(self.fh, fcntl.LOCK_EX)
+        if self.create and not os.path.exists(self.path):
+            self.manifest = {}
+            return self
         with open(self.path) as fh:
             self.manifest = json.load(fh)
         return self
@@ -528,17 +532,22 @@ def absorb(absorber, absorbed, *, by, closed_reason=None, now=None, programs=Non
     """Fold `absorbed` into `absorber`: the ONE writer of `absorbed_by`, `fold` and the `absorbs` mirror.
     Under the graph lock: a committed fold (absorbed_by == absorber with a valid fold) only completes its events;
     otherwise admission, then (1) the string mirror on the terminal owner, (2) absorbed_by + fold on the absorbed
-    manifest (the commit point), (3) one `absorb` row per log. -> {fold_id, wrote, events, notes}."""
+    manifest (the commit point), (3) one `absorb` row per log. -> {fold_id, wrote, events, notes}.
+    A source with no manifest (a manager that never wrote one) has no goal, so no mission to carry: step (2)
+    creates its manifest as a stub holding only the fold, born closed (`--closed-reason`, else a default)."""
     now = time.time() if now is None else now
     if not (by or "").strip():
         raise SchemaError("absorb: --by <session id> is required")
     with _GraphLock(programs):
         ms = read_all(programs)
-        if absorbed not in ms:
-            raise SchemaError(f"absorb: no manifest for {absorbed}")
         if absorber not in ms:
-            raise SchemaError(f"absorb: no manifest for {absorber}")
-        src = ms[absorbed]
+            raise SchemaError(f"absorb: no manifest for {absorber} (the absorber must be a program with a manifest)")
+        stub = absorbed not in ms
+        if stub and os.path.exists(manifest_path(absorbed, programs)):
+            raise SchemaError(f"absorb: {manifest_path(absorbed, programs)} is unreadable or names no program; fix it first")
+        if stub:
+            closed_reason = closed_reason or "no manifest: no recorded goal, so no mission to carry"
+        src = ms.get(absorbed) or {"program": absorbed}
         if src.get("absorbed_by") == absorber and _valid_fold(src):
             return {"fold_id": src["fold"]["id"], "wrote": False, "notes": ["retry: fold already committed"],
                     "events": _absorb_events(absorbed, absorber, src["fold"], programs)}
@@ -555,7 +564,7 @@ def absorb(absorber, absorbed, *, by, closed_reason=None, now=None, programs=Non
             raise SchemaError(f"absorb refused: {absorber} is itself absorbed; fold into {owner} instead")
         if src.get("absorbed_by") and not repair:
             raise SchemaError(f"absorb refused: {absorbed} is already absorbed by {src['absorbed_by']}")
-        if not (src.get("goal") or "").strip():
+        if not stub and not (src.get("goal") or "").strip():
             raise SchemaError(f"absorb refused: {absorbed} has no goal, so there is no mission to carry")
         family = pf.fold_family(absorbed, ms)
         inherited = [s for s in family if pf.mission_open(ms[s])]
@@ -566,6 +575,7 @@ def absorb(absorber, absorbed, *, by, closed_reason=None, now=None, programs=Non
                 raise SchemaError(f"absorb refused: open mission(s) {', '.join(missions)} cannot move under {owner} "
                                   f"({why}). Close each first (work_state.py mission-close), or pick another absorber.")
         notes = [] if (src.get("map") or {}).get("snapshot_cmd") else [f"fold_no_tracker:{absorbed}"]
+        notes += [f"fold_no_manifest:{absorbed}: stub manifest written, mission closed"] if stub else []
         since = now_iso(now)
         fold = {"id": f"{absorbed}@{since}", "since": since, "by": by,
                 "closed": None if closed_reason is None else {"at": since, "reason": closed_reason}}
@@ -575,8 +585,8 @@ def absorb(absorber, absorbed, *, by, closed_reason=None, now=None, programs=Non
             add = [s for s in [absorbed] + family if s not in cur]
             if add:
                 lk.write(dict(lk.manifest, absorbs=cur + add))
-        with _Locked(absorbed, programs) as lk:
-            lk.write(dict(lk.manifest, absorbed_by=absorber, fold=fold))
+        with _Locked(absorbed, programs, create=stub) as lk:
+            lk.write(dict(lk.manifest or {"program": absorbed}, absorbed_by=absorber, fold=fold))
         return {"fold_id": fold["id"], "wrote": True, "notes": notes + (["repair: fold record written"] if repair else []),
                 "events": _absorb_events(absorbed, absorber, fold, programs)}
 
