@@ -279,6 +279,64 @@ def open_missions(slug, manifests):
     return [s for s in fold_family(slug, g) if mission_open(g[s])]
 
 
+# ---------- the state-file resolver: the one owner of "which <x>.state.md is this program's" ----------
+# `<slug>.state.md` is only the default name. A renamed program leaves a `Moved: see <new>.state.md` stub
+# under its old name, and a not-yet-renamed file declares the program in its header instead
+# (`# Program <name> (alias: a, b; manifest <slug>.json)`). A program with no file gets None, never a
+# made-up path: a reader handed a path assumes it exists.
+
+MOVED_RX = re.compile(r"^Moved: see (\S+\.state\.md)\s*$")
+PROGRAM_RX = re.compile(r"^# Program (\S+)(.*)$")
+
+
+def _state_header(path, lines=8):
+    try:
+        with open(path, errors="replace") as fh:
+            return [ln.rstrip("\n") for _, ln in zip(range(lines), fh)]
+    except OSError:
+        return []
+
+
+def _declared_names(path):
+    """The program names a state file's header declares: its `# Program <name>`, every `alias:` entry and
+    the `manifest <slug>.json` it names."""
+    for ln in _state_header(path):
+        m = PROGRAM_RX.match(ln)
+        if not m:
+            continue
+        names = {m.group(1)}
+        for a in re.findall(r"alias(?:es)?:\s*([^;)]+)", m.group(2)):
+            names |= {s.strip() for s in a.split(",") if s.strip()}
+        names |= set(re.findall(r"manifest (\S+)\.json", m.group(2)))
+        return names
+    return set()
+
+
+def state_file(slug, programs_dir):
+    """-> (path | None, note | None). `<slug>.state.md` when it exists, following `Moved:` stubs; else the
+    one state file whose header declares `slug`. Note: `state_moved:<old>-><new>`, `state_declared:<file>`,
+    `state_missing:<slug>`, `state_ambiguous:<files>` or `state_moved_broken:<chain>` (the last three
+    carry no path: fail closed rather than guess)."""
+    path, chain = os.path.join(programs_dir, f"{slug}.state.md"), []
+    while os.path.isfile(path):
+        chain.append(os.path.basename(path))
+        head = next((ln for ln in _state_header(path, 3) if ln.strip()), "")
+        m = MOVED_RX.match(head)
+        if not m:
+            return path, (f"state_moved:{chain[0]}->{chain[-1]}" if len(chain) > 1 else None)
+        path = os.path.join(programs_dir, os.path.basename(m.group(1)))
+        if os.path.basename(path) in chain:
+            return None, "state_moved_broken:" + "->".join(chain + [os.path.basename(path)])
+    if chain:
+        return None, "state_moved_broken:" + "->".join(chain + [os.path.basename(path)])
+    hits = sorted(f for f in glob.glob(os.path.join(programs_dir, "*.state.md")) if slug in _declared_names(f))
+    if len(hits) == 1:
+        return hits[0], f"state_declared:{os.path.basename(hits[0])}"
+    if hits:
+        return None, "state_ambiguous:" + ",".join(os.path.basename(h) for h in hits)
+    return None, f"state_missing:{slug}"
+
+
 def display_title(title):
     """A manager's session title as people read it: "[Manager] Acme cutover (Access v2)" -> "Acme cutover (Access v2)"."""
     t = re.sub(r"^\[Manager\]\s*[-:]?\s*", "", title or "")

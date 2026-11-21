@@ -84,8 +84,11 @@ def checkpoint_for(mgrs, here, floor):
 
 
 def state_fold(slug, programs_dir, lineage_last, manifest):
-    p = lambda ext: os.path.join(programs_dir, f"{slug}.{ext}")  # noqa: E731
-    mt = lambda f: os.path.getmtime(f) if os.path.exists(f) else 0.0  # noqa: E731
+    """The program's state file comes from pf.state_file (the one resolver); its events log sits beside it."""
+    state_path, note = pf.state_file(slug, programs_dir)
+    base = state_path[:-len(".state.md")] if state_path else os.path.join(programs_dir, slug)
+    p = lambda ext: state_path if ext == "state.md" else f"{base}.{ext}"  # noqa: E731
+    mt = lambda f: os.path.getmtime(f) if f and os.path.exists(f) else 0.0  # noqa: E731
     last_event = 0.0
     try:
         with open(p("events.jsonl"), errors="ignore") as fh:
@@ -98,7 +101,7 @@ def state_fold(slug, programs_dir, lineage_last, manifest):
     newest = max(state, events, last_event, lineage_last, tc.parse_ts((manifest or {}).get("updated_at")))
     verdict = "MISSING" if not state else ("CURRENT" if state >= newest - 1800 else
                                            f"STALE by {(newest - state) / 3600:.1f} h")
-    return {"state": p("state.md"), "state_mtime": state, "events_mtime": events, "last_event": last_event,
+    return {"state": state_path, "state_note": note, "state_mtime": state, "events_mtime": events, "last_event": last_event,
             "manifest_updated": tc.parse_ts((manifest or {}).get("updated_at")), "lineage_last": lineage_last,
             "map": (manifest or {}).get("map"), "map_comment": "UNREAD here (Linear): the handoff miner reads it",
             "newest": newest, "verdict": verdict}

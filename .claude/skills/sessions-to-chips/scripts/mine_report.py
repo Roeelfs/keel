@@ -167,7 +167,9 @@ def build_plan(ctx):
             sid, handoff, mode = "unmanaged", "none: add 'likeliest program' per AT-RISK row", "unmanaged"
         else:
             sid = f"{p['slug']}-children-{short(lg['managerSessionId'])}"
-            handoff = handoff_of.get(p["slug"]) or f"none (program quiet since checkpoint): judge against {p['fold']['state']}"
+            handoff = handoff_of.get(p["slug"]) or (
+                f"none (program quiet since checkpoint): judge against {p['fold']['state']}" if p["fold"]["state"]
+                else f"none (program quiet since checkpoint; no state file: {p['fold'].get('state_note')})")
             mode = "children"
         phase2.append({"id": f"reconcile:{sid}", "prompt": os.path.join(PROMPTS, "child-ledger-reconciler.md"),
                        "model": "haiku", "mode": mode, "inputs": {"LEDGER": lg["file"], "HANDOFF": handoff},
@@ -305,7 +307,7 @@ def render_receipt(ctx, plan, gs):
         inst = "<br>".join(f"{m['acct'][:8]}:{short(m['sid'])} {m['cli'][:8]}{' arch' if m['archived'] else ''} {m['verdict']}"
                            for m in sorted(p["managers"], key=lambda m: -m["store_last"]))
         f = p["fold"]
-        fold = (f"{f['verdict']}: state {iso(f['state_mtime'])}, events {iso(f['events_mtime'])} (last {iso(f['last_event'])}), "
+        fold = (f"{f['verdict']}{' (' + f['state_note'] + ')' if f.get('state_note') else ''}: state {iso(f['state_mtime'])}, events {iso(f['events_mtime'])} (last {iso(f['last_event'])}), "
                 f"lineage {iso(f['lineage_last'])}, map comment {f['map_comment'].split(':')[0]}")
         tag = (f" (absorbed by {p['absorbed_by']})" if p["absorbed_by"] else "") + \
             (f" (candidate{', routed ' + p['route'] if p.get('route') else ', UNROUTED'})" if p["kind"] == "candidate" else "")
