@@ -394,9 +394,37 @@ class InteractiveRewrite(unittest.TestCase):
         self.assertIs(updated["run_in_background"], True)
         self.assertIn("background", note)
 
+    def test_every_heavy_segment_of_a_chain_is_wrapped(self):
+        updated, _ = self.rewrite(self.check("pnpm test; echo mid && pnpm build"))
+        self.assertRegex(updated["command"], r"^\S*with-heavy-lock pnpm test; echo mid && \S*with-heavy-lock pnpm build$")
+        self.assertIs(updated["run_in_background"], True)
+
+    def test_an_already_wrapped_segment_is_not_wrapped_twice(self):
+        updated, _ = self.rewrite(self.check("with-heavy-lock pnpm test && pnpm build"))
+        self.assertRegex(updated["command"], r"^with-heavy-lock pnpm test && \S*with-heavy-lock pnpm build$")
+
+    def test_a_heavy_chain_piped_into_an_output_filter_is_wrapped_and_backgrounded(self):
+        # The live 11-22 friction shape (falsifier 5.1 probe).
+        command = "cd /x && pnpm --filter a exec vitest run foo.test.ts 2>&1 | tail -8"
+        updated, _ = self.rewrite(self.check(command))
+        self.assertRegex(updated["command"],
+                         r"^cd /x && \S*with-heavy-lock pnpm --filter a exec vitest run foo\.test\.ts 2>&1 \| tail -8$")
+        self.assertIs(updated["run_in_background"], True)
+        for filt in ("head -20", "grep -E 'FAIL|passed'", "wc -l"):
+            with self.subTest(filt=filt):
+                updated, _ = self.rewrite(self.check("pnpm test 2>&1 | " + filt))
+                self.assertTrue(updated["command"].endswith("| " + filt), updated["command"])
+
+    def test_an_already_wrapped_command_piped_into_a_filter_is_backgrounded(self):
+        updated, note = self.rewrite(self.check("with-heavy-lock pnpm test 2>&1 | tail -5"))
+        self.assertEqual(updated["command"], "with-heavy-lock pnpm test 2>&1 | tail -5")
+        self.assertIs(updated["run_in_background"], True)
+        self.assertIn("background", note)
+
     def test_an_unsafe_shape_stays_denied(self):
-        for command in ("pnpm test | tail -5", "pnpm test & echo hi", "(pnpm test)",
-                        "pnpm test; pnpm build", "cat <<EOF\nx\nEOF\npnpm test"):
+        for command in ("pnpm test & echo hi", "(pnpm test)", "cat <<EOF\nx\nEOF\npnpm test",
+                        "pnpm test | sort", "pnpm test | tail -5 | cat", "pnpm test | tail -5; echo done",
+                        "pnpm test || true", "pnpm test |& tail -5", "pnpm test | tail -$(echo 5)"):
             with self.subTest(command=command):
                 result = self.check(command)
                 self.assertEqual(result.returncode, 2, result.stdout)
