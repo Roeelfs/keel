@@ -23,6 +23,11 @@ export const meta = {
 // GOTCHAS baked in: `args` can arrive as a STRING (JSON.parse it); `process` is undefined;
 // Date.now()/Math.random() throw. Agents are READ-ONLY (no verify / heavy ops / push).
 
+// Every agent() prompt ends with the fixed dispatch tail (sessions-to-chips/prompts/dispatch-tail.md),
+// so agent-prompt-normalizer finds nothing to rewrite: an auto-mode rewrite voids the classifier's review.
+const CONTRACT_TAIL = '\n---\nYou are a leaf agent: do NOT spawn sub-agents or Workflows; do the work inline and return.\n\nReturn a CONDENSED SUMMARY of conclusions (target 1,000-2,000 tokens), never a transcript, raw tool output, or file bodies - the caller re-reads your return on every subsequent turn. Ground-truth identifiers (exact error text, file:line anchors, commit SHAs, ticket IDs, command strings) are quoted VERBATIM and are never compressed away to hit that target. If the full detail matters, write it to a file and return the path.\n\nIf you write scratch files, create your OWN uniquely-named subdirectory first - the scratchpad is shared by every lane of this session, not per-lane, and sibling lanes silently overwrite same-named files.'
+const dispatch = (prompt, opts) => agent(`${prompt}${CONTRACT_TAIL}`, opts)
+
 const input = typeof args === 'string' ? JSON.parse(args) : args
 const sessions = input.sessions
 const mineScript = input.mineScript
@@ -63,7 +68,7 @@ const SCHEMA = {
 }
 
 const results = await parallel(sessions.map((s) => () =>
-  agent(
+  dispatch(
 `Deep-mine ONE finished/paused Claude Code session so a resume prompt can be authored that carries its OVERALL GOAL and the EXACT phrase to continue from where it stopped — not a vague "do the last thing". READ-ONLY: do not edit files, build, test, verify, run any heavy op, or push. Only read, git status/log, and gh.
 
 SESSION (title is the user-facing name — preserve it):
@@ -298,7 +303,7 @@ GATES: ${gates.length ? gates.join('; ') : 'none'}`
 
 const stories = await parallel(groups.map((g) => () => {
   const members = (g.memberClis || []).map(c => ok.find(r => r._cli === c)).filter(Boolean)
-  return agent(narratorPrompt(g, members),
+  return dispatch(narratorPrompt(g, members),
     { label: `narrate:${g.category}`.slice(0, 60), phase: 'Narrate', schema: NARR_SCHEMA, agentType: 'general-purpose', model: 'sonnet' }
   ).then(r => r ? assemble(g, members, r) : { category: g.category, _failed: true })
    .catch(() => ({ category: g.category, _failed: true }))

@@ -593,6 +593,10 @@ conversation's context; interactive work; a sub-minute lookup. Named agents pinn
 there is one native escape. Sonnet/haiku mechanical lanes and `Role: spec` authors retain their
 exceptions, unless doing large read-only research/review passes with document-shaped output.
 The gate uses scope and deliverable words as a conservative heuristic, not semantic analysis.
+Every native prompt also ends with the fixed tail in `../prompts/dispatch-tail.md` (leaf, return
+and scratch lines, verbatim), and an untyped dispatch passes `model`. In auto mode
+`agent-prompt-normalizer.py` denies a prompt without them instead of rewriting it, because a
+rewritten input is refused by the classifier as unreviewed (2026-11-22).
 A headless lane needs no reason flag on either runtime (`--claude-reason` is gone); it is not a
 native escape. Pick the runtime by walking these questions in order; the first "yes" wins.
 

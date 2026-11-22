@@ -154,13 +154,64 @@ def chain_is_safe(command):
     return top_level_segments(command) is not None
 
 
-def wrap_heavy_segment(command, rules, cwd, wrapper):
-    """If `command` is a safe `;`/`&&` chain (see `chain_is_safe`) with EXACTLY ONE segment
-    that classifies as heavy, and that segment does not already invoke the wrapper, return
-    the command with the wrapper prefixed onto just that segment -- every other segment,
-    separator, and byte of whitespace stays untouched. Else return None.
+# The read-only filters a heavy command's output is commonly piped into to keep the log short
+# (`... 2>&1 | tail -8`). 284 desktop denials after 10-20 were this one shape (lane A, 11-22).
+_OUTPUT_FILTERS = frozenset({'tail', 'head', 'grep', 'wc'})
+
+
+def split_output_filter(command):
+    """Split `heavy-chain | filter ...` into (chain, '| filter ...') when the command is a safe
+    `;`/`&&` chain whose LAST statement pipes once into one of `_OUTPUT_FILTERS`, and nothing
+    follows the filter. Anything else (two pipes, `||`, `|&`, a non-filter stage, a statement
+    after the filter) returns None and stays on the deny path."""
+    if '<<' in command or '`' in command:
+        return None
+    masked = _scrub_for_scan(command)
+    pipes, quote, i, n = [], None, 0, len(masked)
+    while i < n:
+        c = masked[i]
+        if quote:
+            if quote == '"' and c == '\\' and i + 1 < n:
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in ('\'', '"'):
+            quote = c
+        elif c == '\\':
+            i += 1
+        elif c == '$' and masked[i + 1:i + 2] == '(':
+            return None  # a pipe inside `$(...)` is not the top-level filter stage; stay denied
+        elif c == '|':
+            if masked[i + 1:i + 2] in ('|', '&'):
+                return None
+            pipes.append(i)
+        i += 1
+    if len(pipes) != 1:
+        return None
+    chain, tail = command[:pipes[0]], command[pipes[0] + 1:]
+    tail_spans = top_level_segments(tail)
+    if not top_level_segments(chain) or not tail_spans or len(tail_spans) != 1:
+        return None
+    try:
+        words = shlex.split(tail)
+    except ValueError:
+        return None
+    if not words or PurePosixPath(words[0]).name not in _OUTPUT_FILTERS:
+        return None
+    return chain, command[pipes[0]:]
+
+
+def wrap_heavy_segments(command, rules, cwd, wrapper):
+    """If `command` is a safe `;`/`&&` chain (see `chain_is_safe`), optionally ending in one
+    pipe into an output filter (see `split_output_filter`), with at least one segment that
+    classifies as heavy, return the command with the wrapper prefixed onto EVERY heavy segment
+    that does not already invoke it -- every other segment, separator, the filter stage, and
+    every byte of whitespace stays untouched. Else return None.
     """
-    spans = top_level_segments(command)
+    split = split_output_filter(command)
+    chain, suffix = split if split else (command, '')
+    spans = top_level_segments(chain)
     if not spans:
         return None
     try:
@@ -168,9 +219,9 @@ def wrap_heavy_segment(command, rules, cwd, wrapper):
     except ValueError:
         return None
     allow_exempt = not may_change_cwd(command, full_parsed)
-    heavy_idx = None
-    for idx, (start, end) in enumerate(spans):
-        seg_text = command[start:end]
+    heavy = []
+    for start, end in spans:
+        seg_text = chain[start:end]
         try:
             words = shlex.split(seg_text)
         except ValueError:
@@ -179,18 +230,16 @@ def wrap_heavy_segment(command, rules, cwd, wrapper):
         if not real_words or PurePosixPath(real_words[0]).name == _HEAVY_LOCK_NAME:
             continue  # empty segment, or already wrapped -- nothing to rewrite here
         if inspect_words(words, rules, cwd, allow_exempt):
-            if heavy_idx is not None:
-                return None  # more than one heavy segment -- ambiguous, leave it denied
-            heavy_idx = idx
-    if heavy_idx is None:
+            lead = _skip_prefixes(seg_text)
+            if not seg_text[lead:].strip():
+                return None  # nothing left to wrap after the prefix run -- refuse rather than guess
+            heavy.append(start + lead)
+    if not heavy:
         return None
-    start, end = spans[heavy_idx]
-    seg = command[start:end]
-    lead = _skip_prefixes(seg)
-    if not seg[lead:].strip():
-        return None  # nothing left to wrap after the prefix run -- refuse rather than guess
-    new_seg = seg[:lead] + wrapper + ' ' + seg[lead:]
-    return command[:start] + new_seg + command[end:]
+    out = chain
+    for at in reversed(heavy):  # right to left, so earlier offsets stay valid
+        out = out[:at] + wrapper + ' ' + out[at:]
+    return out + suffix
 
 
 def valid_rules(value):
@@ -280,7 +329,7 @@ def main(arguments):
         if wrapper:
             needs_background = runtime == 'claude' and 'with-heavy-lock' in background
             if runtime == 'claude' and not headless_lane():
-                new_command = wrap_heavy_segment(command, rules, cwd, wrapper)
+                new_command = wrap_heavy_segments(command, rules, cwd, wrapper)
                 if new_command is not None:
                     note = ('Heavy command (' + kind + ') rewritten to run through the shared '
                             'resource runner (' + wrapper + '); it will queue if another heavy '
@@ -308,11 +357,11 @@ def main(arguments):
         return 0
     if tool_input.get('run_in_background') is True:
         return 0
-    if chain_is_safe(command) and not headless_lane():
+    if (chain_is_safe(command) or split_output_filter(command)) and not headless_lane():
         # run_in_background is a flag on the whole Bash call, not a text edit -- it is safe
-        # for any `;`/`&&` chain regardless of how many statements it has. A pipe stays
-        # denied above (chain_is_safe returns None), since backgrounding the whole pipeline
-        # doesn't fix "piping the slow command's own output into another command".
+        # for any `;`/`&&` chain regardless of how many statements it has, and for one that
+        # ends in a single pipe into a read-only output filter (`| tail -8`). Any other pipe
+        # stays denied: backgrounding it says nothing about what the downstream stage does.
         note = ('Long-running command (' + slow + ') queued to run in background '
                 '(run_in_background: true) automatically; the harness re-invokes you when it exits.')
         return allow_rewrite(tool_input, command, True, note)

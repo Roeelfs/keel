@@ -62,6 +62,11 @@ async function withDeadRetry(role, run) {
   return await run('\nA previous attempt died without a result: write the deliverable file early and keep reads minimal.')
 }
 
+// Every agent() prompt ends with the fixed dispatch tail (sessions-to-chips/prompts/dispatch-tail.md),
+// so agent-prompt-normalizer finds nothing to rewrite: an auto-mode rewrite voids the classifier's review.
+const CONTRACT_TAIL = '\n---\nYou are a leaf agent: do NOT spawn sub-agents or Workflows; do the work inline and return.\n\nReturn a CONDENSED SUMMARY of conclusions (target 1,000-2,000 tokens), never a transcript, raw tool output, or file bodies - the caller re-reads your return on every subsequent turn. Ground-truth identifiers (exact error text, file:line anchors, commit SHAs, ticket IDs, command strings) are quoted VERBATIM and are never compressed away to hit that target. If the full detail matters, write it to a file and return the path.\n\nIf you write scratch files, create your OWN uniquely-named subdirectory first - the scratchpad is shared by every lane of this session, not per-lane, and sibling lanes silently overwrite same-named files.'
+const dispatch = (prompt, opts) => agent(`${prompt}${CONTRACT_TAIL}`, opts)
+
 const gateLog = []
 const note = (s) => { gateLog.push(s); log(s) }
 const labelsOf = (arr) => (arr || []).map((e) => e.label)
@@ -79,7 +84,7 @@ const laneBrief = (file, extra) =>
 // ---------------------------------------------------------------------------
 async function why() {
   phase('Prepare')
-  const r = await agent(`ROLE: why-gate\n${laneBrief(RUN + '/prompts/why-gate.md')}`, { label: 'why-gate', phase: 'Prepare', agentType: 'general-purpose', model: 'opus', schema: WHY })
+  const r = await dispatch(`ROLE: why-gate\n${laneBrief(RUN + '/prompts/why-gate.md')}`, { label: 'why-gate', phase: 'Prepare', agentType: 'general-purpose', model: 'opus', schema: WHY })
   if (!r) throw new Error('spec-review: the why-gate lane returned nothing')
   return { stage: 'why', runDir: RUN, ran: ['why-gate'], gateLog }
 }
@@ -93,7 +98,7 @@ async function prepare() {
   const jobs = []
   if (fb.includes('context-dossier-miner')) jobs.push(['context-dossier-miner', 'opus'])
   if (fb.includes('design-decisions-extractor')) jobs.push(['design-decisions-extractor', 'haiku'])
-  const done = await parallel(jobs.map(([label, model]) => () => withDeadRetry(label, (extra) => agent(`ROLE: ${label}\n${laneBrief(RUN + '/prompts/' + label + '.md')}${capRule(label)}${extra}`,
+  const done = await parallel(jobs.map(([label, model]) => () => withDeadRetry(label, (extra) => dispatch(`ROLE: ${label}\n${laneBrief(RUN + '/prompts/' + label + '.md')}${capRule(label)}${extra}`,
     { label, phase: 'Prepare', agentType: 'general-purpose', model, schema: MINER }))))
   jobs.forEach(([label], i) => {
     if (done[i]) return
@@ -109,7 +114,7 @@ async function prepare() {
 async function review() {
   phase('Review')
   const lanes = need('lanes')
-  const results = await parallel(lanes.map((e) => () => agent(`ROLE: ${e.label}\n${laneBrief(RUN + '/prompts/' + e.label + '.md')}`, laneAgent(e))))
+  const results = await parallel(lanes.map((e) => () => dispatch(`ROLE: ${e.label}\n${laneBrief(RUN + '/prompts/' + e.label + '.md')}`, laneAgent(e))))
   lanes.forEach((e, i) => { if (!results[i]) note(`${e.label}: FAILED (no result returned)`) })
   return { stage: 'review', runDir: RUN, returned: lanes.filter((e, i) => results[i]).map((e) => e.label), gateLog }
 }
@@ -118,10 +123,10 @@ async function review2() {
   phase('Review')
   const briefs = A.briefs || []
   const repair = A.repair || []
-  const inv = await parallel(briefs.map((b) => () => agent(`ROLE: spec-drift-investigator\n${laneBrief(RUN + '/prompts/' + b.label + '.md')}`,
+  const inv = await parallel(briefs.map((b) => () => dispatch(`ROLE: spec-drift-investigator\n${laneBrief(RUN + '/prompts/' + b.label + '.md')}`,
     { label: b.label, phase: 'Review', agentType: 'general-purpose', model: 'opus', schema: ENVELOPE })))
   briefs.forEach((b, i) => { if (!inv[i]) note(`${b.label}: FAILED (no result returned)`) })
-  await parallel(repair.map((e) => () => agent(
+  await parallel(repair.map((e) => () => dispatch(
     `ROLE: ${e.label}\nYour earlier output ${RUN}/lanes/${e.label}.md did not answer these assigned questions: ${e.questions.join(', ')}. Read your brief ${RUN}/prompts/${e.label}.md (the question texts are in its Run contract), answer exactly those questions by appending to your findings file, then rewrite ${RUN}/envelopes/${e.label}.json with answered_questions and findings updated, and reply with it via StructuredOutput.`,
     laneAgent(e))))
   return { stage: 'review2', runDir: RUN, drift: briefs.map((b) => b.label), repaired: repair.map((e) => e.label), gateLog }
@@ -135,9 +140,9 @@ async function critics() {
   const cr = A.critics || []
   const ex = A.extractors || []
   const jobs = [
-    ...cr.map((e) => () => agent(`ROLE: ${e.label}\n${laneBrief(RUN + '/prompts/' + e.label + '.md')}`, laneAgent(e, 'Synthesize'))),
+    ...cr.map((e) => () => dispatch(`ROLE: ${e.label}\n${laneBrief(RUN + '/prompts/' + e.label + '.md')}`, laneAgent(e, 'Synthesize'))),
     // Fallback only: the Codex (luna) extraction of this lane's prose failed validation. Same prompt, run by a Claude lane.
-    ...ex.map((e) => () => agent(
+    ...ex.map((e) => () => dispatch(
       `ROLE: codex-envelope-extractor\nYour complete brief is the file ${e.promptPath}; read it and follow it, with ONE change: ALSO write the envelope object to ${RUN}/envelopes/${e.label}.json (the file is the deliverable the pipeline checks) and reply with it via StructuredOutput.`,
       { label: e.label + ':extract', phase: 'Synthesize', agentType: 'general-purpose', model: 'sonnet', schema: ENVELOPE })),
   ]
@@ -160,7 +165,7 @@ async function merge() {
     `Then validate it yourself with Bash: python3 ${SKILL}/scripts/run_dir.py merge-check --run ${RUN} --lanes ${ok.join(',')} ; if it prints ok:false, fix merged.raw.json as its errors say and rerun until ok:true. Reply via StructuredOutput with the number of units.`,
     'You are a leaf agent: spawn no sub-agents or Workflows.',
   ].join('\n') + repair
-  const r = await agent(prompt, { label: A.repairErrors && A.repairErrors.length ? 'finding-merger:repair' : 'finding-merger', phase: 'Synthesize', agentType: 'general-purpose', model: 'sonnet', schema: MERGED })
+  const r = await dispatch(prompt, { label: A.repairErrors && A.repairErrors.length ? 'finding-merger:repair' : 'finding-merger', phase: 'Synthesize', agentType: 'general-purpose', model: 'sonnet', schema: MERGED })
   if (!r) throw new Error('spec-review: the finding merger returned nothing')
   return { stage: 'merge', runDir: RUN, units: r.units, gateLog }
 }
@@ -168,7 +173,7 @@ async function merge() {
 async function falsify() {
   phase('Synthesize')
   const batches = need('batches')
-  await parallel(batches.map((b) => () => agent(`ROLE: finding-falsifier\n${laneBrief(b.prompt)}`,
+  await parallel(batches.map((b) => () => dispatch(`ROLE: finding-falsifier\n${laneBrief(b.prompt)}`,
     { label: `falsify:batch-${b.batch}`, phase: 'Synthesize', agentType: 'general-purpose', model: 'sonnet', schema: FALSIFIER_BATCH })))
   return { stage: 'falsify', runDir: RUN, batches: batches.map((b) => b.batch), gateLog }
 }
@@ -179,7 +184,7 @@ async function report() {
   const repair = (A.repairErrors && A.repairErrors.length)
     ? `\nYour report ${RUN}/report.md failed the mechanical check. Read it and the brief, fix ONLY what these errors name, and rewrite ${RUN}/report.md.\nERRORS:\n${A.repairErrors.join('\n')}`
     : ''
-  const w = await withDeadRetry('synthesis-writer', (extra) => agent(`ROLE: synthesis-writer\nYour complete brief is the file ${brief}. Read it now and follow every rule in it; spec ${SPEC}.${repair}${capRule('synthesis-writer')}${extra}`,
+  const w = await withDeadRetry('synthesis-writer', (extra) => dispatch(`ROLE: synthesis-writer\nYour complete brief is the file ${brief}. Read it now and follow every rule in it; spec ${SPEC}.${repair}${capRule('synthesis-writer')}${extra}`,
     { label: repair ? 'synthesis-writer:repair' : 'synthesis-writer', phase: 'Synthesize', agentType: 'general-purpose', model: 'opus', schema: SYNTH }))
   if (!w) throw new Error('spec-review: synthesis writer died twice (no result within the turn cap); report failed')
   return { stage: 'report', runDir: RUN, reportPath: RUN + '/report.md', gateLog }
