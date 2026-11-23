@@ -22,7 +22,7 @@ only here, as the last act after the WHOLE brief reached the reader, even when p
 early (`| head -2`: BrokenPipe on the end-of-brief probe) records nothing. Line 2 is a one-line digest of what is
 new since the last load, so even a truncated read carries the new rules. The same load points the program's
 owner manifest (`absorbed_by` followed) at the running session, so an account switch leaves no stale
-`manager_session`. Never hand-edit the record. Rules: ../references/role.md.
+`manager_session`; a folded-away slug's load never takes the owner from another live manager. Never hand-edit the record. Rules: ../references/role.md.
 Module-level imports stay stdlib-only: the Stop guard imports this file under a 2 s budget.
 """
 import argparse
@@ -46,6 +46,7 @@ DELTA_CAP = 12
 DIGEST_SHOW = 3
 DIGEST_WIDTH = 160
 PIPE_SETTLE_S = 0.3  # time for a `| head -N` reader to exit before the end-of-brief probe write
+HOLDER_WINDOW_S = 3 * 3600  # a manager seen this recently still holds its program (wakes are capped at 2700 s)
 ROLE_LABELS = ("role", "overlay")  # sources whose `## Changes` lines are role changes; the ledgers carry rulings
 
 
@@ -405,11 +406,37 @@ def emit(text, version, out=None, settle=PIPE_SETTLE_S):
         return False
 
 
-def claim_owner(slug, session, now, programs=None):
+def holder_live(value, mine, now, rows=None):
+    """True when manifest text `value` leads with a session id (`local_<hex>` or a cli uuid) that is not one of
+    `mine` and names a present [Manager] row of the session index (program_family.session_present over
+    HOLDER_WINDOW_S: a manager idle between wakes still holds its program). An unreadable index counts as live:
+    not stealing costs one owner-slug load, stealing costs two managers ping-ponging the binding."""
+    tok = re.match(r"\s*(local_[0-9a-f-]{6,}|[0-9a-f]{8}-[0-9a-f-]{27,})", value or "")
+    if not tok:
+        return False
+    held = tok.group(1)
+    if any(i and i.startswith(held) for i in mine):
+        return False
+    try:
+        sys.path.insert(0, HERE)
+        import program_family as pf
+        rows = pf.session_index(write=False) if rows is None else rows
+    except Exception:
+        return True
+    row = next((r for r in rows.values() if (r.get("sessionId") or "").startswith(held)
+                or r.get("cliSessionId") == held), None)
+    return bool(row) and pf.is_manager(row) and pf.session_present(row, now.timestamp(), HOLDER_WINDOW_S)
+
+
+def claim_owner(slug, session, now, programs=None, rows=None):
     """Point the program's terminal owner manifest (`absorbed_by` followed) at the running session: its
     `manager_session` (and a legacy `orchestrator_session`) name this session and `updated_at` moves, so the
-    guards resolve this session to the owner after an account switch. -> (owner | None, note | None). Never
-    raises: a failed claim is a printed note, the load still records."""
+    guards resolve this session to the owner after an account switch. A load of the owner's OWN slug always
+    claims. A load of a folded-away slug claims only when the owner's `manager_session` is empty or names no
+    other live manager (`holder_live`): a folded child's manager never steals the owner from its live manager
+    (2026-11-23: the identities manager's loads rebound apps.json, and the two managers stole it back and forth).
+    `rows` is the session index (tests). -> (owner | None, note | None). Never raises: a failed claim is a
+    printed note, the load still records."""
     if not session:
         return None, None
     programs = programs or programs_dir()
@@ -420,11 +447,14 @@ def claim_owner(slug, session, now, programs=None):
         owner = pf.terminal_owner(slug, pf.load_manifests(programs))
         if not owner:
             return None, None  # no manifest (or a broken fold): nothing to point
-        local = next((i for i in own_ids(session) if i.startswith("local_")), None)
+        mine = own_ids(session)
+        local = next((i for i in mine if i.startswith("local_")), None)
         cli = None if session.startswith("local_") else session
         value = f"{local} (cli {cli})" if local and cli else session
         with ws._Locked(owner, programs) as lk:
             m = lk.manifest
+            if owner != slug and holder_live(m.get("manager_session"), mine, now, rows):
+                return owner, None  # the owner has its own live manager: leave the binding alone
             want = {"manager_session": value}
             if "orchestrator_session" in m:
                 want["orchestrator_session"] = cli or session
