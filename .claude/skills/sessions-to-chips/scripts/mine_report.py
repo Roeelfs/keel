@@ -238,7 +238,7 @@ def build_plan(ctx):
     return {"created": time.time(), "date": date, "since": ctx["since_iso"], "here": ctx["here"],
             "dry_run": ctx["dry_run"], "skipped": skipped, "candidates": candidates,
             "program_slugs": sorted(p["slug"] for p in ctx["programs"]), "routes": ctx["routes_file"],
-            "ruling_recipients": ruling_recipients(ctx), "phases": [
+            "ruling_recipients": ruling_recipients(ctx), "switch": {"here": ctx["here"], "hours": 36, "store": ctx.get("store"), "home": ctx.get("home")}, "phases": [
                 {"phase": 1, "name": "handoff miners", "parallel": True, "steps": phase1},
                 {"phase": 2, "name": "reconcilers + decisions sweep + worktree sweep", "after": 1, "parallel": True, "steps": phase2},
                 {"phase": 3, "name": "relay: ONE message per manager", "after": 2,
@@ -265,6 +265,8 @@ def gates(ctx, plan):
         ("orphan-transcripts", last_orphans == 0, f"{last_orphans} desktop transcripts with no store row left unledgered"),
     ]
     out = [{"id": i, "kind": "deterministic", "status": "PASS" if ok else "FAIL", "evidence": ev} for i, ok, ev in g]
+    out.append({"id": "switch-window", "kind": "deterministic", "status": "OWED",
+                "evidence": "graded by `--gate` once phase 1-2 handoffs exist (switch_coverage.py)"})
     for ph in plan["phases"][:2]:
         for s in ph["steps"]:
             out.append({"id": s["id"], "kind": "agent", "status": "OWED", "evidence": s["out"]})
@@ -375,6 +377,7 @@ def check_gate(plan_path, echo=True):
         else:
             ok = os.path.exists(f) and os.path.getsize(f) > 0 and os.path.getmtime(f) >= plan["created"]
         g["status"] = "PASS" if ok else "OWED"
+    _grade_switch(plan, plan_path)
     with open(plan["receipt"], "w") as fh:
         fh.write(plan["receipt_body"] + _gate_table(plan["gates"]))
     with open(plan_path, "w") as fh:
@@ -382,6 +385,33 @@ def check_gate(plan_path, echo=True):
     if echo:
         print(open(plan["receipt"]).read())
     return exit_code(plan["gates"])
+
+
+def _grade_switch(plan, plan_path):
+    """Every live session on the account we switched FROM, active in the hours before it stopped,
+    must be named in a handoff written this round. Ledgered is not routed (measured 2026-11-24:
+    7 of 49 ledgered sessions had no owner). FAIL writes relay/<date>-unrouted-sessions.md."""
+    import switch_coverage as sc
+    sw = plan.get("switch") or {}
+    g = next((g for g in plan["gates"] if g["id"] == "switch-window"), None)
+    if g is None or not sw.get("here"):
+        return
+    if any(x["kind"] == "agent" and x["status"] != "PASS" for x in plan["gates"]):
+        g["status"] = "OWED"  # graded only once every handoff has landed
+        return
+    rep = sc.check(sw["here"], sw.get("hours", 36), plan["created"], store=sw.get("store") or sc.STORE,
+                   home=sw.get("home") or sc.HOME)
+    g["status"] = "FAIL" if rep["unrouted"] else "PASS"
+    g["evidence"] = sc.evidence(rep)
+    if rep["unrouted"]:
+        out = os.path.join(os.path.dirname(plan_path), f"{plan['date']}-unrouted-sessions.md")
+        rows = [f"| {r['sessionId']} | {r['title']} | {r['cwd']} |" for r in rep["unrouted"]]
+        with open(out, "w") as fh:
+            fh.write("# Unrouted sessions from the switch window\n\nRoute each to its owning program in "
+                     "`handoff/<date>-uncovered-sessions.md` (full session id, owner slug, state, worktree, branch, "
+                     "PR), or add `<shortid> <reason>` to relay/switch-exclude.txt for personal work. Then re-run "
+                     "`mine_all.py --gate <plan>`.\n\n| session | title | cwd |\n|---|---|---|\n" + "\n".join(rows) + "\n")
+        g["evidence"] += f" -> {out}"
 
 
 def latest_plan():
