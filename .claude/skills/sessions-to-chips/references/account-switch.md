@@ -22,6 +22,12 @@ child in its existing worktree. A clean receipt that leaves work stranded is a f
 
 ## The rules
 
+0. **Map first.** Before any message, print which account this session is on (the store dir holding
+   its own session) and a table: each `[Manager]` on the other account → its live successor here, by
+   title and full id (folds named). Refer to managers only by their title HERE; a program with no
+   successor is the only reason to start a new manager. (2026-11-24: the dispatcher called
+   `Platform reliability and security` "Security", the old account's title, and the founder could
+   not find it.)
 1. **Switch-window gate** (`scripts/switch_coverage.py`, graded by `mine_all.py --gate` as
    `switch-window`). For each account other than this one, take its newest `lastActivityAt`. Every
    non-archived session active within 36 hours before that moment must have its 8-char short id
