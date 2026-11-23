@@ -304,7 +304,7 @@ class OwnerClaim(Base):
         self.manifest("repo-hygiene", manager_session="new-cli", absorbed_by="harness", fold={})
         now = dt.datetime(2026, 11, 19, 12, tzinfo=dt.timezone.utc)
         with mock.patch.object(rb, "own_ids", return_value={"new-cli", "local_a1cfd2ad-0000"}):
-            owner, note = rb.claim_owner("repo-hygiene", "new-cli", now, self.programs)
+            owner, note = rb.claim_owner("repo-hygiene", "new-cli", now, self.programs, rows={})
         self.assertEqual((owner, note), ("harness", None))
         m = self.read("harness")
         self.assertEqual(m["manager_session"], "local_a1cfd2ad-0000 (cli new-cli)")
@@ -318,6 +318,75 @@ class OwnerClaim(Base):
         self.manifest("demo", manager_session="x")
         self.assertEqual(rb.claim_owner("demo", "", now, self.programs), (None, None))
         self.assertEqual(self.read("demo")["manager_session"], "x")
+
+
+class FoldedChildClaim(Base):
+    """A folded child's load never steals the owner from another live manager; the owner's own load still claims."""
+    NOW = dt.datetime(2026, 11, 23, 12, tzinfo=dt.timezone.utc)
+    APPS = "local_341f08b6-78ea-412b-a27c-94308e80ef85"
+    APPS_CLI = "aaaaaaaa-0000-4000-8000-000000000001"
+    IDS = "local_adb9778d-1735-4c14-8963-689f8ee6975e"
+    IDS_CLI = "cc23b82a-cba5-487f-b3a4-8aa3ec9daaf3"
+
+    def setUp(self):
+        super().setUp()
+        _write(os.path.join(self.programs, "identities.json"),
+               json.dumps({"program": "identities", "manager_session": self.IDS_CLI, "absorbed_by": "apps", "fold": {}}))
+        self.rows = {sid: {"sessionId": sid, "cliSessionId": cli, "title": title, "lastActivityAt": seen}
+                     for sid, cli, title, seen in (
+                         (self.APPS, self.APPS_CLI, "[Manager] Apps", "2026-11-23T11:30:00Z"),
+                         (self.IDS, self.IDS_CLI, "[Manager] Identities", "2026-11-23T11:55:00Z"))}
+
+    def apps(self, manager_session):
+        m = {"program": "apps", "updated_at": "2026-11-20T00:00:00Z"}
+        if manager_session is not None:
+            m["manager_session"] = manager_session
+        _write(os.path.join(self.programs, "apps.json"), json.dumps(m))
+
+    def read(self, slug="apps"):
+        with open(os.path.join(self.programs, slug + ".json")) as fh:
+            return json.load(fh)
+
+    def load(self, slug, cli, local):
+        with mock.patch.object(rb, "own_ids", return_value={cli, local}):
+            return rb.claim_owner(slug, cli, self.NOW, self.programs, rows=self.rows)
+
+    def test_owner_slug_load_claims_even_from_a_live_manager(self):
+        self.apps(f"{self.IDS} (cli {self.IDS_CLI})")
+        self.assertEqual(self.load("apps", self.APPS_CLI, self.APPS), ("apps", None))
+        self.assertEqual(self.read()["manager_session"], f"{self.APPS} (cli {self.APPS_CLI})")
+
+    def test_folded_child_claims_when_the_owner_has_no_or_empty_manager(self):
+        for held in (None, ""):
+            self.apps(held)
+            self.assertEqual(self.load("identities", self.IDS_CLI, self.IDS), ("apps", None))
+            self.assertEqual(self.read()["manager_session"], f"{self.IDS} (cli {self.IDS_CLI})")
+
+    def test_folded_child_claims_from_a_stale_or_unknown_holder(self):
+        self.rows[self.APPS]["lastActivityAt"] = "2026-11-22T00:00:00Z"  # past HOLDER_WINDOW_S: an account switch
+        for held in (f"{self.APPS} (cli {self.APPS_CLI})", "local_2d34eeca (old account)"):
+            self.apps(held)
+            self.load("identities", self.IDS_CLI, self.IDS)
+            self.assertEqual(self.read()["manager_session"], f"{self.IDS} (cli {self.IDS_CLI})")
+
+    def test_folded_child_does_not_steal_from_a_live_manager(self):
+        for held in (f"{self.APPS} (cli {self.APPS_CLI})", self.APPS_CLI, "local_341f08b6 (apps account)"):
+            self.apps(held)
+            self.assertEqual(self.load("identities", self.IDS_CLI, self.IDS), ("apps", None))
+            m = self.read()
+            self.assertEqual((m["manager_session"], m["updated_at"]), (held, "2026-11-20T00:00:00Z"))
+
+    def test_unreadable_session_index_counts_as_live(self):
+        with mock.patch.dict(sys.modules, {"program_family": None}):
+            self.assertTrue(rb.holder_live(self.APPS, {self.IDS}, self.NOW))
+
+    def test_no_ping_pong_across_two_consecutive_loads(self):
+        self.apps(f"{self.IDS} (cli {self.IDS_CLI})")  # the stolen state of 2026-11-23
+        self.load("apps", self.APPS_CLI, self.APPS)  # the apps manager reloads: claims back
+        self.load("identities", self.IDS_CLI, self.IDS)  # the identities manager reloads: leaves it
+        self.load("identities", self.IDS_CLI, self.IDS)
+        self.assertEqual(self.read()["manager_session"], f"{self.APPS} (cli {self.APPS_CLI})")
+        self.assertEqual(self.read("identities")["manager_session"], self.IDS_CLI)
 
 
 if __name__ == "__main__":
