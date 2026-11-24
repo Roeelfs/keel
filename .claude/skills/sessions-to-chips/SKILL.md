@@ -112,11 +112,10 @@ widening** until holes = 0 or each is named unreadable with its reason; the stat
 digest per chain segment. It writes the plan `relay/<date>-mine-plan.json` and the **completeness
 receipt** `relay/<date>-completeness-receipt.md`.
 
-**What the data shows** (measured 2026-11-01, so do not re-derive it by hand): the store's
-`cliSessionId` names only a session's NEWEST transcript; a resume, move or fork mints a new file
-whose head `parentUuid` points into the old one (22 multi-file chains in 14 days).
-`lastActivityAt` also moves on focus and artifact rows, and `accountUuid` sits only on artifact
-rows, so it never proves which account ran a turn: the store dir does.
+**The point: no progress lost on a switch.** The founder switches accounts mid-work. Every
+session active on the old account in the 36 h before it stopped must be named in a handoff (gate
+`switch-window`), and every in-progress child restarted by a counted card. Rules, failures and store
+facts: [references/account-switch.md](references/account-switch.md).
 
 **Print the receipt to the human first.** Then by exit code:
 
@@ -169,7 +168,8 @@ show as `Remote Control · offline` and a message to one is queued to nowhere. N
 
 **Converge.** Do not poll. Append each one-line reply to `relay/<date>-replies.md`. A program is
 converged when its manager replied to the catch-up (archived N, live children X, decisions held)
-and to backlog-first (before → after), confirmed its sweep fixes (fixed N of M) and worktree rows,
+and to backlog-first (before → after), counted its continuation (cards + asks + closed = its
+`-children` rows), confirmed its sweep fixes (fixed N of M) and worktree rows,
 repointed anything contradicting the rulings ledger, has a fresh state-file head, and its Linear map has a
 `State as of` comment newer than the catch-up. `pending-sends.md` must be empty or listed to the
 human. Close with which managers hold open founder decisions and a link to each.

@@ -247,6 +247,19 @@ class EndToEndTests(unittest.TestCase):
                 os.makedirs(os.path.dirname(s["out"]), exist_ok=True)
                 with open(s["out"], "w") as fh:
                     fh.write("SAFE 1 / AT-RISK 0 / NOISE 0\n")
+        # Switch window: the other account's recent sessions are ledgered but named in no handoff.
+        import switch_coverage as sc
+        sw = json.load(open(plan_path))["switch"]
+        rep = sc.check(sw["here"], sw["hours"], plan["created"], store=sw["store"], home=sw["home"],
+                       now_ms=NOW * 1000)
+        self.assertTrue(rep["unrouted"], "fixture's other account should have unrouted recent sessions")
+        if rep["unrouted"]:
+            self.assertEqual(mine_report.check_gate(plan_path, echo=False), 2)
+            self.assertIn("| switch-window | **FAIL**", open(plan["receipt"]).read())
+            hd = os.path.join(sw["home"], "sessions-to-chips", "handoff")
+            os.makedirs(hd, exist_ok=True)
+            with open(os.path.join(hd, "uncovered-sessions.md"), "w") as fh:
+                fh.write("\n".join(f"| {r['sessionId']} | release | DONE |" for r in rep["unrouted"]))
         self.assertEqual(mine_report.check_gate(plan_path, echo=False), 0)
         self.assertIn("ALL GATES PASS", open(plan["receipt"]).read())
 
