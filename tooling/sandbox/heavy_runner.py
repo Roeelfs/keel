@@ -951,11 +951,31 @@ def admit_preview(directory, policy, job_class):
             'jev': cached_jev}
 
 
+def classify_argv(argv):
+    """`--classify -- <argv>`: the classifier hook's verdict for one argv.
+
+    Read-only: no policy load, no state directory, no lease, no queue ticket. Custom rules come
+    from the same `resource-commands.json` the hook reads, so the two can never disagree.
+    """
+    from governor.broker import custom_rules  # puts the hooks directory (heavy_command) on sys.path
+    from heavy_command import inspect_words
+    rules = {name: verbs for name, verbs in custom_rules().items() if name != 'background_required'}
+    return inspect_words(list(argv), rules, working_directory()) is not None
+
+
 def main():
+    command = sys.argv[1:]
+    if command[:1] == ['--classify']:
+        argv = command[2:] if command[1:2] == ['--'] else command[1:]
+        try:
+            print('heavy' if classify_argv(argv) else 'light')
+        except (OSError, ValueError, ImportError) as error:
+            print('with-heavy-lock: --classify unavailable: ' + str(error), file=sys.stderr)
+            return 69
+        return 0
     try:
         policy = load_policy()
         directory = state_directory()
-        command = sys.argv[1:]
         if command == ['--status']:
             leases = []
             for slot in range(1, MAX_SLOTS + 1):
@@ -992,7 +1012,7 @@ def main():
         if command[:1] == ['--']:
             command = command[1:]
         if not command:
-            print('usage: with-heavy-lock [--status|--check-lease|--cpu-check] | COMMAND [ARGS...]', file=sys.stderr)
+            print('usage: with-heavy-lock [--status|--check-lease|--cpu-check|--classify -- ARGV] | COMMAND [ARGS...]', file=sys.stderr)
             return 64
         if valid_lease(directory):
             os.execvpe(command[0], command, child_environment(policy, os.environ['KEEL_HEAVY_JOB_ID'], command))

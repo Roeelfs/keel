@@ -125,7 +125,7 @@ class UnparseableCommand(unittest.TestCase):
     def test_light_command_with_unbalanced_quoting_is_allowed(self):
         for command in ('grep -n "could not parse .claude/hooks/serialize-heavy-ops.py',
                         "git commit -m 'fix install docs", "echo it's done", "ls \\",
-                        "pnpm typecheck 'x", 'eval "echo \'unclosed"'):
+                        "pnpm lint 'x", 'eval "echo \'unclosed"'):
             with self.subTest(command=command):
                 result = run_hook(command)
                 self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
@@ -176,7 +176,7 @@ class FailClosed(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
 
     def test_light_commands_remain_allowed_without_wrapper(self):
-        for command in ("git status --porcelain", "pnpm typecheck", "pnpm lint", "yarn --version", "ls -la"):
+        for command in ("git status --porcelain", "pnpm lint", "yarn --version", "ls -la"):
             self.assertEqual(run_hook(command, with_wrapper_on_path=False).returncode, 0, command)
 
 

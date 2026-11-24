@@ -6,15 +6,20 @@ import stat
 from pathlib import Path, PurePosixPath
 
 PACKAGE_MANAGERS = frozenset({'pnpm', 'npm', 'npx', 'yarn', 'bun', 'bunx', 'corepack'})
-PACKAGE_VERBS = frozenset({'test', 'build', 'install', 'ci', 'i'})
+PACKAGE_VERBS = frozenset({'test', 'build', 'install', 'ci', 'i', 'typecheck'})
 TEST_RUNNERS = frozenset({'vitest', 'vitest.mjs', 'vitest.js', 'jest', 'jest.js'})
+# A whole-program typecheck is as heavy as a test run. Matched as the command word, after
+# `node` (by basename, so `node .../tsc7/bin/tsc` matches) and through npx / pnpm exec.
+TYPECHECKERS = frozenset({'tsc', 'tsc7', 'tsgo', 'vue-tsc'})
+TYPECHECKER_INFO_FLAGS = frozenset({'--version', '-v', '--help'})
+SCRIPT_SUFFIXES = ('.js', '.cjs', '.mjs')
 
 # `with-heavy-lock`'s own read-only flags: none of them ever hold a slot or run a heavy command,
 # so none of them may ever be forced into the background, regardless of what a configured
 # `background_required.with-heavy-lock` rule says (a `["*"]` rule with no `!` exclusion would
 # otherwise catch these too -- docs/specs/2026-09-29-machine-governor.md §7/§8). This is a
 # hardcoded floor, not a default a resource-commands.json config can accidentally omit.
-WITH_HEAVY_LOCK_READ_ONLY_VERBS = frozenset({'--admit-preview', '--status', '--check-lease'})
+WITH_HEAVY_LOCK_READ_ONLY_VERBS = frozenset({'--admit-preview', '--status', '--check-lease', '--classify'})
 
 # A project-command that owns its own heavy-slot lock internally (enforced by that project's own
 # lint) can carry this marker to opt out of the shared runner. Only the custom-rule branch below
@@ -134,6 +139,15 @@ def without_prefixes(words):
     return words
 
 
+def is_typechecker(name):
+    """`tsc`, `tsc7`, `tsgo`, `vue-tsc`, also as a script file (`tsc.js`) run through `node`."""
+    for suffix in SCRIPT_SUFFIXES:
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
+            break
+    return name in TYPECHECKERS
+
+
 def inspect_words(words, custom, cwd=None, allow_exempt=True):
     words = without_prefixes(words)
     if not words:
@@ -172,6 +186,8 @@ def inspect_words(words, custom, cwd=None, allow_exempt=True):
         return inspect_words(rest, custom, cwd, allow_exempt)
     if name in TEST_RUNNERS:
         return None if any(x in rest for x in ['--version', '--help', '-h']) else 'unit-tests'
+    if is_typechecker(name):
+        return None if any(x in TYPECHECKER_INFO_FLAGS for x in rest) else 'typecheck'
     if name in {'node', 'nodejs'}:
         return inspect_words(without_options(rest), custom, cwd, allow_exempt)
     if name == 'next' and rest[:1] == ['build']:
@@ -233,7 +249,7 @@ def unparsed_heavy_token(command, custom=None):
     """Name a heavy token anywhere in unparseable text; ignoring word position over-reports by design."""
     found, later = None, set()
     for name in reversed(raw_words(command)):
-        if (name in TEST_RUNNERS or name in {'turbo', 'cdk'} or name in (custom or {})
+        if (name in TEST_RUNNERS or name in {'turbo', 'cdk'} or name in (custom or {}) or is_typechecker(name)
                 or name in PACKAGE_MANAGERS and (name == 'yarn' or later & PACKAGE_VERBS)
                 or name == 'next' and 'build' in later):
             found = name
@@ -259,7 +275,7 @@ def background_required(command, rules):
     """Name the rule a command segment matches, looking through a leading with-heavy-lock.
 
     A `with-heavy-lock` rule matches the runner itself, so every command it may queue is covered at
-    once -- except its own read-only flags (`--admit-preview`, `--status`, `--check-lease`), which
+    once -- except its own read-only flags (`--admit-preview`, `--status`, `--check-lease`, `--classify`), which
     never hold a slot and are never forced into the background, no matter what the rule says."""
     for segment in segments(command):
         words = without_prefixes(segment)

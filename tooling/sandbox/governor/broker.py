@@ -14,9 +14,9 @@ _HOOKS_DIR = Path(__file__).resolve().parents[3] / '.claude' / 'hooks'
 if str(_HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(_HOOKS_DIR))
 
-from heavy_command import PACKAGE_MANAGERS, PACKAGE_VERBS, TEST_RUNNERS, is_self_locking
+from heavy_command import PACKAGE_MANAGERS, PACKAGE_VERBS, TEST_RUNNERS, TYPECHECKERS, is_self_locking
 
-ALWAYS_HEAVY_NAMES = frozenset({'tsc', 'turbo', 'cdk', 'next', 'node'})
+ALWAYS_HEAVY_NAMES = frozenset({'turbo', 'cdk', 'next', 'node'}) | TYPECHECKERS
 
 
 def custom_rules(home=None):
