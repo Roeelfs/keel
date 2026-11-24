@@ -14,7 +14,7 @@ import sys
 import time
 
 from heavy_resources import event, free_percent, processes, read_record, total_memory_mb
-from governor import registry as session_registry
+from governor import inventory, registry as session_registry
 
 PROBE_TIMEOUT_S = 0.25
 SNAPSHOT_INTERVAL_S = 10
@@ -104,14 +104,18 @@ def hang_reports_recent(unknown, log_dir=None, now=None):
     return _probe('hang_reports', fn, unknown)
 
 
-def leases(heavy_directory, max_slots=6):
-    """`{slot, job_id, class, age_s, rss_mb, members}` per live lease (§4)."""
+def leases(heavy_directory):
+    """`{slot, job_id, class, age_s, rss_mb, members}` per lease in a held slot (§4).
+
+    Held is the shared inventory's rule (`inventory.held_slots`): a zero-member lease in an
+    unlocked slot is a finished job, never a running one.
+    """
     result = []
     table = None
     now = time.time()
-    for slot in range(1, max_slots + 1):
+    for slot in inventory.held_slots(heavy_directory):
         try:
-            lease = read_record(heavy_directory / f'lease.{slot}.json')
+            lease = read_record(inventory.lease_path(heavy_directory, slot))
         except (OSError, ValueError):
             continue
         if not lease:
@@ -137,8 +141,10 @@ def leases(heavy_directory, max_slots=6):
 
 
 def queued_and_deferrals(heavy_directory, window_s=3600):
-    queue_dir = heavy_directory / 'queue'
-    queued = len(list(queue_dir.glob('*.json'))) if queue_dir.is_dir() else 0
+    try:
+        queued = len(inventory.live_tickets(heavy_directory / 'queue'))  # live waiters only, nothing pruned
+    except (OSError, ValueError, subprocess.SubprocessError):
+        queued = None
     deferrals = 0
     events_path = heavy_directory / 'events.jsonl'
     if events_path.exists():
@@ -375,7 +381,7 @@ def take(directory, heavy_directory, disk_path='/System/Volumes/Data', persist=T
         **swap(unknown, history),
         **disk(unknown, disk_path),
         'hang_reports_recent': hang_reports_recent(unknown),
-        'leases': leases(heavy_directory),
+        'leases': _probe('leases', lambda: leases(heavy_directory), unknown),
         'sessions': sessions(),
         'desktop_apps': desktop_apps(),
         'class_stats': load_class_stats(directory, heavy_directory),

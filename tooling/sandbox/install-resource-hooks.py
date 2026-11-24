@@ -18,7 +18,7 @@ CLAUDE_HOOKS = ("serialize-heavy-ops.py", "heavy_command.py")
 GOVERNOR_MODULES = tuple(
     "governor/" + name for name in
     ("__init__.py", "state.py", "snapshot.py", "admission.py", "jev_client.py", "broker.py",
-     "act.py", "context.py", "registry.py"))  # docs/specs/2026-09-29-machine-governor.md phase 1
+     "act.py", "context.py", "registry.py", "inventory.py"))  # docs/specs/2026-09-29-machine-governor.md phase 1
 RUNTIME_FILES = ("with-heavy-lock", "heavy_resources.py", "heavy_runner.py", "heavy_node.cjs",
                   "heavy_child.py", "keel_test_tmpdir.py", *GOVERNOR_MODULES)
 RESOURCE_SCRIPT = "serialize-heavy-ops.py"

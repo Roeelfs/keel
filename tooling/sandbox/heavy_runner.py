@@ -13,6 +13,8 @@ import uuid
 
 from heavy_resources import (MAX_SLOTS, account_home, ancestors, command_seconds, background_load, cpu_state, event, free_percent,
                              job_members, load_policy, processes, read_record, total_memory_mb, write_record)
+from governor import inventory
+from governor.inventory import heartbeat, lease_group_alive, lease_path, lock_available, running_job_count, slot_path
 
 QUEUE_PROGRESS_SECONDS = 30
 
@@ -21,29 +23,6 @@ def state_directory():
     path = account_home() / '.keel/heavy.slots'
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     return path
-
-
-def slot_path(directory, slot):
-    return directory / f'slot.{slot}'
-
-
-def lease_path(directory, slot):
-    return directory / f'lease.{slot}.json'
-
-
-def lock_available(directory, slot):
-    with slot_path(directory, slot).open('a') as stream:
-        try:
-            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except BlockingIOError:
-            return False
-
-
-def lease_group_alive(lease):
-    # A job outlives a killed supervisor as the live processes of its session, whatever their group.
-    # A lease from an older runner has no leader identity; its pgid is still the session it started.
-    return bool(lease and job_members(lease.get('pgid'), lease.get('leader_identity'), processes()))
 
 
 def valid_lease(directory):
@@ -115,32 +94,14 @@ class Interrupted(Exception):
     """A termination signal arrived while the job waited in the admission queue."""
 
 
-def heartbeat(path):
-    try:
-        return path.stat().st_mtime
-    except OSError:
-        return 0.0
-
-
-def live_tickets(queue):
+def prune_tickets(queue):
+    """Acquisition's cleanup, the only place a queue file is ever deleted: returns the live tickets."""
     for temporary in queue.glob('*.tmp.*'):  # A writer interrupted mid-write leaves these behind.
         if time.time() - heartbeat(temporary) > 3600:
             temporary.unlink(missing_ok=True)
-    # List tickets before sampling processes: every listed writer existed before the sample.
-    paths = sorted(queue.glob('*.json'))
-    table = processes()
-    live = []
-    for path in paths:
-        try:
-            ticket = read_record(path)
-        except (OSError, ValueError):
-            ticket = None
-        pid = ticket.get('pid') if ticket else None
-        owner = table.get(pid) if isinstance(pid, int) else None
-        if owner and not owner.state.startswith('Z') and owner.identity == ticket.get('identity'):
-            live.append(path)
-        else:
-            path.unlink(missing_ok=True)  # Dead waiter, reused pid, or unreadable ticket.
+    live, dead = inventory.ticket_liveness(queue)
+    for path in dead:
+        path.unlink(missing_ok=True)  # Dead waiter, reused pid, or unreadable ticket.
     return live
 
 
@@ -225,13 +186,6 @@ def job_sessions(directory):
         if lease and isinstance(lease.get('pgid'), int):
             sessions.add(lease['pgid'])
     return sessions
-
-
-def running_job_count(directory, policy):
-    """Held heavy slots: the one `running_jobs` figure the lock, --cpu-check and the preview share."""
-    # A lowered ceiling must still account for jobs admitted under the previous policy.
-    return sum(1 for slot in range(1, MAX_SLOTS + 1)
-               if not lock_available(directory, slot) or lease_group_alive(read_record(lease_path(directory, slot))))
 
 
 def evaluate_load(directory, policy, running_jobs, memory_reason=None, memory='unknown', log=False):
@@ -391,8 +345,7 @@ def consult_jev(directory, job_id, command, policy):
 def queue_position(live, ticket, fresh_after):
     """1 + the live, fresh, NON-yielding tickets ahead. A yielding ticket (refused for memory,
     within YIELD_MAX_SECONDS) lets a smaller job behind it take the slot it cannot use."""
-    return 1 + sum(1 for path in live if path < ticket and heartbeat(path) >= fresh_after
-                   and not (read_record(path) or {}).get('yield'))
+    return 1 + sum(1 for path in inventory.contending(live, fresh_after) if path < ticket)
 
 
 def job_budget(command, policy):
@@ -478,14 +431,13 @@ def acquire(directory, policy, job_id, command):
                 os.utime(ticket)  # Heartbeat: a stopped or hung waiter stops refreshing its ticket.
             except FileNotFoundError:
                 pass  # Restored below.
-            live = live_tickets(queue)
+            live = prune_tickets(queue)
             if ticket not in live:
                 write_record(ticket, record)  # Restore a wrongly pruned ticket at its original place.
                 live = sorted([*live, ticket])
             # Skip, never delete, a live waiter whose heartbeat stalled -- or one that is yielding
             # (refused for memory, so a smaller job behind it may use the slot it cannot).
-            fresh_after = time.time() - max(3, 6 * policy.poll_seconds)
-            position = queue_position(live, ticket, fresh_after)
+            position = queue_position(live, ticket, inventory.fresh_after(policy))
             reason = 'resource_busy'
             if position <= policy.slots:  # A waiter behind every slot's worth of waiters cannot be next.
                 if budget_mb is None or time.monotonic() >= reserve_at:
@@ -850,6 +802,37 @@ def run_broker_if_wrapper(directory, policy, command):
     return code
 
 
+# Probes whose unknown never gates the preview: hang reports feed only the shadow-only app_hang floor.
+PREVIEW_UNNEEDED_PROBES = frozenset({'hang_reports'})
+
+
+def preview_pressure(directory, policy, snapshot, running_jobs, job_class):
+    """Machine pressure for `--admit-preview` only: `evaluate_load()` plus the preview floors.
+
+    Returns `(pressure, evaluation)`. `pressure` is `{state, reasons, shadow}`:
+    `reasons` is evaluate_load's blocker (cpu_pressure, interactive_foreground, memory_pressure, or
+    a protected app) plus the enforced floors (disk, swap_growth, mem_critical); `shadow` holds the
+    floors reported but never acted on (app_hang). `state` is 'pressure' when any reason fired, else
+    'unknown' when any needed probe is unknown, else 'clear'. The floors stay preview-only:
+    `claim_slot` and `evaluate_load` never see them.
+    """
+    from governor import admission
+
+    unknown = sorted(set(snapshot.get('unknown') or ()) - PREVIEW_UNNEEDED_PROBES)
+    memory_reason = None if 'memory' in unknown else pressure_reason(
+        policy, running_jobs >= 1, job_class=admission.canonical_class(job_class))
+    memory = 'unknown' if 'memory' in unknown else ('pressure' if memory_reason else 'ok')
+    evaluation = evaluate_load(directory, policy, running_jobs, memory_reason, memory, log=True)
+    if 'error' in evaluation['load']:
+        unknown.append('cpu_state')
+    fired = admission.floors_fired(snapshot, policy)
+    reasons = ([evaluation['blocker']] if evaluation['blocker'] else []) + [
+        floor for floor in fired if floor not in admission.SHADOW_FLOORS]
+    shadow = [floor for floor in fired if floor in admission.SHADOW_FLOORS]
+    state = 'pressure' if reasons else ('unknown' if unknown else 'clear')
+    return {'state': state, 'reasons': reasons, 'shadow': shadow}, evaluation
+
+
 def admit_preview(directory, policy, job_class):
     """Read-only admission preview for cynap's `verify-route` (spec §7).
 
@@ -860,7 +843,10 @@ def admit_preview(directory, policy, job_class):
     is what makes `verify-route`'s R4 ("preview unavailable") the safe default.
 
     Returns exactly the shape verify-route's `admitPreview()` consumes:
-    `{decision, source, slots_now, running, queued, eta_wait_p90_s, eta_run_p50_s, eta_total_s}`.
+    `{decision, source, slots_now, running, queued, eta_wait_p90_s, eta_run_p50_s, eta_total_s,
+    pressure}`. `running` and `queued` come from the shared read-only inventory (held slots, live
+    tickets), the same rule acquisition counts by; the preview never prunes a ticket. The fast-path
+    admit needs `pressure.state == 'clear'`: an unknown probe never fast-admits.
 
     `job_class` may be a synthetic preview-only name (`cynap-verify-<mode>`) that never appears in
     a recorded lease/event; `admission.canonical_class()` is the one place that maps it to the
@@ -873,24 +859,20 @@ def admit_preview(directory, policy, job_class):
 
     governor_dir = governor_directory()
     snapshot = take_snapshot(governor_dir, directory, persist=False)
-    running = len(snapshot.get('leases') or [])
-    queued = snapshot.get('queued', 0)
+    leases = snapshot.get('leases') or []
+    running = running_job_count(directory)
+    tickets = inventory.live_tickets(directory / 'queue')
+    queued = len(tickets)
     class_stats = snapshot.get('class_stats') or {}
     class_row = admission.class_row(class_stats, job_class)
     run_p50 = class_row.get('run_p50_s')
     run_p90 = class_row.get('run_p90_s')
 
-    floors = admission.floors_fired(snapshot, policy)
-    running_jobs = running_job_count(directory, policy)
-    unknown = admission.any_unknown(snapshot)
-    memory_reason = None if unknown else pressure_reason(
-        policy, running_jobs >= 1, job_class=admission.canonical_class(job_class))
-    memory = 'unknown' if unknown else ('pressure' if memory_reason else 'ok')
-    evaluation = evaluate_load(directory, policy, running_jobs, memory_reason, memory, log=True)
-    fast_reason = None if unknown else evaluation['blocker']
+    pressure, evaluation = preview_pressure(directory, policy, snapshot, running, job_class)
+    floors = [floor for floor in pressure['reasons'] if floor in admission.FLOOR_NAMES]
 
     cached_jev = None
-    if not floors and running_jobs < policy.slots and fast_reason is None:
+    if pressure['state'] == 'clear' and running < policy.slots:
         decision, source, slots_now = 'admit', 'fast_path', policy.slots
     else:
         d_result = admission.cheap_class_bonus(
@@ -915,7 +897,7 @@ def admit_preview(directory, policy, job_class):
         eta_wait_p90_s = 0.0
     else:
         wait_candidates = []
-        for lease in snapshot.get('leases') or []:
+        for lease in leases:
             lease_row = admission.class_row(class_stats, lease.get('class'))
             lease_p90 = lease_row.get('run_p90_s')
             if lease_p90 is not None:
@@ -935,20 +917,19 @@ def admit_preview(directory, policy, job_class):
         # the slots that really drain it. A ticket with no recorded class (written before tickets
         # carried one) or an unmodeled class is priced as the caller's class, the old estimate.
         ahead = []
-        for path in live_tickets(directory / 'queue'):
+        for path in tickets:
             ticket_class = (read_record(path) or {}).get('class')
             ahead.append(admission.class_row(class_stats, ticket_class).get('run_p90_s') if ticket_class else None)
-        ahead += [None] * max(0, queued - len(ahead))
         queue_term = sum(p90 if p90 is not None else (run_p90 or 0) for p90 in ahead) / max(slots_now, 1)
         eta_wait_p90_s = min_wait + queue_term
     eta_run_p50_s = run_p50 if run_p50 is not None else 0.0
     eta_total_s = eta_wait_p90_s + eta_run_p50_s
 
-    deny_reason = None if decision == 'admit' else (fast_reason or 'queue')
+    deny_reason = None if decision == 'admit' else (evaluation['blocker'] or 'queue')
     return {'decision': decision, 'source': source, 'slots_now': slots_now, 'running': running,
             'load': evaluation['load'], 'deny_reason': deny_reason, 'queued': queued, 'eta_wait_p90_s': round(eta_wait_p90_s, 1),
             'eta_run_p50_s': round(eta_run_p50_s, 1), 'eta_total_s': round(eta_total_s, 1),
-            'jev': cached_jev}
+            'jev': cached_jev, 'pressure': pressure}
 
 
 def classify_argv(argv):
@@ -988,7 +969,7 @@ def main():
                               'leases': leases, 'state_dir': str(directory)}))
             return 0
         if command == ['--cpu-check']:  # dry: the CPU admission decision for one more job, nothing claimed
-            held = running_job_count(directory, policy)
+            held = running_job_count(directory)
             print(json.dumps({**cpu_state(policy, held, job_sessions(directory)),
                               'max_load_per_core': policy.max_load_per_core,
                               'interactive_max_jobs': policy.interactive_max_jobs}, sort_keys=True))
