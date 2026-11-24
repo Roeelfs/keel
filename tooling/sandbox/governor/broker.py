@@ -14,9 +14,9 @@ _HOOKS_DIR = Path(__file__).resolve().parents[3] / '.claude' / 'hooks'
 if str(_HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(_HOOKS_DIR))
 
-from heavy_command import PACKAGE_MANAGERS, PACKAGE_VERBS, TEST_RUNNERS, is_self_locking
+from heavy_command import PACKAGE_MANAGERS, PACKAGE_VERBS, TEST_RUNNERS, TYPECHECKERS, is_self_locking
 
-ALWAYS_HEAVY_NAMES = frozenset({'tsc', 'turbo', 'cdk', 'next', 'node'})
+ALWAYS_HEAVY_NAMES = frozenset({'turbo', 'cdk', 'next', 'node'}) | TYPECHECKERS
 
 
 def custom_rules(home=None):
@@ -63,7 +63,7 @@ from pathlib import Path
 
 REAL_NAME = {name!r}
 HERE = Path(__file__).resolve().parent
-SANDBOX = HERE.parent.parent / 'sandbox'
+SANDBOX = HERE.parent  # the runtime root (~/.keel/resource-hooks): with-heavy-lock and governor/
 sys.path.insert(0, str(SANDBOX))
 
 
@@ -91,13 +91,6 @@ if __name__ == '__main__':
 """
 
 
-def write_shims(directory):
-    """Writes one shim per heavy tool name (§6). Idempotent; returns the written paths."""
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    written = []
-    for name in SHIMMED_NAMES:
-        path = directory / name
-        path.write_text(SHIM_TEMPLATE.format(name=name))
-        path.chmod(0o700)
-        written.append(path)
-    return written
+def shim_sources():
+    """`{name: text}`, one shim per heavy tool name (§6); install-resource-hooks.py writes them to <runtime>/shims."""
+    return {name: SHIM_TEMPLATE.format(name=name) for name in SHIMMED_NAMES}

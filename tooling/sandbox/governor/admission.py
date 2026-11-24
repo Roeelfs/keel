@@ -82,6 +82,8 @@ def cheap_class_bonus(job_class, snapshot, policy, d_result):
 
 
 FLOOR_NAMES = ('disk', 'swap_growth', 'mem_critical', 'app_hang')
+# Reported, never acted on (§5.3, §18 Q2): unproven whether macOS writes these for user-app hangs.
+SHADOW_FLOORS = frozenset({'app_hang'})
 
 
 def floors_fired(snapshot, policy):

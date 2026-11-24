@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Host snapshot: failed probes never raise, and each field has a well-defined shape (spec §4)."""
+import fcntl
 import json
 import subprocess
 import tempfile
@@ -19,6 +20,11 @@ class SnapshotTests(unittest.TestCase):
         self.directory.mkdir()
         self.heavy_directory.mkdir()
         self.addCleanup(self.tmp.cleanup)
+
+    def hold(self, slot):
+        stream = (self.heavy_directory / f'slot.{slot}').open('a')
+        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.addCleanup(stream.close)
 
     def test_take_never_raises_and_reports_every_field(self):
         result = snapshot.take(self.directory, self.heavy_directory)
@@ -74,7 +80,8 @@ class SnapshotTests(unittest.TestCase):
     def test_leases_reads_pgid_matched_members(self):
         (self.heavy_directory / 'lease.1.json').write_text(
             json.dumps({'job_id': 'j1', 'class': 'wt-verify', 'pgid': 999999, 'started': time.time()}))
-        result = snapshot.leases(self.heavy_directory, max_slots=1)
+        self.hold(1)
+        result = snapshot.leases(self.heavy_directory)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]['job_id'], 'j1')
 
@@ -85,7 +92,8 @@ class SnapshotTests(unittest.TestCase):
         started_ns = time.time_ns() - 5_000_000_000  # 5s ago
         (self.heavy_directory / 'lease.1.json').write_text(json.dumps(
             {'job_id': 'j1', 'executable': 'cynap-sandbox', 'pgid': 999999, 'started_ns': started_ns}))
-        result = snapshot.leases(self.heavy_directory, max_slots=1)
+        self.hold(1)
+        result = snapshot.leases(self.heavy_directory)
         self.assertEqual(result[0]['class'], 'cynap-sandbox')
         self.assertGreaterEqual(result[0]['age_s'], 4.5)
 
@@ -93,8 +101,14 @@ class SnapshotTests(unittest.TestCase):
         (self.heavy_directory / 'lease.1.json').write_text(json.dumps(
             {'job_id': 'j1', 'class': 'wt-verify', 'executable': 'cynap-sandbox',
              'pgid': 999999, 'started': time.time()}))
-        result = snapshot.leases(self.heavy_directory, max_slots=1)
+        self.hold(1)
+        result = snapshot.leases(self.heavy_directory)
         self.assertEqual(result[0]['class'], 'wt-verify')
+
+    def test_a_zero_member_lease_in_an_unlocked_slot_is_not_listed(self):
+        (self.heavy_directory / 'lease.2.json').write_text(
+            json.dumps({'job_id': 'done', 'executable': 'vitest', 'pgid': 999999, 'started_ns': time.time_ns()}))
+        self.assertEqual(snapshot.leases(self.heavy_directory), [])
 
     def test_queued_and_deferrals_counts_recent_deferred_events(self):
         events = self.heavy_directory / 'events.jsonl'

@@ -61,15 +61,12 @@ class ShimIsHeavyTests(unittest.TestCase):
         self.assertFalse(broker.shim_is_heavy('cat', ['file']))
 
 
-class WriteShimsTests(unittest.TestCase):
-    def test_writes_one_executable_shim_per_heavy_name(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            directory = Path(tmp) / 'shims'
-            written = broker.write_shims(directory)
-            self.assertEqual(len(written), len(broker.SHIMMED_NAMES))
-            for path in written:
-                self.assertTrue(path.is_file())
-                self.assertTrue(path.stat().st_mode & 0o100)
+class ShimSourcesTests(unittest.TestCase):
+    def test_one_shim_per_heavy_name(self):
+        sources = broker.shim_sources()
+        self.assertEqual(sorted(sources), sorted(broker.SHIMMED_NAMES))
+        for name, text in sources.items():
+            self.assertIn(f'REAL_NAME = {name!r}', text)
 
 
 if __name__ == '__main__':

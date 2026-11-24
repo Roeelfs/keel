@@ -19,6 +19,7 @@ from unittest import mock
 
 import heavy_resources
 import heavy_runner
+from governor import inventory
 
 
 PROFILE = Path(__file__).with_name('resource-policy.memory-constrained.json')
@@ -85,9 +86,10 @@ class LoweredSlotTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
         self.policy = heavy_resources.Policy(slots=3)
-        patch = mock.patch.object(heavy_runner, 'lease_group_alive', return_value=False)
-        patch.start()
-        self.addCleanup(patch.stop)
+        for owner in (heavy_runner, inventory):  # claim_slot counts under its locks, inventory reads
+            patch = mock.patch.object(owner, 'lease_group_alive', return_value=False)
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def hold(self, slot):
         stream = heavy_runner.slot_path(self.directory, slot).open('a')
@@ -96,7 +98,7 @@ class LoweredSlotTests(unittest.TestCase):
 
     def test_count_includes_jobs_above_the_new_ceiling(self):
         self.hold(4)
-        self.assertEqual(heavy_runner.running_job_count(self.directory, self.policy), 1)
+        self.assertEqual(heavy_runner.running_job_count(self.directory), 1)
 
     def test_no_new_job_until_total_held_is_below_the_lowered_ceiling(self):
         for slot in (1, 2, 4):
@@ -123,8 +125,9 @@ class LoweredSlotTests(unittest.TestCase):
     def test_surviving_descendants_above_the_ceiling_still_count(self):
         lease = {'pgid': 123}
         heavy_resources.write_record(heavy_runner.lease_path(self.directory, 4), lease)
-        with mock.patch.object(heavy_runner, 'lease_group_alive', side_effect=lambda row: row == lease):
-            self.assertEqual(heavy_runner.running_job_count(self.directory, self.policy), 1)
+        with mock.patch.object(heavy_runner, 'lease_group_alive', side_effect=lambda row: row == lease), \
+                mock.patch.object(inventory, 'lease_group_alive', side_effect=lambda row: row == lease):
+            self.assertEqual(heavy_runner.running_job_count(self.directory), 1)
             self.assertEqual(heavy_runner.first_lease(self.directory, self.policy), lease)
 
     def test_queue_position_cannot_claim_capacity_consumed_by_a_high_slot(self):
@@ -177,9 +180,10 @@ class LoweredSlotTests(unittest.TestCase):
         heavy_resources.write_record(heavy_runner.lease_path(self.directory, 4), lease)
         self.hold(1)
         with mock.patch.object(heavy_runner, 'lease_group_alive', side_effect=lambda row: row == lease), \
+                mock.patch.object(inventory, 'lease_group_alive', side_effect=lambda row: row == lease), \
                 mock.patch.object(heavy_runner, 'pressure_reason', return_value=None), \
                 mock.patch.object(heavy_runner, 'evaluate_load', return_value={'blocker': None}):
-            self.assertEqual(heavy_runner.running_job_count(self.directory, policy), 2)
+            self.assertEqual(heavy_runner.running_job_count(self.directory), 2)
             self.assertEqual(heavy_runner.first_lease(self.directory, policy), lease)
             for position, expected in ((1, 2), (2, 2), (3, 'previous_job_alive'), (4, 'resource_busy')):
                 with self.subTest(position=position):
