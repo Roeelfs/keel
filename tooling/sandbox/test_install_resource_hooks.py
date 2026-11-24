@@ -167,4 +167,48 @@ class InstallerTests(unittest.TestCase):
             self.assertFalse(second.get("claude_changed"))
             self.assertNotIn("backups", second)  # a second apply over the same governor tree is a no-op
 
+    def test_apply_then_check_reports_nothing_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            installer.install(home, True)
+            check = installer.install(home, False)
+            self.assertEqual(check["stale_files"], [])
+            self.assertFalse(check["wrapper_changed"]); self.assertFalse(check["claude_changed"])
+
+    def test_launcher_is_a_rendered_copy_pinned_to_the_hook_interpreter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            installer.install(home, True)
+            launcher = home.resolve() / ".keel" / "resource-hooks" / "with-heavy-lock"
+            self.assertFalse(launcher.is_symlink())
+            self.assertEqual(launcher.read_text().splitlines()[0], "#!" + str(installer.stable_python()))
+            self.assertTrue(installer.valid_wrapper_target(home / ".local/bin/with-heavy-lock", launcher.parent))
+            probe = subprocess.run([str(home / ".local/bin/with-heavy-lock"), "--classify", "--", "tsc"],
+                                   capture_output=True, text=True, cwd=tmp, env={**os.environ, "HOME": str(home)})
+            self.assertEqual((probe.returncode, probe.stdout.strip()), (0, "heavy"), probe.stderr)
+
+    def test_a_launcher_linked_to_the_source_is_stale_and_replaced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp); runtime = home / ".keel" / "resource-hooks"
+            installer.install(home, True)
+            launcher = runtime / "with-heavy-lock"; launcher.unlink(); launcher.symlink_to(installer.SOURCE_ROOT / "with-heavy-lock")
+            self.assertIn(str(home.resolve() / ".keel/resource-hooks/with-heavy-lock"), installer.install(home, False)["stale_files"])
+            installer.install(home, True)
+            self.assertFalse(launcher.is_symlink())
+            wrapper = home / ".local/bin/with-heavy-lock"; wrapper.unlink(); wrapper.symlink_to(installer.SOURCE_ROOT / "with-heavy-lock")
+            self.assertFalse(installer.valid_wrapper_target(wrapper, runtime))  # the source-symlinked shape is gone
+
+    def test_the_ts7_shim_resolves_from_the_installed_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            installer.install(home, True)
+            shims = home.resolve() / ".keel" / "resource-hooks" / "shims"
+            self.assertTrue(os.access(shims / "tsc7", os.X_OK))
+            # No real tsc7 on PATH: the shim must import governor.broker (and heavy_command) from the
+            # installed root before it looks the binary up, so this message proves the imports resolved.
+            probe = subprocess.run([os.sys.executable, str(shims / "tsc7"), "--noEmit"], capture_output=True, text=True,
+                                   cwd=tmp, env={**os.environ, "HOME": str(home), "PATH": str(shims)})
+            self.assertNotEqual(probe.returncode, 0)
+            self.assertIn("governor shim: tsc7 not found on PATH outside the shim directory", probe.stderr)
+
 if __name__ == "__main__": unittest.main(verbosity=2)
