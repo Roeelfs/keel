@@ -445,9 +445,10 @@ Status: <WORKING | GRILLING | DONE>
 Wake: <ScheduleWakeup <id> | bg:<task-id> | agent:<id> | workflow:<id> | session:<local_id>> fires <ISO-8601 UTC or "on exit"> (<size>s) on <event>; on fire: <the one action it takes>
 Hold: <ticket> <file-collision:<ticket> <glob,glob> | completion-mode | founder-gated:<grill>> <why>
 Mode: <completion, only under §Completion mode override>
-Next action: <one executable action, or none when the accepted outcome is verified>
-Owner: <agent/person responsible for that action>
-Prerequisite: <exact external state/approval required, or none>
+Next: <how to proceed: one executable action and its owner, or none when the accepted outcome is verified>
+Blocked by: <exact blocker and its owner, or none>
+Research: <lane id -> the unknown it answers, reports back <when/how>; or none>
+Run: <ready-to-run commands, each in its own fenced block, plus the instructions that finish the task>
 Stop condition: <completion, explicit stop, or the named external gate>
 ```
 
@@ -461,8 +462,8 @@ a new block rather than editing an old one when the state changes.
 Update it at a milestone or a legitimate stopping boundary. If the next action is reachable and
 authorized, execute it before ending the turn. At an external gate, arm one event-bound wake for
 it and record it on the `Wake:` line (§No stop without an armed wake); only a human decision ends
-the turn unarmed, as `Status: GRILLING`. In the final reply, list remaining actions in order, with
-owner and prerequisite where needed, or state that no requested work remains.
+the turn unarmed, as `Status: GRILLING`. `Next:`, `Blocked by:`, `Research:` and `Run:` are the session
+report fields (§Session report contract); the final reply ends with the same four.
 
 **State page (founder, 2026-11-03; reshaped 2026-11-04).** The page is the track's state: the content and
 output of the work, readable by someone who never saw a session, and the context every wake runs from. It names
@@ -667,8 +668,9 @@ on stderr.
    tracked headless lane. Before starting, handing off or archiving a chip, record its consolidation
    state ([consolidation.md](consolidation.md) §Before a chip).
    **The child keeps ONE notes file (founder, 2026-11-13):** `relay/<slug>/child-notes.md` under the
-   program's relay folder (`~/.claude/sessions-to-chips/relay/`), with done, owed, next, decisions and
-   paths, rewritten every turn, so a compaction, an archive or a hand-off loses nothing. Its manager reads
+   program's relay folder (`~/.claude/sessions-to-chips/relay/`), with done, decisions and paths, then
+   the four report fields (`Next:`, `Blocked by:`, `Research:`, `Run:`; §Session report contract),
+   rewritten every turn, so a compaction, an archive or a hand-off loses nothing. Its manager reads
    that file and the PR at a wake, never the child's transcript.
    **Compact in place by default; a fresh child only at a phase boundary (founder, 2026-11-13).** A child
    at the auto-compact window compacts in place: it keeps the warm cache and does not re-pay the fixed
@@ -974,9 +976,14 @@ A close-out, wrap-up note or state file that carries an "open questions" list is
 The fastest path to completion is every independent piece moving at once. Serial dispatch is the
 exception and needs a reason (a true data or ordering dependency).
 
-- **Find the independent set every tick:** work whose inputs are settled and whose files no other
-  live lane writes. Dispatch all of it in one message: headless lanes, Codex lanes, `Agent`
-  subagents, and child sessions where the human must judge.
+- **The whole map's frontier, every wake (founder 2026-11-26).** Enumerate every unblocked node on the
+  map (`work_state.py snapshot`: `frontier` plus READY_NOT_DISPATCHED), not just the seam you last
+  touched, and dispatch every one in that turn's ONE message: a chip session (`start_session`) for
+  ongoing or human-judged work, else a headless lane on the pool usage picks (`spawn-lane.sh` without
+  `--runtime`, so `lane_pool.py` chooses Codex or a Claude account by headroom). A node is unblocked when
+  its inputs are settled and no other live lane writes its files. A frontier node you leave undispatched
+  gets a `Hold:` line in `## AT-WAKE` naming the dependency it waits on (§AT-WAKE); a frontier node with
+  neither a dispatch nor a `Hold:` is the defect this rule exists to catch.
 - **No Codex fan-out cap:** the provider's quota wall is the only limit (founder ruling 2026-11-04).
   Keep one writer per file set; a lane that would touch another live lane's files waits or stacks on its branch.
 - **A blocker blocks only its dependents.** Stack on the unmerged branch (§Autonomous stretches),
@@ -1266,10 +1273,32 @@ verify/judge/adversarial bucket is `opus` (the Claude ceiling) or Codex's bounde
 `adjudication`/`security` class at high effort. `codex-headroom.sh --route` owns the Codex model
 id; never restate it here.
 
+## Session report contract
+
+**Every session says how to proceed, what blocks it, and what it dispatched to find out (founder
+2026-11-26).** Every end-of-turn report, a manager's and every child's, ends with four labelled fields:
+
+- **Next** — how to proceed: the one action that comes next and who takes it.
+- **Blocked by** — the exact blocker and its owner (a session id, a person, a ticket), or `none`.
+- **Research** — every research lane dispatched for an unknown behind a blocker: its id, the
+  question, and when and how it reports back (completion notification, `SendMessage`, outfile path).
+  An unknown is a research dispatch in the same turn, never a stop and never a question to the human
+  (§Open items are grilled, step 1). `none` when nothing is unknown.
+- **Run** — ready-to-run commands, each in its own fenced block (no `$` prompt, secrets by reference),
+  plus the instructions that complete the current task. A founder step uses the full kit of §Open
+  items are grilled.
+
+A manager writes the same four lines into `## AT-WAKE` (§AT-WAKE); a child writes them into its
+`child-notes.md` (§Lane runtimes, question 1), so a reader of either file can resume without the
+transcript. `role_brief.py --check-report <state file>` prints `{"status", "missing"}` for the
+last `## AT-WAKE` block and exits 1 when a WORKING or DONE block lacks one; GRILLING is exempt, since
+its report is the grill round. Briefs to children carry this contract
+(`prompts/session-template.md`).
+
 ## Close-out and skill memory
 
-Close out with ONE summary to the human: shipped (PR and `mergedAt`), parked and why, still
-unproven. Read the private overlay if present, `~/.claude/skills-overlay/sessions-to-chips/LEARNINGS.md`
+Close out with ONE summary to the human: shipped (PR and `mergedAt`) and still unproven, then the four
+report fields (§Session report contract). Read the private overlay if present, `~/.claude/skills-overlay/sessions-to-chips/LEARNINGS.md`
 (adopter-private, never in this public repo). At close-out, route each learning by scope (full
 routing: [`docs/skill-memory.md`](../../../../docs/skill-memory.md)): operator-private manager craft
 → that overlay; project facts → the project's `.claude/memory/`; universal craft → note it for
