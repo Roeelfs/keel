@@ -45,16 +45,16 @@ def live_program(manifest):
     return not manifest.get("absorbed_by") and str(manifest.get("status") or "").lower() not in ("done", "closed")
 
 
-def other_sidecars(slug, now):
+def other_sidecars(slug, now, programs=None):
     rows = []
-    for path in glob.glob(os.path.join(st.PROGRAMS, "*.state.json")):
+    for path in glob.glob(os.path.join(programs or st.PROGRAMS, "*.state.json")):
         name = os.path.basename(path)[:-len(".state.json")]
         if name == slug:
             continue
         try:
             with open(path) as fh:
                 data = json.load(fh)
-            with open(st.manifest_path(name)) as fh:
+            with open(st.manifest_path(name, programs)) as fh:
                 manifest = json.load(fh)
         except (OSError, ValueError):
             continue

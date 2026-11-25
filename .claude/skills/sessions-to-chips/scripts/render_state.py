@@ -196,11 +196,11 @@ def read_events(path, problems):
 
 
 def publications(events):
-    """History's shipped list from `binding-retired`, deduplicated by repo plus PR or push SHA, never cut."""
+    """History's shipped list from `binding-retired` (ceded ones skipped), deduplicated by repo plus PR or push SHA, never cut."""
     seen, out = set(), []
     for e in events:
-        if e.get("event") != "binding-retired":
-            continue
+        if e.get("event") != "binding-retired" or e.get("verdict") == "ceded":
+            continue  # a ceded binding was handed to another program, not shipped (coordinate.py release)
         b = e.get("binding") or {}
         p = b.get("publication") or {}
         if not p.get("repo"):

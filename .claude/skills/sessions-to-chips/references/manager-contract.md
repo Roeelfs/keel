@@ -375,6 +375,7 @@ Declaring the files is every manager's first act, in either mode. A resume-mode 
   "ceded": [ { "item": "…", "to": "<program>" } ],
   "shared_touch_not_owned": [],
   "bindings": [ "<written only by work_state.py; schema below>" ],
+  "owns": [ { "seam": "<name>", "repo": "<owner/name>", "paths": ["<globs>"], "since": "YYYY-MM-DDTHH:MM:SSZ" } ],
   "gates_held_by_manager": [],
   "next_forcing_function": "<the one move that advances the program>",
   "updated_at": "YYYY-MM-DDTHH:MM:SSZ" }
@@ -534,16 +535,46 @@ what its Problems panel reports. Schema and owners: `specs/2026-11-03-manager-st
   `claude agents --json`, the worktree registry) to manifest membership: lanes you started,
   sessions you explicitly adopted (bind them), branches matching your claims. Foreign
   activity is never your progress and never your stall; note it only where it overlaps your claims.
-- **Claims are bindings.** A program's claims are its open bindings' tickets, branches and `paths`;
-  cross-program collision checks read other manifests' `bindings` (there is no `claims` key).
+- **Claims are bindings, plus seams.** A program's claims are its open bindings' tickets, branches,
+  worktrees, PRs and `paths`, plus the unbound seams in `owns` (`[{seam, repo, paths, since}]`, written only by
+  `coordinate.py own|release|settle|takeover`; `own` refuses a seam overlapping a non-abandoned peer's claim and prints the
+  `ask` command instead). Cross-program checks read other manifests (there is no `claims` key).
 - **First claim wins.** The earliest manifest recording a claim owns it; the later manager
   re-scopes, stacks on the owner's branch, or cedes (`ceded`).
-- **Transfer, don't grab.** Ask the owning manager for the item (`send_message` on an
-  operator-present turn, or an entry in its `.events.jsonl`); proceed only once its manifest
-  releases it. Abandoned means `updated_at` >24h stale AND no live manager session AND no live
-  carrier in its bindings: then take it and record the takeover.
-- **Contested live-vs-live → `AskUserQuestion`**, naming both goals and the overlapping item.
-  Never silently double-own.
+- **Transfer, don't grab.** Ask the owning manager for the item: `coordinate.py ask` writes the thread to
+  `<programs>/coordination.jsonl` first, then prints the `SendMessage` payload (the peer's full `local_` id,
+  `notify_when_idle: true`) only when that id resolves to exactly one session; send it from a non-final
+  message of the same turn. With no resolvable id, `ask` says ledger-only and the row reaches the peer at its
+  next role load. Proceed only once its manifest releases the item.
+  Abandoned means, on the terminal owner: `updated_at` parses and is >24h stale AND no present manager session
+  AND no live carrier on any binding of its fold family (liveness fails closed: unknown, a wake carrier or an
+  unprovable pid counts as live). Then `coordinate.py takeover` takes `folds.lock`, re-checks that rule and
+  moves the claim: a ticket by `work_state_store.transfer` (bind at mine, retire at the source, one operation
+  under both manifest locks, a `binding-transferred` event in both logs, never `binding-retired`); a seam by
+  removing it from the source before adding it to mine. The ledger `takeover` row is written last.
+- **Release what you ceded.** A cede of a ticket, branch, worktree or PR puts a `release` line in your block;
+  `coordinate.py release --program <me> --item <item>` retires the holding binding with verdict `ceded`,
+  which shipped history skips.
+- **Every manager sees the others at every role load.** `role_brief.py` prints `coordinate.peers_block`:
+  the other live programs (fold families projected to their terminal owner), what each holds, every overlap
+  with yours (ticket, branch, worktree, PR, path), the threads addressed to you, escalations, release lines
+  and takeovers on offer. It names every peer whose sidecar coverage is missing, stale or collapsed, so an
+  empty path-overlap list is never read as a no-overlap verdict. Escalations and threads are never cut;
+  `peers --all` lifts the other caps. A broken view degrades the load, never blocks it. Wake step 3c acts on
+  every line in the turn.
+- **Lock order** for every coordination writer: `folds.lock`, then `coordination.jsonl.lock`, then manifest
+  locks in sorted slug order. `own` checks and writes under the coordination lock, so two managers never both
+  win one seam.
+- **The ledger is the coordination record.** One row per act: `{ts, thread, verb, from, to, item, text,
+  owner?, session}`; verbs `ask | reply | settle | contest | ruling | takeover`; items `<kind>:<value>`
+  (`ticket`, `branch`, `worktree`, `pr`, `path`, `seam`, `question`). Only the thread's two programs write to
+  it; one unfinished thread per item and pair (`ask` returns the existing one). Thread state is derived, never
+  stored, first match wins: taken, ruled, expired (a party is abandoned), escalate (contested with both
+  present, or open/proposed past 24 h with both present), contested (the last settle-or-contest is a contest),
+  settled (a cede, or both settle to one owner), proposed (an unmatched self-award), answered, open. A settle
+  naming the other party is a cede: the item joins the settler's `ceded` and a seam leaves its `owns`.
+- **Contested live-vs-live → `AskUserQuestion`** by the manager that asked (the thread's founder liaison),
+  naming both goals and the overlapping item; then that manager records the answer with `coordinate.py ruling`. Never silently double-own.
 - Path locking inside one repo goes through the repo's own claim-scope CLI where one exists. The
   manifest is program-level intent; the CLI is the file lock.
 - **Scale reality:** the manifest governs *declared* lanes only. A machine can carry 100+
