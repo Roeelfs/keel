@@ -2,6 +2,7 @@
 """role_brief.py: the computed role version, the load record and its status, the change delta, the keel
 behind-origin line on a real git pair, the staged-diff check, and one end-to-end load into a temp programs dir."""
 import datetime as dt
+import io
 import json
 import os
 import subprocess
@@ -401,6 +402,45 @@ class FoldedChildClaim(Base):
         self.load("identities", self.IDS_CLI, self.IDS)
         self.assertEqual(self.read()["manager_session"], f"{self.APPS} (cli {self.APPS_CLI})")
         self.assertEqual(self.read("identities")["manager_session"], self.IDS_CLI)
+
+
+class ReportContract(unittest.TestCase):
+    """The session report contract (founder 2026-11-26): a WORKING or DONE AT-WAKE carries Next, Blocked by,
+    Research and Run; GRILLING is exempt; only the LAST AT-WAKE block counts, and only up to the next heading."""
+    FULL = ("## AT-WAKE\nStatus: WORKING\nWake: bg:abc fires on exit\nNext: grade lane abc\n"
+            "Blocked by: none\nResearch: none\nRun:\n```bash\ngh pr view 1\n```\n")
+
+    def test_full_block_has_no_gaps(self):
+        self.assertEqual(rb.report_gaps(self.FULL), ("WORKING", []))
+
+    def test_working_block_missing_fields_names_them(self):
+        text = "## AT-WAKE\nStatus: WORKING\nWake: bg:abc\nNext action: grade it\nResearch: none\n"
+        self.assertEqual(rb.report_gaps(text), ("WORKING", ["Next", "Blocked by", "Run"]))
+
+    def test_done_is_checked_and_grilling_is_exempt(self):
+        self.assertEqual(rb.report_gaps("## AT-WAKE\nStatus: DONE\n")[1], list(rb.REPORT_FIELDS))
+        self.assertEqual(rb.report_gaps("## AT-WAKE\nStatus: GRILLING\n"), ("GRILLING", []))
+
+    def test_only_the_last_block_counts_up_to_the_next_heading(self):
+        text = self.FULL + "\n## AT-WAKE\n- **Status**: DONE\n- **Next**: none\n\n## VIEW\nBlocked by: x\nResearch: y\nRun: z\n"
+        self.assertEqual(rb.report_gaps(text), ("DONE", ["Blocked by", "Research", "Run"]))
+
+    def test_no_block_or_no_status_is_left_to_the_arm_check(self):
+        self.assertEqual(rb.report_gaps("# state\n"), (None, []))
+        self.assertEqual(rb.report_gaps("## AT-WAKE\nWake: x\n"), (None, []))
+
+    def test_cli_exit_codes(self):
+        with tempfile.TemporaryDirectory() as d:
+            ok, bad = os.path.join(d, "ok.state.md"), os.path.join(d, "bad.state.md")
+            _write(ok, self.FULL)
+            _write(bad, "## AT-WAKE\nStatus: WORKING\n")
+            out = subprocess.run([sys.executable, "-I", os.path.join(HERE, "role_brief.py"), "--check-report", bad],
+                                 capture_output=True, text=True)
+            self.assertEqual(out.returncode, 1)
+            self.assertEqual(json.loads(out.stdout)["missing"], list(rb.REPORT_FIELDS))
+            with mock.patch("sys.stdout", new_callable=io.StringIO):
+                self.assertEqual(rb.main(["--check-report", ok]), 0)
+                self.assertEqual(rb.main(["--check-report", os.path.join(d, "absent.state.md")]), 2)
 
 
 if __name__ == "__main__":

@@ -35,8 +35,9 @@ Constraints:
 - Commit with project conventions and a real session/lane identifier.
 - Do not merge/deploy/prod-mutate without the project's explicit authorization.
 - Do not poll CI/deploy or repeat a third identical failure.
-- External wait/readiness failure ends with one blocker/resume artifact.
-- Final reply: phase, branch HEAD, artifacts, obligations, checks, changed seams, last verified fact, blocker/resume key.
+- An unknown is a research lane you dispatch now (headless or Codex, tracked background Bash), never a stop; a blocker you cannot clear is named with its owner.
+- Keep ~/.claude/sessions-to-chips/relay/<slug>/child-notes.md current every turn: done, decisions, paths, then Next, Blocked by, Research, Run.
+- Final reply: phase, branch HEAD, artifacts, obligations, checks, changed seams, last verified fact, then four labelled fields: Next (how to proceed), Blocked by (exact blocker + owner, or none), Research (lanes dispatched for the unknowns, and when/how each reports back, or none), Run (ready-to-run commands, each in its own fenced block, plus the instructions that finish this task).
 
 After accepting this mission, complete the bounded phase under its continuation contract.
 ```

@@ -6,6 +6,8 @@ Usage:
   role_brief.py --version                            {"version", "sources"} of the role on disk
   role_brief.py --status --program <slug> [--session <id>]   {"status", "version", "ack", "delta"}; writes nothing
   role_brief.py --check-staged                       pre-commit: refuse a staged role.md change with no `## Changes` line
+  role_brief.py --check-report <state file>          {"status", "missing"} of the last `## AT-WAKE` block's four report
+                                                     fields; exit 1 when a WORKING or DONE block lacks one
 
 The brief (about 90 lines plus the context brief): a header with the role version and the version this
 manager last loaded, health lines (keel checkout behind origin, overlay ledger missing, state page older than
@@ -14,7 +16,9 @@ with a ready-to-paste wake prompt, then the `render_state.py --context` brief bu
 
 The ROLE VERSION is the first 8 hex of sha256 over the declared role sources (role.md, the public rulings ledger,
 the overlay rulings ledger, the overlay role notes). It is computed, never bumped. This script is the one owner
-of it: the Stop guard and the prompt hooks import `role_version` and `ack_status` from here.
+of it: the Stop guard and the prompt hooks import `role_version` and `ack_status` from here. It also owns the
+session report contract's check (`report_gaps`): the four labelled fields every WORKING or DONE `## AT-WAKE`
+block carries (Next, Blocked by, Research, Run; role.md role card).
 
 The LOAD RECORD `<programs>/<slug>.role.json` = {version, sources, loaded_at, session_id, degraded} is written
 only here, as the last act after the WHOLE brief reached the reader, even when part of the brief failed
@@ -384,7 +388,9 @@ def brief(slug, session, now, programs=None, run=subprocess.run):
             "", "Head (the turn's last state write, then update ## VIEW): "
             f'python3 {HERE}/state_view.py --write-head {slug} --since "<what changed>"',
             "", f"Wake prompt (paste as is): /manager-role {slug} -- on fire: <the one action>",
-            f"AT-WAKE line: Role: v{version}"]
+            f"AT-WAKE line: Role: v{version}",
+            "AT-WAKE report lines: Next:, Blocked by:, Research:, Run: (check: "
+            f"python3 {HERE}/role_brief.py --check-report {programs_dir() if programs is None else programs}/{slug}.state.md)"]
     ctx, bad_ctx = context_brief(slug, since, now, run)
     out += ["", "----- context brief -----", ctx]
     return "\n".join(out), version, shas, degraded or bad or bad_ctx or bad_peers
@@ -479,6 +485,45 @@ def claim_owner(slug, session, now, programs=None, rows=None):
         return None, f"owner manifest not updated ({type(exc).__name__}: {str(exc)[:120]})"
 
 
+# ---------- session report contract ----------
+
+REPORT_FIELDS = ("Next", "Blocked by", "Research", "Run")
+REPORT_STATUSES = ("WORKING", "DONE")  # GRILLING is exempt: its report is the grill round
+AT_WAKE = re.compile(r"^##\s+AT-WAKE\b", re.M)
+STATUS_LINE = re.compile(r"^\s*[-*]?\s*\**Status\**:\s*\**\s*(WORKING|GRILLING|DONE)\b", re.M | re.I)
+
+
+def _field_re(name):
+    # `Next:` or `- **Next**:` with a value (or a fenced block on the next lines, for Run); never `Next action:`.
+    return re.compile(rf"^\s*[-*]?\s*\**{re.escape(name)}\**\s*:", re.M | re.I)
+
+
+def report_gaps(state_text):
+    """-> (status, missing): the last `## AT-WAKE` block's Status and the report fields it lacks. `missing` is
+    empty for GRILLING, for no status, and for a file with no AT-WAKE block (the arm check owns those)."""
+    starts = [m.start() for m in AT_WAKE.finditer(state_text or "")]
+    if not starts:
+        return None, []
+    block = state_text[starts[-1]:]
+    nxt = re.search(r"^##\s", block[3:], re.M)
+    block = block[:nxt.start() + 3] if nxt else block
+    statuses = STATUS_LINE.findall(block)
+    status = statuses[-1].upper() if statuses else None
+    if status not in REPORT_STATUSES:
+        return status, []
+    return status, [f for f in REPORT_FIELDS if not _field_re(f).search(block)]
+
+
+def check_report(path):
+    text = _text(path)
+    if text is None:
+        print(json.dumps({"status": None, "missing": [], "error": f"unreadable: {path}"}))
+        return 2
+    status, missing = report_gaps(text)
+    print(json.dumps({"status": status, "missing": missing}))
+    return 1 if missing else 0
+
+
 # ---------- pre-commit ----------
 
 def staged_role_change_ok(diff_text):
@@ -511,6 +556,7 @@ def main(argv=None):
     mode.add_argument("--version", action="store_true")
     mode.add_argument("--status", action="store_true")
     mode.add_argument("--check-staged", action="store_true")
+    mode.add_argument("--check-report", metavar="STATE_FILE")
     args = ap.parse_args(argv)
     if args.version:
         version, shas = role_version()
@@ -518,6 +564,8 @@ def main(argv=None):
         return 0
     if args.check_staged:
         return check_staged()
+    if args.check_report:
+        return check_report(args.check_report)
     if not args.program:
         ap.error("--program <slug> is required")
     now = dt.datetime.now(dt.timezone.utc)
