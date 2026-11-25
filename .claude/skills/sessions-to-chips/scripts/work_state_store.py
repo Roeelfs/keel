@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The binding record: its strict schema, and the ONLY write path for manifest `bindings`.
 
-Owner of: the binding schema (`validate_binding`), atomic manifest writes under flock
+Owner of: the binding schema (`validate_binding`), the `owns` schema (`validate_owns`), atomic manifest writes under flock
 (`<slug>.json.lock`), bind / carrier / retire, the fold record and its only writers (absorb,
 close_mission, reopen_mission under the graph lock `folds.lock`), the `<slug>.events.jsonl` append, the told-waiter
 record (`<slug>.notices.json`, `claim_notices`), the lane row
@@ -175,6 +175,31 @@ def validate_bindings(bindings):
             seen_pub[pk] = b["ticket"]
 
 
+OWNS_KEYS = {"seam": (str, True), "repo": (str, True), "paths": (list, True), "since": (str, True)}
+
+
+def validate_owns(owns):
+    """The strict `owns` validator (the program's unbound seams). Written only by coordinate.py."""
+    if not isinstance(owns, list):
+        raise SchemaError("owns: expected a list")
+    seen = set()
+    for i, o in enumerate(owns):
+        where = f"owns[{i}]"
+        _check_keys(o, OWNS_KEYS, where)
+        if not o["seam"].strip() or not o["repo"].strip():
+            raise SchemaError(f"{where}: seam and repo must be non-empty")
+        if o["seam"] in seen:
+            raise SchemaError(f"{where}: seam {o['seam']!r} appears twice")
+        seen.add(o["seam"])
+        if not RFC3339.match(o["since"]):
+            raise SchemaError(f"{where}.since: RFC3339 UTC (…Z)")
+        if not o["paths"]:
+            raise SchemaError(f"{where}.paths: at least one path")
+        for p in o["paths"]:
+            if not isinstance(p, str) or not p.strip() or p.strip() in ROOT_GLOBS:
+                raise SchemaError(f"{where}.paths: root or empty glob {p!r} refused (it collides with everything)")
+
+
 REPO_KEYS = {
     "repo": (str, True), "path": (str, True), "ticket_pattern": (str, True), "main": (str, True),
     "surfaces": (list, True), "red_main_cmd": (object, False), "red_main_unproven": (str, False),
@@ -284,6 +309,8 @@ class _Locked:
     def write(self, manifest):
         if "bindings" in manifest:
             validate_bindings(manifest["bindings"])
+        if "owns" in manifest:
+            validate_owns(manifest["owns"])
         text = json.dumps(manifest, indent=2) + "\n"
         tmp = f"{self.path}.{os.getpid()}.tmp"
         with open(tmp, "w") as fh:

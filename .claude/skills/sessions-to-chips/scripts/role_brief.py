@@ -340,6 +340,17 @@ def rulings_block(since):
         return [f"Rulings unreadable ({type(exc).__name__}); read {PUBLIC_LEDGER} and the overlay ledger."], True
 
 
+def peers_lines(slug, session, now, programs=None):
+    """coordinate.peers_block: the other managers, overlaps, threads, escalations, takeovers. -> (lines, degraded)."""
+    try:
+        sys.path.insert(0, HERE)
+        import coordinate
+        return ["", coordinate.peers_block(slug, session, now, programs or programs_dir())], False
+    except Exception as exc:  # a broken peer view degrades the load; it never blocks it
+        return ["", f"Other managers unreadable ({type(exc).__name__}: {str(exc)[:120]}); run "
+                    f"`coordinate.py peers --program {slug}` by hand."], True
+
+
 def overlay_card():
     text = _text(dict(role_sources())["overlay"])
     return _section(text, "Role card") if text else ""
@@ -359,6 +370,8 @@ def brief(slug, session, now, programs=None, run=subprocess.run):
            digest_line(since),
            "Read top to bottom and do the wake steps in order."]
     out += health_lines(slug, programs, run, session, now)
+    peers, bad_peers = peers_lines(slug, session, now, programs)
+    out += peers
     changes = delta_lines(since, kinds=("role",))  # rulings print in their own block below
     out += ["", f"Changes since your last load ({'all recent' if since is None else len(changes)}):"] + (changes or ["- none"])
     card = _section(role_text, "Role card") if role_text else f"ROLE CARD UNREADABLE: {ROLE}"
@@ -374,7 +387,7 @@ def brief(slug, session, now, programs=None, run=subprocess.run):
             f"AT-WAKE line: Role: v{version}"]
     ctx, bad_ctx = context_brief(slug, since, now, run)
     out += ["", "----- context brief -----", ctx]
-    return "\n".join(out), version, shas, degraded or bad or bad_ctx
+    return "\n".join(out), version, shas, degraded or bad or bad_ctx or bad_peers
 
 
 # ---------- the load ----------

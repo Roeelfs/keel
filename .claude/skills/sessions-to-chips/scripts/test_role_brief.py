@@ -187,6 +187,20 @@ class Load(Base):
         self.assertEqual((ack["version"], ack["session_id"], ack["degraded"]), (version, "s1", True))
         self.assertEqual(rb.ack_status(ack, rb.role_version()[0], "s1"), "current")
 
+    def test_the_peers_block_prints_and_a_broken_one_degrades_the_load(self):
+        import coordinate
+        now = dt.datetime(2026, 11, 5, 12, tzinfo=dt.timezone.utc)
+        with mock.patch.object(coordinate, "peers_block", return_value="Other managers (0 live, 0 abandoned):"), \
+                mock.patch.object(rb, "context_brief", return_value=("ctx", False)):
+            text, _, _, degraded = rb.brief("demo", "s1", now, self.programs)
+        self.assertIn("Other managers (0 live", text)
+        self.assertFalse(degraded)
+        with mock.patch.object(coordinate, "peers_block", side_effect=RuntimeError("boom")), \
+                mock.patch.object(rb, "context_brief", return_value=("ctx", False)):
+            text, _, _, degraded = rb.brief("demo", "s1", now, self.programs)
+        self.assertIn("Other managers unreadable (RuntimeError: boom)", text)
+        self.assertTrue(degraded)
+
     def test_page_stale_line(self):
         base = os.path.join(self.programs, "demo")
         _write(base + ".state.html", "x")

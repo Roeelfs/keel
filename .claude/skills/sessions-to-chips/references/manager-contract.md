@@ -375,6 +375,7 @@ Declaring the files is every manager's first act, in either mode. A resume-mode 
   "ceded": [ { "item": "…", "to": "<program>" } ],
   "shared_touch_not_owned": [],
   "bindings": [ "<written only by work_state.py; schema below>" ],
+  "owns": [ { "seam": "<name>", "repo": "<owner/name>", "paths": ["<globs>"], "since": "YYYY-MM-DDTHH:MM:SSZ" } ],
   "gates_held_by_manager": [],
   "next_forcing_function": "<the one move that advances the program>",
   "updated_at": "YYYY-MM-DDTHH:MM:SSZ" }
@@ -534,16 +535,30 @@ what its Problems panel reports. Schema and owners: `specs/2026-11-03-manager-st
   `claude agents --json`, the worktree registry) to manifest membership: lanes you started,
   sessions you explicitly adopted (bind them), branches matching your claims. Foreign
   activity is never your progress and never your stall; note it only where it overlaps your claims.
-- **Claims are bindings.** A program's claims are its open bindings' tickets, branches and `paths`;
-  cross-program collision checks read other manifests' `bindings` (there is no `claims` key).
+- **Claims are bindings, plus seams.** A program's claims are its open bindings' tickets, branches,
+  worktrees, PRs and `paths`, plus the unbound seams in `owns` (`[{seam, repo, paths, since}]`, written only by
+  `coordinate.py own|release|settle|takeover`; `own` refuses a seam overlapping a live peer's claim and prints the
+  `ask` command instead). Cross-program checks read other manifests (there is no `claims` key).
 - **First claim wins.** The earliest manifest recording a claim owns it; the later manager
   re-scopes, stacks on the owner's branch, or cedes (`ceded`).
-- **Transfer, don't grab.** Ask the owning manager for the item (`send_message` on an
-  operator-present turn, or an entry in its `.events.jsonl`); proceed only once its manifest
-  releases it. Abandoned means `updated_at` >24h stale AND no live manager session AND no live
-  carrier in its bindings: then take it and record the takeover.
-- **Contested live-vs-live → `AskUserQuestion`**, naming both goals and the overlapping item.
-  Never silently double-own.
+- **Transfer, don't grab.** Ask the owning manager for the item: `coordinate.py ask` writes the thread to
+  `<programs>/coordination.jsonl` and prints the `SendMessage` payload (the peer's `local_` id,
+  `notify_when_idle: true`); send it in the same turn. Proceed only once its manifest releases the item.
+  Abandoned means `updated_at` >24h stale AND no present manager session AND no live carrier in its
+  bindings; then `coordinate.py takeover` re-checks that rule under the owner's lock, moves the claim and
+  records the takeover in the ledger and both programs' `.events.jsonl`.
+- **Every manager sees the others at every role load.** `role_brief.py` prints `coordinate.peers_block`:
+  the other live programs, what each holds, every overlap with yours (ticket, branch, worktree, PR, path),
+  the threads addressed to you, escalations and takeovers on offer. A broken view degrades the load, never
+  blocks it. Wake step 3c acts on every line in the turn.
+- **The ledger is the coordination record.** One row per act: `{ts, thread, verb, from, to, item, text,
+  owner?, session}`; verbs `ask | reply | settle | contest | ruling | takeover`; items `<kind>:<value>`
+  (`ticket`, `branch`, `worktree`, `pr`, `path`, `seam`, `question`). Thread state is derived, never stored:
+  open, answered, settled, contested, escalate (both live and contested, or an open ask past 24 h), expired
+  (the owner is abandoned), ruled, taken. A settle by the non-owner is a cede: the item joins its `ceded`
+  and a seam leaves its `owns`.
+- **Contested live-vs-live → `AskUserQuestion`**, naming both goals and the overlapping item, then
+  `coordinate.py ruling` records the answer. Never silently double-own.
 - Path locking inside one repo goes through the repo's own claim-scope CLI where one exists. The
   manifest is program-level intent; the CLI is the file lock.
 - **Scale reality:** the manifest governs *declared* lanes only. A machine can carry 100+
