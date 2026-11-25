@@ -1,6 +1,6 @@
 # Managers coordinate with each other
 
-Founder ask (, 2026-11-25): "Manager sessions needs to understand what other managers are doing, so
+Founder ask, 2026-11-25: "Manager sessions needs to understand what other managers are doing, so
 if there's overlap, or clarifications / questions they can mesage and ask and decide ownership. baked
 into the manager role, so they all report ownership and it's actively managed".
 
@@ -43,8 +43,8 @@ and bound paths stay in `bindings`, written only by `work_state.py`. One new key
   schema refusal at the next engine write.
 - A seam is program-level intent ("this program owns the manager role code"). A binding's `paths` is a
   ticket-level lock. Both count as claims for overlap.
-- First claim wins (contract, unchanged). `own` refuses a seam whose paths overlap another live
-  program's seam and prints the `ask` command instead. The earlier `since` (or the earlier `bound_at`
+- First claim wins (contract, unchanged). `own` refuses a seam whose paths overlap a non-abandoned
+  peer's seam or bound paths and prints the `ask` command instead. The earlier `since` (or the earlier `bound_at`
   for a binding) is the first claim.
 
 ### 2. The coordination ledger
@@ -64,161 +64,188 @@ Row shape (strict; the writer validates it):
 Item kinds: `ticket:<id>`, `branch:<repo>:<ref>`, `worktree:<abs path>`, `pr:<repo>#<n>`,
 `path:<repo>:<glob>`, `seam:<name>`, `question:<topic>` (a clarification with no ownership at stake).
 
-Thread state is derived from its rows, never stored:
+Thread state is derived from its rows, never stored. Precedence, first match wins:
+`taken` > `ruled` > `expired` > `escalate` > `contested` > `settled` > `proposed` > `answered` > `open`.
 
 | State | Derived when |
 |-------|--------------|
-| `open` | An `ask` with no later `settle`, `ruling` or `takeover` (a `reply` keeps it open) |
+| `taken` | A `takeover` row, and the taker now holds the item. If it does not, `taken-unbound`: the taker re-runs `takeover` |
+| `ruled` | A `ruling` row: the founder's answer, written only by the manager that asked (it is the founder liaison for the thread) |
+| `expired` | Either party's claim is abandoned (rule 4). The block offers the takeover in its place |
+| `escalate` | `contested` with both managers present, or `open`/`proposed` for more than 24 h with both present |
+| `contested` | The last decisive row (`settle` or `contest`) is a `contest`: a contest after a settle reopens it, and a contest before any settle contests it |
+| `settled` | The last settle names an owner that is not its writer (a cede, final at once), or both parties have settled to the same owner |
+| `proposed` | The last settle is a self-award (writer == owner) that the other party has not yet matched |
 | `answered` | A `question:` thread with a `reply` from the asked program |
-| `settled` | The last decisive row is a `settle` and no later `contest` exists |
-| `contested` | A `contest` after a `settle`, or both programs have written `contest` |
-| `escalate` | `contested` with both managers live, or `open` for more than 24 h with both managers live |
-| `expired` | The asked program's claim is abandoned (rule 4) while the thread is open |
-| `ruled` | A `ruling` row (the founder's answer, written by the manager that asked the founder) |
-| `taken` | A `takeover` row |
+| `open` | An `ask` with none of the above |
 
-A `settle` is written by either party and names the `owner`. If the settler is not the owner, it is a
-cede: `coordinate.py` appends `{item, to: owner}` to the settler's `ceded` and, for a `seam:`, drops the
-seam from the settler's `owns`. If the settler is the owner, the other party sees the settle at its next
-wake and either accepts it (no row) or writes `contest`. A contest by both parties is a live-vs-live
-deadlock: `escalate`, and the founder decides through `AskUserQuestion` naming both goals and the item
-(contract, unchanged). The manager records the answer with `ruling`.
+Writers are bound to the thread: only its two programs may write to it, `settle` and `ruling` name one of
+them as `owner`, and a `ruled` or `taken` thread takes no more rows. One thread per item and pair: `ask`
+returns the existing unfinished thread instead of opening a second one.
+
+A cede (`settle` naming the other party) appends `{item, to: owner}` to the settler's `ceded` and, for a
+`seam:`, drops the seam from its `owns`. For a ticket, branch, worktree or PR, the settler's block then
+carries a `release` line with the exact command: `coordinate.py release --program <me> --item <item>`
+retires the binding that holds the item with reason `ceded to <owner>` and verdict `ceded`, which
+render_state's shipped history skips. A self-award stays `proposed` until the counterparty matches it, or
+contests it (then `contested`, `escalate` with both present). The founder decides an escalation through
+`AskUserQuestion` naming both goals and the item (contract, unchanged), and the asker records the answer
+with `ruling`.
 
 ### 3. The peer view at every wake
 
-`coordinate.py peers --program <slug> [--json]` prints the block `role_brief.py` embeds. Its inputs are
-read fresh each call: every manifest (`work_state_store.read_all`), the session index
-(`program_family.session_index(write=False)`), the rendered sidecars for PR files
-(`state_index.other_sidecars` and this program's own sidecar), and the ledger.
+`coordinate.py peers --program <slug> [--json] [--all]` prints the block `role_brief.py` embeds. Its inputs
+are read fresh each call: every manifest (`work_state_store.read_all`), the session index
+(`program_family.session_index(write=False)`), the sidecars through their one reader
+(`state_index.other_sidecars`), and the ledger.
 
-**Peers.** A peer is another manifest that is a live program (`state_index.live_program`: not absorbed,
-not done) and is either held by a present manager (`role_brief.holder_live` over
-`HOLDER_WINDOW_S`) or has at least one open binding. Dormant manifests (no manager, no bindings) are not
-peers; there are 30+ of them today.
+**Peers and fold families.** A peer is a terminal owner (`program_family.terminal_owner`) other than mine
+that is a live program (`state_index.live_program`) and is either held by a present manager
+(`role_brief.holder_live`) or has at least one open binding in its fold family. An absorbed program's
+bindings and seams count as its terminal owner's; its duplicates with its own owner stay the engine's
+`fold_duplicate` note. `ask` or `takeover` naming an absorbed program is refused with the terminal owner's
+name.
 
-**Block shape** (bounded: at most 12 peer lines, 10 overlap lines, 8 thread lines; a cut prints
-`+N more: coordinate.py peers --program <slug>`):
+**Display versus contact.** Each peer line shows the display name and slug, and separately the contact: the
+one full `local_…` session id that the session index resolves from `manager_session` for a present
+manager, or `ledger-only (<why>)` when the manager is absent, the id is ambiguous or unresolved, or the
+runtime is not Claude Code.
 
-```
-Other managers (3 live, 1 abandoned):
-- Apps [apps] manager local_6511f250-… present 12m; owns seam "portal billing"; 17 tickets, 2 PRs, 3 worktrees
-Overlaps (2):
-- ticket T-123 is bound by you and by Apps (theirs first, 2026-11-20): ask → coordinate.py ask --program <me> --to apps --item ticket:T-123 --text "…"
-- path keel:.claude/skills/x/** (your seam) vs Legal open PR #12 files (advisory): ask, or re-scope
-Threads for you (1): c-20261125-ab12cd from Apps asks about seam:portal billing (open 2h) → reply/settle
-Escalate to founder (0)
-Takeover available (1): Ops claim ticket:T-9 is abandoned (manifest 31h stale, no live manager, no live carrier) → coordinate.py takeover …
-```
+**Block shape.** Render order: escalations, threads, release, takeover, exact overlaps, path overlaps,
+peers. Escalations and threads are never cut; the other sections are capped (10 release/overlap lines each,
+8 takeover lines, 12 peer lines) with `+N more: coordinate.py peers --program <slug> --all`, and `--all`
+disables every cap. Every line names its one next command with the program and item filled in; an overlap
+with an open thread names that thread (`coordinate.py show --thread <id>`) instead of a fresh `ask`.
 
-Every line names its one next command, with the program and item filled in.
+**Overlap kinds compared** (my fold family against each peer's):
 
-**Overlap kinds compared** (mine against each peer's):
+| Kind | Predicate |
+|------|-----------|
+| ticket | equal id |
+| branch | equal repo and ref. The same ref with the repo unknown on one side is shown as an overlap marked "repo unknown"; two different repos never overlap |
+| worktree | equal real path |
+| pr | equal repo and number |
+| path | seam paths, binding paths and sidecar PR files, through `state_sources.overlap` (same-PR pairs dropped); advisory |
 
-| Kind | Mine | Theirs | Predicate |
-|------|------|--------|-----------|
-| ticket | open binding tickets | open binding tickets | equal id |
-| branch | binding `branch` (+ publication repo) | same | equal repo and ref |
-| worktree | binding `worktree` | same | equal real path |
-| pr | binding `publication` repo + pr | same | equal |
-| path | seam paths, binding paths, own open-PR files | same | `state_sources.paths_overlap`; PR-file pairs through `state_sources.overlap` (same-PR pairs dropped) |
+The first claim is the earlier `since`/`bound_at`; a tie goes to the lower slug, so both sides never read
+"yours". An overlap with a `settled`, `ruled` or `taken` thread is silent for the winner and becomes the
+loser's `release` line while the loser still holds it.
 
-An overlap whose item has a `settled`, `ruled` or `taken` thread is suppressed when the record agrees
-with the manifests (the loser no longer holds it). If the loser still holds it, the line reads
-`settled to <owner> on <date>, but <loser> still holds it: release it` and goes to the loser's block.
-
-**Fold families are not peers of each other.** A program and the programs absorbed into it already
-share one owner (`program_family.terminal_owner`); their duplicates are the engine's `fold_duplicate`
-note, never a coordination thread.
+**Coverage.** Path overlap is only as good as the sidecars. The Overlaps header names every peer whose
+sidecar is missing, older than 3 h, collapsed to directories, or has dropped PR files; with any such peer
+and no overlap found, the block says "none found in what could be read; this is not a no-overlap verdict".
 
 ### 4. Expiry and handover
 
-`coordinate.py` evaluates the contract's abandonment rule; it does not define a new one. A peer claim is
-**abandoned** when all three hold:
+`coordinate.py` evaluates the contract's abandonment rule on the terminal owner; it does not define a new
+one. A claim is **abandoned** when all three hold:
 
-1. the peer manifest's `updated_at` is more than 24 h old;
+1. the owner manifest's `updated_at` parses and is more than 24 h old (missing or unparseable is not stale);
 2. no present manager holds it (`holder_live` is false);
-3. none of the binding's carriers is live: a `session` carrier with no present session-index row, a
-   `lane`/`bg`/`agent` carrier whose `pid` is gone or whose `pid_start` no longer matches
-   (`work_state_store.pid_start`), and `wake`/`card`/`founder` carriers never count as live.
+3. no carrier on any binding of any program in its fold family is live, judged by
+   `work_state.carrier_state`. Liveness fails closed: `unknown` is live, a `wake` carrier is live, and a
+   `pid` that `ps` did not return is live unless `kill(pid, 0)` proves it gone.
 
-A seam is abandoned when conditions 1 and 2 hold. `coordinate.py takeover --program <me> --from <peer>
---item <item> [--text]` re-checks the rule under the peer's manifest lock and refuses unless it holds.
-Then it:
+`coordinate.py takeover --program <me> --from <peer> --item <ticket:|seam:…>` takes `folds.lock`, then the
+coordination lock, re-reads every store and re-applies the rule. Then:
 
-- `ticket:` retires the peer's binding through `work_state_store.retire` with
-  `reason: "takeover by <me>"` and an allow predicate that accepts only this case, and prints the
-  `work_state.py bind --program <me> --ticket <id> --continue` command (binding needs the tracker
-  snapshot, which `work_state.py` owns);
-- `seam:` moves the seam from the peer's `owns` to mine;
-- appends `takeover` to the ledger and `{"event": "takeover", ...}` to both programs' `.events.jsonl`.
-
-A thread to an abandoned program is `expired`; the block offers the takeover in its place.
+- `ticket:` moves the binding with `work_state_store.transfer`: one operation under both manifest locks in
+  sorted slug order, binding at the destination first (branch, worktree, artifact, publication and paths
+  kept; carriers reset) and retiring at the source second, with the abandonment rule re-checked under the
+  source lock. A ticket outside my map is refused before anything moves (the fold, `work_state.py absorb`,
+  is the route for that). Both programs' events get `binding-transferred`, never `binding-retired`, so
+  history never reads a hand-over as shipped.
+- `seam:` removes the seam from the peer first and adds it to mine second (a crash between leaves it
+  unowned, never doubly owned).
+- The ledger `takeover` row is written last, so a `taken` row always has a moved claim behind it.
 
 ### 5. The role carries it
 
-- **Role card** (`references/role.md`), one new line replacing the current membership line:
-  *Coordinate with the other managers.* Every role load prints the other managers, what they own and
-  every overlap; record what you own (`bindings` through the engine, unbound seams through
-  `coordinate.py own`); on an overlap or a question, `coordinate.py ask` and `SendMessage` the peer's
-  `local_` id in the same turn; answer every thread addressed to you in the turn you see it (reply,
-  settle or contest); first claim wins, a contest by both goes to the founder; take over a claim only
-  when the block says it is abandoned.
-- **Wake steps**: a new step 3c *Coordinate*, after oversight: act on every line of the "Other managers"
-  block in the same message as step 4's dispatches.
-- **Contract** §Membership and collisions keeps its rules and gains the mechanics: the `owns` key, the
-  ledger, the thread states, the takeover writer. The clause "or an entry in its `.events.jsonl`" is
-  deleted: the ledger replaces it. §Program state's manifest example gains `owns`.
-- **`role_brief.py`** embeds `coordinate.peers_block(slug, session, now)` after the health lines and
-  before the role card. A failure degrades the load (`degraded: true`) and prints one line naming the
-  by-hand command; it never blocks the load. Imports stay lazy so the Stop guard's 2 s budget, which
-  imports `role_version` from this module, is untouched.
-- **`SendMessage`**: `ask` prints the exact payload: `to` = the peer's `local_` id parsed from its
-  `manager_session`, a message that names the thread id, the item, the question and the reply command,
-  and `notify_when_idle: true`. The ledger row is written first, so a message lost to an unattended wake
-  still reaches the peer at its next role load.
+- **Role card** (`references/role.md`): *Coordinate with the other managers.* Every role load prints the
+  other managers, what they own and every overlap; record what you own (`bindings` through the engine,
+  unbound seams through `coordinate.py own`); on an overlap or a question, `coordinate.py ask`, then send
+  its printed payload; answer every thread addressed to you in the turn you see it; first claim wins, a
+  contest goes to the founder through the asker; take over only what the block calls abandoned.
+- **Wake steps**: step 3c *Coordinate*, after oversight: act on every line of the block in the same
+  message as step 4's dispatches.
+- **Contract** §Membership and collisions keeps its rules and gains the mechanics (the `owns` key, the
+  ledger, thread states, release, transfer-based takeover, lock order). The clause "or an entry in its
+  `.events.jsonl`" is replaced by the ledger. §Program state's manifest example gains `owns`.
+- **`role_brief.py`** embeds `coordinate.peers_block(slug, session, now)` after the health lines and before
+  the role card. A failure degrades the load (`degraded: true`) and prints the by-hand command; it never
+  blocks. Imports stay lazy so the Stop guard's 2 s budget is untouched. Measured: `peers` runs in 0.10 s
+  warm and prints 1.8 KB against the live stores (2026-11-25), inside the 250 ms / 4 KiB budget.
+- **Transport.** The ledger row is the message; `SendMessage` is the doorbell. `ask` writes the row
+  first, then prints the payload (`to` = the resolved full session id, the thread id, item, question and
+  reply command, `notify_when_idle: true`) only when the contact resolves; the asker sends it from a
+  non-final message of its turn. Otherwise `ask` reports ledger-only, and the row reaches the peer at its
+  next role load.
+- **Lock order**, for every writer: `folds.lock`, then `coordination.jsonl.lock` (re-entrant within a
+  process), then manifest locks in sorted slug order. `own` checks and writes under the coordination lock,
+  so two managers cannot both win the same paths, and a retry with the same repo and paths keeps the
+  original `since`.
 
 ## Files
 
 | File | Change |
 |------|--------|
-| `scripts/coordinate.py` | New. Peers, overlap, ledger, thread state, `own/release/ask/reply/settle/contest/ruling/takeover`, `peers_block` |
+| `scripts/coordinate.py` | New. Peers, overlap, coverage, ledger, thread state, `own/release/ask/show/reply/settle/contest/ruling/takeover`, `peers_block` |
 | `scripts/test_coordinate.py` | New. Unit tests over temp programs dirs and a fake session index |
-| `scripts/work_state_store.py` | `validate_owns`; `_Locked.write` validates `owns` |
+| `scripts/work_state_store.py` | `validate_owns`; `_Locked.write` validates `owns`; `transfer` |
+| `scripts/state_index.py` | `other_sidecars` takes a `programs` dir |
+| `scripts/render_state.py` | Shipped history skips `ceded` retirements |
 | `scripts/role_brief.py` | Embed the peers block; degrade on failure |
 | `scripts/test_role_brief.py` | The block appears; a broken ledger degrades, never blocks |
 | `references/role.md` | Role card line, wake step 3c, `## Changes` line |
-| `references/manager-contract.md` | §Membership and collisions mechanics; §Program state `owns` key; events.jsonl clause deleted |
+| `references/manager-contract.md` | §Membership and collisions mechanics; §Program state `owns` key; transport rule |
 
 Keel stays repo-agnostic: no repo paths, tracker prefixes or schemas. Item values are opaque strings.
 
 ## Tests
 
-1. Two temp manifests with the same open ticket → one `ticket` overlap line on each side, naming the
-   earlier `bound_at` as first claim.
-2. Same branch, same worktree, same PR → one line each; a fold-family pair → no line.
-3. A seam glob against a peer's open-PR file list (sidecar) → one `path` line; a same-PR pair → none.
-4. `own` refuses an overlapping seam of a live peer and prints the `ask` command; accepts a disjoint one.
-5. `validate_owns` refuses an unknown key, a root glob and a duplicate seam.
-6. Ledger: ask → `open`; reply on a `question:` → `answered`; settle by the non-owner → `settled`, and
-   the settler's `ceded` gains the item and its `owns` loses the seam; settle by the owner then contest →
-   `contested`; both live → `escalate`; ruling → `ruled`; an `open` ask older than 24 h with both live →
-   `escalate`.
-7. Abandonment: stale manifest + absent manager + dead lane pid → `takeover` succeeds, the binding goes
-   to the peer's events as `binding-retired` with the takeover reason; a live manager or a live carrier
-   → refused.
-8. A settled overlap the loser still holds → the "still holds it: release it" line on the loser's side.
-9. `role_brief` brief contains "Other managers"; a corrupt ledger line is skipped with one note; an
-   exception inside `peers_block` degrades the load and records the ack.
-10. Block bounds: 20 peers → 12 lines plus the `+N more` line.
+`test_coordinate.py` covers: ticket/branch/worktree/PR overlap and the fold family's silence (1, 2); path
+overlap against sidecar PR files (3); `own` refusal, acceptance, retry-keeps-`since` and concurrent
+admission of exactly one (4, 17, 18); `validate_owns` (5); every thread state, asker-only ruling and closed
+threads (6, 6b, 11, 12); idempotent `ask` and non-party refusal (13); ledger-only contact (14); coverage
+(15); repo-unknown branches (16); takeover by transfer, foreign-map refusal, live refusals, fail-closed
+liveness and folded-peer refusal (7, 7b, 7c, 7d); release of a settled item with a `ceded` verdict that
+history skips (8); corrupt ledger lines (9b); caps, `--all` and uncut escalations (10, 10b).
+`test_role_brief.py` covers the embedded block and degradation.
+
+### Carried obligations
+
+| Finding | Obligation | Proof |
+|---------|------------|-------|
+| F-1 | A self-award is `proposed` until matched; writers are thread parties | `test_coordinate` 11, 13 |
+| F-2 | One state machine with fixed precedence | `test_coordinate` 6, 6b, 11, 12 |
+| F-3 | Abandonment over every binding of the fold family, failing closed | `test_coordinate` 7b, 7c |
+| F-4 | No `taken` row without the claim moved, metadata kept | `test_coordinate` 7 (transfer, foreign-map refusal) |
+| F-5 | A runnable release for every ceded kind | `test_coordinate` 8 |
+| F-6 | Exact recipient or ledger-only | `test_coordinate` 14 |
+| F-7 | Serialized admission, fixed lock order | `test_coordinate` 18 (two processes, one winner) |
+| F-8 | The feature ticket is linked into its map | Linear parent set; checked on the ticket |
+| F-9 | Absorbed claims projected to the terminal owner | `test_coordinate` 2, 7d |
+| F-10 | One sidecar reader, coverage reported | `test_coordinate` 15 |
+| F-11 | Repo-aware branch keys | `test_coordinate` 16 |
+| F-12 | Reachable overflow, fixed cut order | `test_coordinate` 10, 10b |
+| F-13 | One thread per item and pair | `test_coordinate` 13 |
+| F-14 | Role-load budget measured | 0.10 s, 1.8 KB live (2026-11-25), §5 |
+| F-15 | Live bake at the feature revision | Two present managers exchange a thread; evidence on the ticket |
+| F-16 | Transfers and cedes never read as shipped | `test_coordinate` 7, 8 (`render_state.publications`) |
+| F-17 | Display identity separate from contact | `test_coordinate` 14; live `peers` output |
 
 ## Acceptance (live)
 
 - `coordinate.py peers --program harness` and `--program <a second live program>` each list the other as
   a present manager with its ownership, from the real stores.
 - One real question thread: the Harness manager `ask`s a second live manager, sends the doorbell, and the
-  second manager `reply`s or `settle`s; both role loads show the thread's final state. Evidence on  the feature ticket.
+  second manager `reply`s or `settle`s; both role loads show the thread's final state. Evidence on the feature ticket.
 
 ## Ships
+
+| Ship | Scope items | Files and contracts | blockedBy | Dependency |
+|------|-------------|---------------------|-----------|------------|
+| 1 | (a) `owns` key, (b) peers block and overlaps, (c) ledger and threads, (d) expiry and takeover, role wiring | Every file in §Files | none | none |
 
 One PR in keel. No cutover: the ledger starts empty, `owns` is optional, and the peers block is
 additive to the brief. The deleted `.events.jsonl` clause has no reader in code (prose only).

@@ -454,6 +454,41 @@ def retire(slug, ticket, *, carrier_ids=None, merge_sha=None, verdict=None, reas
     return b
 
 
+def transfer(src, dst, ticket, *, children, map_id, allow, reason, programs=None, now=None):
+    """Move one open binding from `src` to `dst` in one locked operation: bind at the destination FIRST (branch,
+    worktree, artifact, publication and paths kept; carriers reset), then retire at the source. Manifest locks are
+    taken in sorted slug order. `allow(binding)` re-checks the caller's rule under the source lock. A ticket outside
+    the destination map is refused: the fold (absorb) is the route for that. Event: `binding-transferred` in both
+    logs, never `binding-retired`, so readers can tell a hand-over from a finish. -> the new binding."""
+    now = time.time() if now is None else now
+    if src == dst:
+        raise SchemaError("transfer: source and destination are the same program")
+    if ticket != map_id and (children is None or ticket not in children):
+        raise SchemaError(f"transfer: {ticket} is not a child of {dst}'s map {map_id}" +
+                          (" (tracker snapshot unavailable)" if children is None else "") +
+                          "; fold the program instead (work_state.py absorb)")
+    first, second = sorted((src, dst))
+    with _Locked(first, programs) as l1, _Locked(second, programs) as l2:
+        lk = {first: l1, second: l2}
+        sbs = _with_bindings(lk[src].manifest)
+        b = next((x for x in sbs if x["ticket"] == ticket), None)
+        if not b:
+            raise SchemaError(f"transfer: {src} has no open binding for {ticket}")
+        ok, why = allow(b)
+        if not ok:
+            raise SchemaError(f"transfer refused: {why}")
+        dbs = _with_bindings(lk[dst].manifest)
+        if any(x["ticket"] == ticket for x in dbs):
+            raise SchemaError(f"transfer: {dst} already holds {ticket}")
+        new = dict(b, carriers=[], bound_at=now_iso(now))
+        validate_binding(new)
+        lk[dst].write(dict(lk[dst].manifest, bindings=dbs + [new]))
+        lk[src].write(dict(lk[src].manifest, bindings=[x for x in sbs if x["ticket"] != ticket]))
+    append_event(src, {"event": "binding-transferred", "lane": ticket, "binding": b, "to": dst, "note": reason}, programs)
+    append_event(dst, {"event": "binding-transferred", "lane": ticket, "from": src, "note": reason}, programs)
+    return new
+
+
 # ---------- the fold record (row 11): `absorbed_by` + `fold` on the absorbed manifest ----------
 
 class _GraphLock:
