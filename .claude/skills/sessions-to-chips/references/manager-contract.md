@@ -177,12 +177,17 @@ time, and write it next to the lane in the state file (`## AT-WAKE`: lane, artif
    included, with exactly one block:
 
    ```
-   LANE RESULT: rc=<n> runtime=<claude|codex|none> artifact=<path|none> mission=<file|stdin|none>
+   LANE RESULT: rc=<n> runtime=<claude|codex|none> lane=<id|none> artifact=<items|none> outfile=<path|none> mission=<file|stdin|none>
      <last <=5 non-empty lines of the lane's final message>
    ```
 
-   `artifact` is the Codex `-o` outfile, or `LANE_RECORD_OUTFILE` for a Claude lane (else `none`); the
-   mission's own named artifact is still what you grade. `rc=3` with `AUTH DEAD` is one human
+   `lane` is the id to bind (`work_state.py carrier --type lane --id <lane>`); stderr also prints it
+   at launch, so bind while the lane runs. `artifact` is what the lane produced, comma-joined:
+   `commits:<base>..<head>(<n>)` beyond its launch HEAD, `pr:<url>` for its branch, and `path:<p>` for
+   each mission line `Artifact: <path>` written during the run; `none` means it produced nothing.
+   `outfile` is the Codex `-o` file or `LANE_RECORD_OUTFILE`. `rc=75` from an implementation lane
+   means its worktree really could not be identified (the message names the candidates) or the proof
+   deferred; a lane that committed in its `--cwd` is never deferred. The artifact is still what you grade. `rc=3` with `AUTH DEAD` is one human
    `claude /login`. Only a lane the harness cannot track gets kind 2.
 2. **Self-armed, only where no event can exist.** CI, a deploy, a Codex lane started outside the
    harness, or any process you could not launch tracked: arm ONE event-bound `ScheduleWakeup` sized to

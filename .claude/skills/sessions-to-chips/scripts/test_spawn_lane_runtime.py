@@ -13,7 +13,13 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "spawn-lane.sh"
-STUB = '#!/bin/bash\nprintf "%s\\n" "$@" > "$STUB_OUT"\n'
+# STUB_WORK, when set, is shell the stub runs as the lane's "work" (a commit, a written file).
+STUB = ('#!/bin/bash\nprintf "%s\\n" "$@" > "$STUB_OUT"\n'
+        '[ -z "${STUB_WORK:-}" ] || eval "$STUB_WORK"\n')
+# The gh stub answers `gh pr list` with STUB_GH_JSON and records its argv in STUB_GH_ARGS.
+GH_STUB = ('#!/bin/bash\nprintf "%s\\n" "$*" >> "${STUB_GH_ARGS:-/dev/null}"\n'
+           'printf "%s" "${STUB_GH_JSON:-[]}"\n')
+COMMIT = "git -c core.hooksPath=/dev/null -c user.name=t -c user.email=t@t commit -qm lane --allow-empty"
 # The claude stub also records the two env settings a headless lane must carry, and can
 # answer with a canned JSON envelope + exit code (an auth death is is_error:true, rc=1).
 # `claude auth status` answers STUB_AUTH_JSON / STUB_AUTH_RC and leaves the lane argv file alone.
@@ -37,9 +43,9 @@ class RuntimeTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.bin = self.root / "bin"; self.bin.mkdir()
-        for name in ("codex", "claude"):
+        for name, body in (("codex", STUB), ("claude", CLAUDE_STUB), ("gh", GH_STUB)):
             p = self.bin / name
-            p.write_text(CLAUDE_STUB if name == "claude" else STUB); p.chmod(0o755)
+            p.write_text(body); p.chmod(0o755)
         self.home = self.root / "home"
         gate = self.home / ".claude/scripts/codex-headroom.sh"
         gate.parent.mkdir(parents=True)
@@ -342,26 +348,104 @@ class RuntimeTests(unittest.TestCase):
         r, _ = self.spawn(self.base, "--runtime", "claude")
         self.assertEqual(r.returncode, 0, r.stderr)
         head, tail = self.result_block(r.stdout)
-        self.assertEqual(head, "LANE RESULT: rc=0 runtime=claude artifact=none mission=%s" % self.mission)
+        self.assertRegex(head, r"^LANE RESULT: rc=0 runtime=claude lane=[0-9a-f-]{36} artifact=none "
+                               r"outfile=none mission=%s$" % self.mission)
         self.assertEqual(tail, ["  line %d" % i for i in range(3, 8)])
 
-    def test_lane_result_block_names_the_codex_outfile_as_artifact(self):
-        # The research class used to exec codex, which skipped any trailing output.
+    def test_lane_result_block_names_the_codex_outfile_separately_from_the_artifact(self):
+        # The research class used to exec codex, which skipped any trailing output. The outfile
+        # exists for every launched lane, so it is never the artifact (2026-11-25).
         outfile = self.root / "codex-last.txt"
         outfile.write_text("done\nartifact at /x/report.md\n")
         self.run_env = {"LANE_OUT": str(outfile)}
         r, _ = self.spawn(self.base, "--runtime", "codex", "--class", "research")
         self.assertEqual(r.returncode, 0, r.stderr)
         head, tail = self.result_block(r.stdout)
-        self.assertEqual(head, "LANE RESULT: rc=0 runtime=codex artifact=%s mission=%s" % (outfile, self.mission))
+        self.assertRegex(head, r"^LANE RESULT: rc=0 runtime=codex lane=codex-lane-[0-9a-f-]{36} artifact=none "
+                               r"outfile=%s mission=%s$" % (outfile, self.mission))
         self.assertEqual(tail, ["  done", "  artifact at /x/report.md"])
 
     def test_lane_result_block_prints_on_early_failure(self):
         r, _ = self.spawn(self.base, "--no-such-flag")
         self.assertEqual(r.returncode, 2)
         head, tail = self.result_block(r.stdout)
-        self.assertEqual(head, "LANE RESULT: rc=2 runtime=none artifact=none mission=%s" % self.mission)
+        self.assertEqual(head, "LANE RESULT: rc=2 runtime=none lane=none artifact=none outfile=none "
+                               "mission=%s" % self.mission)
         self.assertEqual(tail, [])
+
+    # ---- artifact= is what the lane produced; lane= is what a manager binds ---------
+    def field(self, head, name):
+        return next(t.split("=", 1)[1] for t in head.split() if t.startswith(name + "="))
+
+    def linked(self, name="lane-report"):
+        path = self.base / ".claude/worktrees" / name
+        git("worktree", "add", "-q", "-b", "worktree-" + name, str(path), cwd=self.base)
+        git("remote", "add", "origin", "https://example.invalid/o/r.git", cwd=self.base)
+        return path.resolve()
+
+    def test_a_lane_that_committed_and_opened_a_pr_reports_both(self):
+        # Observed 2026-11-25: keel#44 opened from branch worktree-lane-report,
+        # LANE RESULT said artifact=none.
+        lane = self.linked()
+        pr = "https://github.com/o/r/pull/44"
+        for runtime in ("claude", "codex"):
+            with self.subTest(runtime=runtime):
+                (self.root / "gh-args.txt").unlink(missing_ok=True)
+                self.run_env = {"STUB_WORK": COMMIT + "; " + COMMIT, "STUB_GH_ARGS": str(self.root / "gh-args.txt"),
+                                "STUB_GH_JSON": json.dumps([{"url": pr, "state": "OPEN",
+                                                             "createdAt": "2020-01-01T00:00:00Z"}])}
+                r, _ = self.spawn(lane, "--runtime", runtime, "--class", "implementation")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                items = self.field(self.result_block(r.stdout)[0], "artifact").split(",")
+                self.assertRegex(items[0], r"^commits:[0-9a-f]{7}\.\.[0-9a-f]{7}\(2\)$")
+                self.assertEqual(items[1:], ["pr:" + pr])
+                self.assertIn("--head worktree-lane-report",
+                              (self.root / "gh-args.txt").read_text())
+
+    def test_a_pre_existing_pr_with_no_new_commits_is_not_an_artifact(self):
+        lane = self.linked()
+        self.run_env = {"STUB_GH_JSON": json.dumps([{"url": "https://github.com/o/r/pull/1", "state": "OPEN",
+                                                     "createdAt": "2020-01-01T00:00:00Z"}])}
+        r, _ = self.spawn(lane, "--runtime", "claude")
+        self.assertEqual(self.field(self.result_block(r.stdout)[0], "artifact"), "none")
+
+    def test_a_pr_opened_during_the_run_counts_without_commits(self):
+        lane = self.linked()
+        pr = "https://github.com/o/r/pull/6"
+        self.run_env = {"STUB_GH_JSON": json.dumps([{"url": pr, "state": "OPEN",
+                                                     "createdAt": "2999-01-01T00:00:00Z"}])}
+        r, _ = self.spawn(lane, "--runtime", "claude")
+        self.assertEqual(self.field(self.result_block(r.stdout)[0], "artifact"), "pr:" + pr)
+
+    def test_a_mission_declared_artifact_written_during_the_run_is_reported(self):
+        self.mission.write_text("write the report\nArtifact: `out/report.md`\n- Artifact: out/never.md\n")
+        (self.base / "out").mkdir()
+        self.run_env = {"STUB_WORK": "printf x > out/report.md"}
+        r, _ = self.spawn(self.base, "--runtime", "codex")
+        self.assertEqual(self.field(self.result_block(r.stdout)[0], "artifact"),
+                         "path:%s" % (self.base / "out/report.md").resolve())
+
+    def test_a_lane_that_did_nothing_reports_artifact_none(self):
+        self.mission.write_text("Artifact: s.txt\n")  # exists, but untouched by the lane
+        for runtime in ("claude", "codex"):
+            with self.subTest(runtime=runtime):
+                r, _ = self.spawn(self.base, "--runtime", runtime)
+                self.assertEqual(self.field(self.result_block(r.stdout)[0], "artifact"), "none")
+
+    def test_the_codex_lane_id_is_announced_and_matches_its_row_and_outfile(self):
+        # a Codex lane stayed UNBOUND: its key was printed nowhere and its outfile used a
+        # second uuid, so the manager had no id to `carrier --type lane --id` with.
+        rows_path = self.home / ".claude/state/lane-parents.jsonl"
+        self.run_env = {"CLAUDE_SESSION_ID": "mgr-cli-1"}
+        for runtime in ("codex", "claude"):
+            with self.subTest(runtime=runtime):
+                r, _ = self.spawn(self.base, "--runtime", runtime)
+                row = json.loads(rows_path.read_text().splitlines()[-1])
+                self.assertEqual(self.field(self.result_block(r.stdout)[0], "lane"), row["lane"])
+                self.assertIn("lane id %s (bind: work_state.py carrier --type lane --id %s)"
+                              % (row["lane"], row["lane"]), r.stderr)
+                if runtime == "codex":
+                    self.assertEqual(Path(row["outfile"]).name, row["lane"] + ".json")
 
     def test_lane_result_block_carries_a_failed_lane_rc(self):
         self.run_env = {"STUB_RC": "7"}

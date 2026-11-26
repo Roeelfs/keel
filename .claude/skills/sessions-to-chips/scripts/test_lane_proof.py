@@ -23,7 +23,7 @@ class ProofTests(unittest.TestCase):
     tearDown = runtime_tests.RuntimeTests.tearDown
 
     def spawn(self, *args, runtime="claude", own=False, change=False, runtime_rc=0,
-              no_commit=False, through_links=False, parent="", named=False, foreign=0):
+              no_commit=False, through_links=False, parent="", named=False, foreign=0, cwd=None):
         scripts = self.root / "scripts"
         scripts.mkdir(exist_ok=True)
         for name in ("spawn-lane.sh", "lane_commit_guard.py", "lane_proof.py"):
@@ -80,7 +80,7 @@ exit "$RUNTIME_RC"
                "OWN": str(int(own)), "OWN_CWD": str((self.base / ".claude/worktrees/named" if named else self.root / "own").resolve()),
                "CHANGE": str(int(change)), "NO_COMMIT": str(int(no_commit)), "RUNTIME_RC": str(runtime_rc)}
         return subprocess.run([str(launcher), "--mission", str(self.mission),
-                               "--cwd", str(self.base), "--runtime", runtime, "--class", "implementation",
+                               "--cwd", str(cwd or self.base), "--runtime", runtime, "--class", "implementation",
                                "--ticket", "T-1", *(["--worktree", "named"] if named else []), *args], env=env, capture_output=True, text=True, timeout=15)
 
     def rows(self):
@@ -112,12 +112,12 @@ exit "$RUNTIME_RC"
         self.assertIn("lane_commit_guard.py", result.stderr)
         self.assertIn("can't open file", result.stderr)
         self.assertFalse(self.out.exists(), "mutant must fail before runtime dispatch")
-        # With no guard/proof to stop dispatch, the same bad path silently loses rows.
+        # The snapshot now runs for every class (2026-11-25: the artifact needs it), so the same bad
+        # path also stops a research lane before dispatch instead of silently losing its row.
         result = self.spawn("--class", "research", through_links=True,
                             parent="symlink-manager", no_commit=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(self.out.exists())
-        self.assertEqual(result.stderr, "")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertFalse(self.out.exists())
         self.assertFalse((self.root / "lane-parents.jsonl").exists())
 
     def assert_proof(self, rc, outcome, runtime="claude", **kw):
@@ -178,22 +178,57 @@ exit "$RUNTIME_RC"
         self.assertIn('"type":"result"', result.stdout)
 
     def test_unnamed_ambiguous_worktree_defers_without_failure_count(self):
+        # Real ambiguity only: the launch checkout did NOT move and two worktrees appeared.
         for _ in range(2):
             lane_proof.append({"ticket": "T-1", "outcome": "fail"},
                               self.root / "lane-proofs.jsonl")
-        result = self.spawn("--proof", "python3", "proof.py", "0", foreign=2)
+        result = self.spawn("--proof", "python3", "proof.py", "0", foreign=2, no_commit=True)
         self.assertEqual(result.returncode, 75, result.stderr)
         row = self.rows()[-1]
         self.assertEqual(row["outcome"], "deferred")
         self.assertIsNone(row["worktree"])
         self.assertIn("ambiguous", row["error"])
+        self.assertIn("foreign-0", row["error"], "a real deferral names its candidates")
         self.assertFalse((self.base / "proof-ran").exists())
         self.assertEqual(lane_proof.failure_counts(self.root / "lane-proofs.jsonl"), {"T-1": 2})
+
+    # ---- a lane that committed is never "ambiguous" -------------------------
+    def linked(self, name="lane-adr"):
+        path = self.base / ".claude/worktrees" / name
+        self.spawn("--class", "research", no_commit=True)  # seeds proof.py on the base first
+        git("worktree", "add", "-q", "-b", "worktree-" + name, str(path), cwd=self.base)
+        return path.resolve()
+
+    def test_linked_worktree_lane_that_committed_passes_despite_concurrent_worktrees(self):
+        # Observed 2026-11-25: --cwd <repo>/.claude/worktrees/<name>, the lane committed, two
+        # sibling worktrees appeared from other sessions -> rc=75 "proof worktree is ambiguous".
+        lane = self.linked()
+        for runtime in ("claude", "codex"):
+            with self.subTest(runtime=runtime):
+                result = self.spawn(runtime=runtime, cwd=lane, foreign=2)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn("deferred", result.stderr)
+                for d in ("foreign-0", "foreign-1"):
+                    git("worktree", "remove", "--force", str(self.root / d), cwd=self.base)
+                    git("branch", "-D", d, cwd=self.base)
+
+    def test_linked_worktree_proof_runs_in_the_launch_worktree(self):
+        lane = self.linked()
+        row = self.assert_proof(0, "pass", cwd=lane, foreign=2)
+        self.assertEqual(Path(row["worktree"]), lane)
+        self.assertNotIn("error", row)
+
+    def test_named_worktree_prefers_the_one_created_during_the_run(self):
+        # A same-named worktree already existed elsewhere: the lane's fresh one is the target.
+        git("worktree", "add", "-q", "--detach", str(self.root / "elsewhere/.claude/worktrees/named"),
+            cwd=self.base)
+        result = self.spawn(named=True, own=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_failed_proof_prints_report(self):
         result = self.spawn("--proof", "python3", "proof.py", "1")
         self.assertEqual(result.returncode, 4, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["type"], "result")
+        self.assertEqual(json.loads(result.stdout.splitlines()[0])["type"], "result")
 
     def test_runtime_failure_precedes_failed_proof_both_runtimes(self):
         for runtime in ("claude", "codex"):

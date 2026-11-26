@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
 """Shared zero-commit evidence for headless lanes and the shadow Agent hook.
 
-Never count a changed sibling checkout. A named lane selects its worktree by path;
-unnamed lanes infer only when exactly one new worktree exists. Compare its HEAD
-to its own creation reflog.
-Ambiguous or removed worktrees stay unproven, rather than borrowing another lane's work.
+Never count a changed sibling checkout. The proof worktree resolves deterministically:
+  1. a named lane (--worktree <name>) selects its worktree by path, preferring the one
+     created during the run when the name matches more than one;
+  2. a transcript cwd (the shadow Agent hook) selects that checkout;
+  3. the launch checkout, when its HEAD moved: the lane committed where it was launched,
+     so worktrees other sessions created meanwhile are irrelevant (2026-11-25: in a busy repo
+     every --cwd lane in a linked worktree came back "ambiguous", rc=75, despite commits);
+  4. otherwise the one worktree created during the run, else the launch checkout.
+Compare its HEAD to its own creation reflog. Only a lane whose launch HEAD did not move while
+several worktrees appeared stays unproven, and the error names the candidates.
 """
 import json
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -18,41 +26,59 @@ def git(cwd, *args):
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+def real(path):
+    return os.path.realpath(path) if path else path
+
+
 def worktrees(cwd):
     raw = git(cwd, "worktree", "list", "--porcelain", "-z")
-    return [part[len("worktree "):] for part in raw.split("\0")
+    return [real(part[len("worktree "):]) for part in raw.split("\0")
             if part.startswith("worktree ")]
 
 
 def snapshot(cwd):
-    return {"cwd": str(Path(cwd).resolve()),
+    return {"cwd": real(str(Path(cwd).resolve())), "ts": time.time(),
             "heads": {path: git(path, "rev-parse", "HEAD") for path in worktrees(cwd)}}
 
 
+def _named(paths, heads, worktree_name):
+    matches = [path for path in paths if path.endswith("/.claude/worktrees/" + worktree_name)]
+    fresh = [path for path in matches if path not in heads]
+    for pool in (fresh, matches):
+        if len(pool) == 1:
+            return pool[0], None
+    if not matches:
+        return None, ("named proof worktree is unavailable: no worktree ends in .claude/worktrees/"
+                      + worktree_name)
+    return None, "named proof worktree is ambiguous: %s matches %s" % (worktree_name, ", ".join(matches))
+
+
 def evidence(before, cwd, actual_cwd=None, worktree_name=""):
-    heads = before["heads"]
-    launch = before["cwd"]
+    heads = {real(k): v for k, v in before["heads"].items()}
+    launch = real(before["cwd"])
+    launch_top = real(git(launch, "rev-parse", "--show-toplevel")) or launch
     paths = worktrees(cwd)
     # A transcript's cwd can identify an existing worktree used by the lane.
-    actual = git(actual_cwd, "rev-parse", "--show-toplevel") if actual_cwd else ""
+    actual = real(git(actual_cwd, "rev-parse", "--show-toplevel")) if actual_cwd else ""
     new = [path for path in paths if path not in heads]
+    launch_before = heads.get(launch_top)
+    launch_moved = bool(launch_before) and git(launch_top, "rev-parse", "HEAD") not in ("", launch_before)
     error = None
     if worktree_name:
-        matches = [path for path in paths
-                   if path.endswith("/.claude/worktrees/" + worktree_name)]
-        target = matches[0] if len(matches) == 1 else None
-        if target is None:
-            error = "named proof worktree is ambiguous or unavailable: " + worktree_name
-    elif actual and actual != launch:
+        target, error = _named(paths, heads, worktree_name)
+    elif actual and actual not in (launch, launch_top):
         target = actual
-    elif len(new) > 1:
-        target, error = None, "proof worktree is ambiguous"
+    elif launch_moved or not new:
+        target = launch_top
+    elif len(new) == 1:
+        target = new[0]
     else:
-        target = new[0] if new else launch
+        target, error = None, ("proof worktree is ambiguous: the launch checkout %s did not move and %d "
+                               "worktrees appeared during the run (%s)" % (launch_top, len(new), ", ".join(new)))
     if target is None or not git(target, "rev-parse", "HEAD"):
         return {"worktree": None, "head_before": None, "head_after": None,
                 "committed": False, "dirty": False,
-                "error": error or "proof worktree is unavailable"}
+                "error": error or "proof worktree is unavailable: %s has no HEAD" % target}
     initial = heads.get(target)
     if initial is None:
         # The oldest per-worktree HEAD reflog entry is the creation HEAD. Comparing
