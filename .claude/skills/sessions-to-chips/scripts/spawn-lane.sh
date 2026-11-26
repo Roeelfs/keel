@@ -79,14 +79,21 @@ LANE_SCRIPT_DIR="$(lane_script_dir)"
 MISSION_SRC="" ; WORKTREE="" ; MODEL="" ; MODE="bypassPermissions" ; LANE_CWD="" ; MCP_CFG="" ; LANE_EFFORT="medium"
 PROOF=() ; TICKET="" ; MAX_TURNS="" ; MAX_BUDGET=""
 RUNTIME="" ; AUTO_PICKED=0 ; ALLOW_NETWORK=0 ; CLASS="standard" ; CLASS_SET=0
-GUARD_STATE="" ; LANE_LAUNCHED=0 ; AUTH_DEAD=0 ; LANE_PID=""
+GUARD_STATE="" ; LANE_LAUNCHED=0 ; AUTH_DEAD=0 ; LANE_PID="" ; LANE_ID=""
 
 # ---- LANE RESULT: the response a tracked caller reads -------------------------------------
 # A manager launches this script with `run_in_background` (one tracked Bash call), so the
 # harness re-invokes it when the lane exits. That completion notification is the response, and
 # this block is what it reads: every exit, an early refusal included, ends stdout with
-#   LANE RESULT: rc=<n> runtime=<r> artifact=<path-or-none> mission=<file>
+#   LANE RESULT: rc=<n> runtime=<r> lane=<id|none> artifact=<items|none> outfile=<path|none> mission=<file>
 # plus the last <=5 lines of the lane's final message. Earlier output is unchanged.
+#   lane      the id a manager binds (`work_state.py carrier --type lane --id <lane>`), also
+#             printed to stderr at launch. 2026-11-25: the Codex lane key was printed nowhere, so
+#             such a lane could never be bound and stayed UNBOUND.
+#   artifact  what the lane PRODUCED (lane_artifact.py): commits beyond its launch HEAD, the PR on
+#             its branch, mission-declared `Artifact:` paths written during the run. `none` means
+#             nothing was produced.
+#   outfile   where the lane's final message went: the Codex -o file, or LANE_RECORD_OUTFILE.
 # (A detached `nohup … &` launch fires no notification at all; 2026-11-19 the founder had to ask.)
 lane_final_lines() {
   # $1 = file, $2 = json (claude envelope) | text (codex -o last message)
@@ -109,14 +116,19 @@ for line in [l for l in text.splitlines() if l.strip()][-5:]:
 ' "$1" "$2" 2>/dev/null || true
 }
 lane_result() {
-  local rc=$? artifact=none
+  local rc=$? artifact=none outfile=none
   trap - EXIT
+  if [ "$LANE_LAUNCHED" = 1 ] && [ -n "$GUARD_STATE" ]; then
+    artifact="$(printf '%s' "$MISSION" | python3 "$LANE_SCRIPT_DIR/lane_artifact.py" "$GUARD_STATE" "$PWD" "$WORKTREE")" \
+      || artifact=none
+  fi
   [ -z "$GUARD_STATE" ] || rm -f "$GUARD_STATE"
-  if [ "$LANE_LAUNCHED" = 1 ] && [ "$RUNTIME" = codex ]; then artifact="${LANE_OUT:-none}"; fi
-  if [ "$LANE_LAUNCHED" = 1 ] && [ "$RUNTIME" = claude ]; then artifact="${LANE_RECORD_OUTFILE:-none}"; fi
+  if [ "$LANE_LAUNCHED" = 1 ] && [ "$RUNTIME" = codex ]; then outfile="${LANE_OUT:-none}"; fi
+  if [ "$LANE_LAUNCHED" = 1 ] && [ "$RUNTIME" = claude ]; then outfile="${LANE_RECORD_OUTFILE:-none}"; fi
   [ "$LANE_LAUNCHED" = 1 ] && printf '\n'
-  printf 'LANE RESULT: rc=%s runtime=%s artifact=%s mission=%s\n' \
-    "$rc" "${RUNTIME:-none}" "$artifact" "$( [ "$MISSION_SRC" = "-" ] && echo stdin || echo "${MISSION_SRC:-none}" )"
+  printf 'LANE RESULT: rc=%s runtime=%s lane=%s artifact=%s outfile=%s mission=%s\n' \
+    "$rc" "${RUNTIME:-none}" "${LANE_ID:-none}" "${artifact:-none}" "$outfile" \
+    "$( [ "$MISSION_SRC" = "-" ] && echo stdin || echo "${MISSION_SRC:-none}" )"
   if [ "$AUTH_DEAD" = 1 ]; then
     echo "  AUTH DEAD: run \`claude /login\`, then re-spawn the lane."
   elif [ "$LANE_LAUNCHED" = 1 ] && [ "$RUNTIME" = codex ]; then
@@ -225,12 +237,11 @@ case "$RUNTIME" in
   *) echo "spawn-lane.sh: --runtime must be claude|codex (got '$RUNTIME')" >&2; exit 2 ;;
 esac
 
-# Snapshot every existing worktree before dispatch. The guard resolves a newly created
-# lane worktree against its own initial HEAD, never the launching checkout's HEAD.
-if [ "$CLASS" = implementation ] || [ "${#PROOF[@]}" -gt 0 ]; then
-  GUARD_STATE="$(mktemp "${TMPDIR:-/tmp}/lane-heads.XXXXXX")"
-  python3 "$LANE_SCRIPT_DIR/lane_commit_guard.py" snapshot "$PWD" > "$GUARD_STATE"
-fi
+# Snapshot every existing worktree before dispatch, for every class: the commit guard and the
+# LANE RESULT artifact both resolve the lane's worktree against its own initial HEAD, never the
+# launching checkout's HEAD.
+GUARD_STATE="$(mktemp "${TMPDIR:-/tmp}/lane-heads.XXXXXX")"
+python3 "$LANE_SCRIPT_DIR/lane_commit_guard.py" snapshot "$PWD" > "$GUARD_STATE"
 check_commits() {
   python3 "$LANE_SCRIPT_DIR/lane_commit_guard.py" check "$GUARD_STATE" "$PWD" "$RUNTIME" "$WORKTREE"
 }
@@ -248,6 +259,8 @@ run_proof() {
 # is this launcher's: it either execs the runtime or waits on it, so it lives exactly as long as
 # the lane. Best-effort: a write failure never blocks the lane.
 record_lane_row() {
+  LANE_ID="$1"
+  echo "spawn-lane.sh: lane id $1 (bind: work_state.py carrier --type lane --id $1)" >&2
   [ -n "${CLAUDE_SESSION_ID:-}" ] || return 0
   python3 -I "$LANE_SCRIPT_DIR/work_state.py" lane-row --lane "$1" --parent "$CLAUDE_SESSION_ID" \
     --runtime "$2" --model "$MODEL" --pid "$$" --outfile "${3:-}" --worktree "${WORKTREE:-$(pwd -P)}" \
@@ -394,7 +407,10 @@ print(json.dumps(roots))')" || exit 2
   # Codex has no equivalent unless asked: docs/codex-lane-contract.md requires -o <outfile>
   # and grades THAT to separate DEAD from BLOCKED-ON-QUOTA. Without it a caller has no
   # runtime-health signal at all.
-  LANE_OUT="${LANE_OUT:-${TMPDIR:-/tmp}/codex-lane-$(uuidgen | tr 'A-Z' 'a-z').json}"
+  # ONE id names the lane: the default outfile is <lane key>.json, so the path a caller sees and
+  # the lane-row key agree (2026-11-25: two uuids left a Codex lane unbindable).
+  LANE_KEY="codex-lane-$(uuidgen | tr 'A-Z' 'a-z')"
+  LANE_OUT="${LANE_OUT:-${TMPDIR:-/tmp}/$LANE_KEY.json}"
   CARGS+=( -o "$LANE_OUT" )
   echo "spawn-lane.sh: codex lane output -> $LANE_OUT" >&2
 
@@ -402,8 +418,7 @@ print(json.dumps(roots))')" || exit 2
   # ~/.codex/AGENTS.md requires every Codex commit to carry a Session-Id trailer, and no
   # commit-msg hook exists here to add one. The launcher cannot force the model's git
   # invocation, so it does the two things it CAN do deterministically: mint a stable lane
-  # key, and state the requirement in the mission every single time.
-  LANE_KEY="codex-lane-$(uuidgen | tr 'A-Z' 'a-z')"
+  # key (above), and state the requirement in the mission every single time.
   # The lane never pushes; the session that spawned it does, and owns the resulting PR. Record
   # lane -> parent session BEFORE the identity scrub below, so a PR whose commits carry only lane
   # keys still resolves to a session a peer can message. Best-effort: a write failure never
